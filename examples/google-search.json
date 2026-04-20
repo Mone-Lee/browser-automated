@@ -1,0 +1,15 @@
+[
+  {
+    "name": "Google search for agent-browser",
+    "url": "https://www.google.com",
+    "steps": [
+      {
+        "instruction": "Search for \"agent-browser\" in the search box and press Enter"
+      },
+      {
+        "instruction": "Click the first organic search result",
+        "assertion": "A page other than Google should be loaded"
+      }
+    ]
+  }
+]
