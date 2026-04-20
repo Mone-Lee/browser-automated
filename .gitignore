@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.agent-browser/
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.har
