@@ -7,8 +7,10 @@
 
 - 🗣️ **自然语言 e2e 测试**：用自然语言描述测试步骤，由 `agent-browser chat` 驱动执行
 - 📝 **测试用例生成**：根据自然语言描述自动生成结构化测试用例（JSON 格式）
+- 🧠 **Skills 风格编排**：自然语言触发时优先命中已有 Playwright 用例，未命中时回退到一次性 NL 测试
+- 🧩 **代码沉淀闭环**：一次性 NL 测试通过后可自动生成并注册 Playwright 测试代码
 - 🤖 **BrowserAgent**：封装 `agent-browser` CLI 的 TypeScript 接口，支持 snapshot、screenshot、batch 等操作
-- 🔧 **CLI 工具**：`browser-automated run / gen / chat`
+- 🔧 **CLI 工具**：`browser-automated run / gen / chat / e2e / e2e-gen`
 
 ## 安装
 
@@ -37,6 +39,47 @@ npx browser-automated gen https://example.com "填写联系表单并提交"
 ```bash
 npx browser-automated chat https://example.com "点击登录按钮"
 ```
+
+### Skills 模式执行 e2e（优先代码用例）
+
+```bash
+npx browser-automated e2e https://example.com "打开 pricing 页面并进入 contact 页面" --assert "Contact 页面应可见"
+```
+
+推荐自然语言用例模板：
+
+```text
+测试网站 <url> 的<功能>。
+
+目标：
+1. <步骤1>
+2. <步骤2>
+3. <步骤3>
+4. <验证步骤>
+```
+
+登录示例：
+
+```text
+测试网站 https://example.com/login 的登录功能。
+
+目标：
+1. 打开登录页面。
+2. 输入用户名 "testuser" 和密码 "password123"。
+3. 点击登录按钮。
+4. 验证是否跳转到仪表盘页面（URL 包含 /dashboard 或看到欢迎文字）。
+```
+
+### 从自然语言直接生成 Playwright 测试代码
+
+```bash
+npx browser-automated e2e-gen https://example.com "打开 pricing 页面并进入 contact 页面" --name "pricing contact flow" --tags marketing,navigation
+```
+
+生成产物：
+
+- `tests/generated/*.spec.ts`（Playwright 测试代码）
+- `tests/generated/index.json`（测试元数据索引，供下次自然语言触发优先命中）
 
 ## 测试用例格式
 
