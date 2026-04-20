@@ -46,6 +46,31 @@ export class BrowserAgent {
     return this.run(['open', url]);
   }
 
+  /** Click an element by ref (e.g. e5 from snapshot output). */
+  click(ref: string): string {
+    return this.run(['click', `@${ref.replace(/^@/, '')}`]);
+  }
+
+  /** Fill an input by ref (e.g. e10 from snapshot output). */
+  fill(ref: string, value: string): string {
+    return this.run(['fill', `@${ref.replace(/^@/, '')}`, value]);
+  }
+
+  /** Wait for a URL pattern (example: /Home). */
+  waitForUrl(pattern: string): string {
+    return this.run(['wait', '--url', pattern]);
+  }
+
+  /** Wait until text appears on page. */
+  waitForText(text: string): string {
+    return this.run(['wait', '--text', text]);
+  }
+
+  /** Wait for a fixed duration in milliseconds. */
+  waitMs(ms: number): string {
+    return this.run(['wait', String(ms)]);
+  }
+
   /**
    * Execute a natural language instruction using `agent-browser chat`.
    * The CLI interprets the instruction and performs the corresponding browser actions.

@@ -7,18 +7,26 @@ import type { BrowserAgent } from '../src/agent.js';
 // mocking is required.
 function buildMockAgent(overrides: {
   open?: (url: string) => string;
-  chat?: (instruction: string) => string;
+  snapshot?: () => string;
+  fill?: (ref: string, value: string) => string;
+  click?: (ref: string) => string;
   screenshot?: (path?: string) => string;
+  getUrl?: () => string;
   close?: () => void;
 } = {}): BrowserAgent {
   return {
     open: vi.fn(overrides.open ?? (() => '')),
-    chat: vi.fn(overrides.chat ?? (() => 'Done.')),
+    snapshot: vi.fn(overrides.snapshot ?? (() => '- textbox "请输入用户名" [ref=e10]\n- button "登 录" [ref=e5]')),
+    fill: vi.fn(overrides.fill ?? (() => '')),
+    click: vi.fn(overrides.click ?? (() => '')),
     screenshot: vi.fn(overrides.screenshot ?? (() => '/tmp/shot.png')),
+    getUrl: vi.fn(overrides.getUrl ?? (() => 'https://example.com/Home')),
     close: vi.fn(overrides.close ?? (() => {})),
-    snapshot: vi.fn(() => ''),
+    waitForUrl: vi.fn(() => ''),
+    waitForText: vi.fn(() => ''),
+    waitMs: vi.fn(() => ''),
+    chat: vi.fn(() => ''),
     getTitle: vi.fn(() => 'Test Page'),
-    getUrl: vi.fn(() => 'https://example.com'),
     batch: vi.fn(() => '[]'),
   } as unknown as BrowserAgent;
 }
@@ -37,8 +45,8 @@ describe('NaturalLanguageTestRunner', () => {
         name: 'Login flow',
         url: 'https://example.com/login',
         steps: [
-          { instruction: 'Fill in the email field with "test@example.com"' },
-          { instruction: 'Click the submit button' },
+          { instruction: '输入用户名 "test@example.com"' },
+          { instruction: '点击登录按钮' },
         ],
       };
 
@@ -53,18 +61,18 @@ describe('NaturalLanguageTestRunner', () => {
     });
 
     it('marks the test as failed when a step throws', async () => {
-      const chatFn = vi.fn()
-        .mockReturnValueOnce('Done.')
+      const clickFn = vi.fn()
+        .mockImplementationOnce(() => '')
         .mockImplementationOnce(() => { throw new Error('Element not found'); });
-      const mockAgent = buildMockAgent({ chat: chatFn });
+      const mockAgent = buildMockAgent({ click: clickFn });
       const runner = new NaturalLanguageTestRunner({}, makeFactory(mockAgent));
 
       const testCase: TestCase = {
         name: 'Failing test',
         url: 'https://example.com',
         steps: [
-          { instruction: 'Click the first button' },
-          { instruction: 'Click the missing button' },
+          { instruction: '点击登录按钮' },
+          { instruction: '点击不存在按钮' },
         ],
       };
 
@@ -77,16 +85,16 @@ describe('NaturalLanguageTestRunner', () => {
     });
 
     it('stops executing further steps after the first failure', async () => {
-      const chatFn = vi.fn().mockImplementationOnce(() => { throw new Error('fail'); });
-      const mockAgent = buildMockAgent({ chat: chatFn });
+      const clickFn = vi.fn().mockImplementationOnce(() => { throw new Error('fail'); });
+      const mockAgent = buildMockAgent({ click: clickFn });
       const runner = new NaturalLanguageTestRunner({}, makeFactory(mockAgent));
 
       const testCase: TestCase = {
         name: 'Bail on failure',
         url: 'https://example.com',
         steps: [
-          { instruction: 'Step that fails' },
-          { instruction: 'Step that should not run' },
+          { instruction: '点击登录按钮' },
+          { instruction: '点击登录按钮' },
         ],
       };
 
@@ -94,12 +102,12 @@ describe('NaturalLanguageTestRunner', () => {
 
       // Only the first step ran.
       expect(result.steps).toHaveLength(1);
-      expect(chatFn).toHaveBeenCalledTimes(1);
+      expect(clickFn).toHaveBeenCalledTimes(1);
     });
 
     it('takes a screenshot on failure when screenshotOnFailure is enabled', async () => {
-      const chatFn = vi.fn().mockImplementationOnce(() => { throw new Error('fail'); });
-      const mockAgent = buildMockAgent({ chat: chatFn });
+      const clickFn = vi.fn().mockImplementationOnce(() => { throw new Error('fail'); });
+      const mockAgent = buildMockAgent({ click: clickFn });
       const runner = new NaturalLanguageTestRunner(
         { screenshotOnFailure: true, screenshotDir: '/tmp' },
         makeFactory(mockAgent),
@@ -108,7 +116,7 @@ describe('NaturalLanguageTestRunner', () => {
       const testCase: TestCase = {
         name: 'Screenshot on failure',
         url: 'https://example.com',
-        steps: [{ instruction: 'Step that fails' }],
+        steps: [{ instruction: '点击登录按钮' }],
       };
 
       await runner.runOne(testCase);
@@ -131,45 +139,39 @@ describe('NaturalLanguageTestRunner', () => {
       expect((mockAgent.close as ReturnType<typeof vi.fn>)).toHaveBeenCalled();
     });
 
-    it('verifies the assertion when a step has one and passes on PASS reply', async () => {
-      const chatFn = vi.fn()
-        .mockReturnValueOnce('Clicked.')  // step instruction
-        .mockReturnValueOnce('PASS');     // assertion verification
-      const mockAgent = buildMockAgent({ chat: chatFn });
+    it('verifies assertion with deterministic url check', async () => {
+      const mockAgent = buildMockAgent({ getUrl: () => 'https://example.com/Home/Dashboard' });
       const runner = new NaturalLanguageTestRunner({}, makeFactory(mockAgent));
 
       const result = await runner.runOne({
         name: 'Assertion pass',
         url: 'https://example.com',
-        steps: [{ instruction: 'Click the button', assertion: 'A success banner is shown' }],
+        steps: [{ instruction: '点击登录按钮', assertion: 'URL 包含 /Home' }],
       });
 
       expect(result.passed).toBe(true);
     });
 
-    it('fails the step when the assertion verification returns FAIL', async () => {
-      const chatFn = vi.fn()
-        .mockReturnValueOnce('Clicked.')
-        .mockReturnValueOnce('FAIL: banner not found');
-      const mockAgent = buildMockAgent({ chat: chatFn });
+    it('fails the step when deterministic assertion does not match', async () => {
+      const mockAgent = buildMockAgent({ getUrl: () => 'https://example.com/Login' });
       const runner = new NaturalLanguageTestRunner({}, makeFactory(mockAgent));
 
       const result = await runner.runOne({
         name: 'Assertion fail',
         url: 'https://example.com',
-        steps: [{ instruction: 'Click the button', assertion: 'A success banner is shown' }],
+        steps: [{ instruction: '点击登录按钮', assertion: 'URL 包含 /Home' }],
       });
 
       expect(result.passed).toBe(false);
-      expect(result.steps[0].error).toContain('Assertion failed');
+      expect(result.steps[0].error).toContain('Expected URL include /Home');
     });
   });
 
   describe('run()', () => {
     it('returns a summary with correct counts', async () => {
-      const passingAgent = buildMockAgent({ chat: vi.fn().mockReturnValue('Done.') });
+      const passingAgent = buildMockAgent();
       const failingAgent = buildMockAgent({
-        chat: vi.fn().mockImplementation(() => { throw new Error('fail'); }),
+        click: vi.fn().mockImplementation(() => { throw new Error('fail'); }),
       });
 
       let call = 0;
@@ -180,9 +182,9 @@ describe('NaturalLanguageTestRunner', () => {
 
       const runner = new NaturalLanguageTestRunner({}, factory);
       const testCases: TestCase[] = [
-        { name: 'Test 1', url: 'https://example.com', steps: [{ instruction: 'Step' }] },
-        { name: 'Test 2', url: 'https://example.com', steps: [{ instruction: 'Step' }] },
-        { name: 'Test 3', url: 'https://example.com', steps: [{ instruction: 'Step' }] },
+        { name: 'Test 1', url: 'https://example.com', steps: [{ instruction: '点击登录按钮' }] },
+        { name: 'Test 2', url: 'https://example.com', steps: [{ instruction: '点击登录按钮' }] },
+        { name: 'Test 3', url: 'https://example.com', steps: [{ instruction: '点击登录按钮' }] },
       ];
 
       const summary = await runner.run(testCases);
@@ -195,9 +197,7 @@ describe('NaturalLanguageTestRunner', () => {
 
     it('stops after first failure when bail is enabled', async () => {
       let instancesCreated = 0;
-      const failingAgent = buildMockAgent({
-        chat: vi.fn().mockImplementation(() => { throw new Error('fail'); }),
-      });
+      const failingAgent = buildMockAgent({ click: vi.fn().mockImplementation(() => { throw new Error('fail'); }) });
       const factory = (_options?: AgentOptions) => {
         instancesCreated++;
         return failingAgent;
@@ -205,8 +205,8 @@ describe('NaturalLanguageTestRunner', () => {
 
       const runner = new NaturalLanguageTestRunner({ bail: true }, factory);
       const testCases: TestCase[] = [
-        { name: 'Test 1', url: 'https://example.com', steps: [{ instruction: 'Step' }] },
-        { name: 'Test 2', url: 'https://example.com', steps: [{ instruction: 'Step' }] },
+        { name: 'Test 1', url: 'https://example.com', steps: [{ instruction: '点击登录按钮' }] },
+        { name: 'Test 2', url: 'https://example.com', steps: [{ instruction: '点击登录按钮' }] },
       ];
 
       const summary = await runner.run(testCases);

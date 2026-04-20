@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import { createBrowserAgent, type BrowserAgentFactory, type BrowserAgent } from './agent.js';
+import { executeDeterministicStep } from './deterministic.js';
 import type {
   TestCase,
   TestResult,
@@ -127,32 +128,8 @@ export class NaturalLanguageTestRunner {
     instruction: string,
     assertion?: string,
   ): Promise<StepResult> {
-    try {
-      const output = agent.chat(instruction);
-
-      if (assertion) {
-        // Ask the agent to verify the assertion against the current page state.
-        const assertionPrompt = `Verify: ${assertion}. Reply with "PASS" if the assertion holds, or "FAIL: <reason>" if it does not.`;
-        const verificationOutput = agent.chat(assertionPrompt);
-
-        if (verificationOutput.trim().toUpperCase().startsWith('FAIL')) {
-          return {
-            instruction,
-            passed: false,
-            output,
-            error: `Assertion failed: ${verificationOutput.trim()}`,
-          };
-        }
-      }
-
-      return { instruction, passed: true, output };
-    } catch (err) {
-      return {
-        instruction,
-        passed: false,
-        error: err instanceof Error ? err.message : String(err),
-      };
-    }
+    const result = executeDeterministicStep(agent, instruction, assertion);
+    return result.step;
   }
 }
 
