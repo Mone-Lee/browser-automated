@@ -1,0 +1,61 @@
+{
+  "name": "browser-e2e",
+  "version": "0.1.0",
+  "description": "Code-first browser e2e automation skill with natural-language fallback",
+  "triggers": [
+    "test this flow",
+    "run e2e",
+    "browser automation",
+    "natural language test"
+  ],
+  "inputs": {
+    "type": "object",
+    "required": [
+      "url",
+      "instruction"
+    ],
+    "properties": {
+      "url": {
+        "type": "string"
+      },
+      "instruction": {
+        "type": "string"
+      },
+      "assertion": {
+        "type": "string"
+      },
+      "autoGenerate": {
+        "type": "boolean"
+      },
+      "generatedName": {
+        "type": "string"
+      },
+      "tags": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "type": "object",
+    "properties": {
+      "mode": {
+        "enum": [
+          "code",
+          "one-shot"
+        ]
+      },
+      "passed": {
+        "type": "boolean"
+      },
+      "guidance": {
+        "type": "string"
+      },
+      "generatedFile": {
+        "type": "string"
+      }
+    }
+  }
+}
