@@ -37,6 +37,25 @@ function makeFactory(agent: BrowserAgent) {
 
 describe('NaturalLanguageTestRunner', () => {
   describe('runOne()', () => {
+    it('does not inject profile into runner-created agents', async () => {
+      const mockAgent = buildMockAgent();
+      const capturedOptions: AgentOptions[] = [];
+      const factory = (options?: AgentOptions) => {
+        capturedOptions.push(options ?? {});
+        return mockAgent;
+      };
+
+      const runner = new NaturalLanguageTestRunner({}, factory);
+      await runner.runOne({
+        name: 'No profile injection',
+        url: 'https://example.com',
+        steps: [{ instruction: '点击登录按钮' }],
+      });
+
+      expect(capturedOptions).toHaveLength(1);
+      expect(capturedOptions[0].profile).toBeUndefined();
+    });
+
     it('returns a passing result when all steps succeed', async () => {
       const mockAgent = buildMockAgent();
       const runner = new NaturalLanguageTestRunner({}, makeFactory(mockAgent));

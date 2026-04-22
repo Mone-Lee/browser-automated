@@ -78,6 +78,12 @@ export interface AgentOptions {
   timeout?: number;
   /** Whether to run in headless mode (default: true). */
   headless?: boolean;
+  /** Whether to show a visible browser window while executing commands. */
+  headed?: boolean;
+  /** Alias for headed execution when the caller wants a live visible viewport. */
+  liveViewport?: boolean;
+  /** Chrome profile name/path reused by agent-browser (e.g. Default). */
+  profile?: string;
 }
 
 /**

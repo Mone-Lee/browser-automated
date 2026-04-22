@@ -18,6 +18,38 @@ export interface DeterministicExecutionResult {
   step: StepResult;
 }
 
+export interface HandoffRequestContext {
+  instruction: string;
+  action: DeterministicAction;
+  consecutiveFailures: number;
+  error: string;
+}
+
+export interface HandoffLifecycleContext extends HandoffRequestContext {
+  handoffMessage: string;
+  handoffOutput: string;
+  sessionId?: string;
+}
+
+export interface DeterministicScenarioOptions {
+  maxConsecutiveFailuresBeforeHandoff?: number;
+  maxHandoffsPerScenario?: number;
+  onActionFailure?: (context: HandoffRequestContext) => Promise<'handoff' | 'continue' | void> | 'handoff' | 'continue' | void;
+  onHandoffRequired?: (context: HandoffLifecycleContext) => Promise<void> | void;
+  waitForUserResume?: (context: HandoffLifecycleContext) => Promise<void> | void;
+  onHandoffCompleted?: (context: HandoffLifecycleContext) => Promise<void> | void;
+}
+
+export interface DeterministicScenarioExecutionMeta {
+  handoffTriggered: boolean;
+  handoffCount: number;
+}
+
+export interface DeterministicScenarioExecutionResult {
+  step: StepResult;
+  meta: DeterministicScenarioExecutionMeta;
+}
+
 const QUOTED_VALUE_RE = /["“]([^"”]+)["”]/g;
 
 function parseSnapshot(snapshot: string): SnapshotNode[] {
@@ -347,6 +379,173 @@ export function executeDeterministicStep(
         instruction,
         passed: false,
         error: err instanceof Error ? err.message : String(err),
+      },
+    };
+  }
+}
+
+function actionErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function executeSingleAction(agent: BrowserAgent, action: DeterministicAction, outputs: string[]): void {
+  if (action.type === 'open') {
+    outputs.push(agent.open(action.value ?? ''));
+    return;
+  }
+
+  if (action.type === 'fill') {
+    const snapshot = agent.snapshot();
+    const ref = findTextboxRef(snapshot, action.field ?? '');
+    if (!ref) {
+      throw new Error(`Cannot locate textbox for field: ${action.field ?? 'unknown'}`);
+    }
+    outputs.push(agent.fill(ref, action.value ?? ''));
+    return;
+  }
+
+  if (action.type === 'click') {
+    const snapshot = agent.snapshot();
+    const ref = findClickableRef(snapshot, action.value ?? '');
+    if (!ref) {
+      throw new Error(`Cannot locate clickable element for target: ${action.value ?? 'unknown'}`);
+    }
+    outputs.push(agent.click(ref));
+    return;
+  }
+
+  if (action.type === 'assert-url') {
+    const currentUrl = agent.getUrl();
+    if (!currentUrl.includes(action.value ?? '')) {
+      throw new Error(`URL assertion failed. Expected URL to include: ${action.value}. Actual: ${currentUrl}`);
+    }
+    outputs.push(`URL includes: ${action.value}`);
+    return;
+  }
+
+  if (action.type === 'assert-text') {
+    const snapshot = agent.snapshot();
+    if (!snapshot.includes(action.value ?? '')) {
+      throw new Error(`Text assertion failed. Expected text: ${action.value}`);
+    }
+    outputs.push(`Text visible: ${action.value}`);
+  }
+}
+
+export async function executeDeterministicScenarioWithHandoff(
+  agent: BrowserAgent,
+  url: string,
+  instruction: string,
+  options: DeterministicScenarioOptions = {},
+): Promise<DeterministicScenarioExecutionResult> {
+  const lines = instruction
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => /^\d+\./.test(line))
+    .map((line) => line.replace(/^\d+\.\s*/, '').trim());
+
+  const scopedInstructions = lines.length > 0 ? lines : [instruction];
+  const outputs: string[] = [];
+  const threshold = Math.max(1, options.maxConsecutiveFailuresBeforeHandoff ?? 3);
+  const maxHandoffs = Math.max(1, options.maxHandoffsPerScenario ?? 1);
+  let consecutiveFailures = 0;
+  let handoffCount = 0;
+
+  try {
+    outputs.push(agent.open(url));
+
+    for (const item of scopedInstructions) {
+      const actions = parseDeterministicActionsFromInstruction(item);
+      if (actions.length === 0) {
+        throw new Error('Unsupported deterministic instruction. Please provide explicit open/fill/click/assert steps.');
+      }
+
+      for (const action of actions) {
+        let attempts = 0;
+
+        while (true) {
+          try {
+            executeSingleAction(agent, action, outputs);
+            consecutiveFailures = 0;
+            break;
+          } catch (err) {
+            attempts += 1;
+            consecutiveFailures += 1;
+            const error = actionErrorMessage(err);
+            const failureContext: HandoffRequestContext = {
+              instruction: item,
+              action,
+              consecutiveFailures,
+              error,
+            };
+
+            const failureDecision = await options.onActionFailure?.(failureContext);
+            const challenge = agent.detectHandoffChallenge(error);
+            const shouldHandoff =
+              failureDecision === 'handoff' ||
+              challenge.detected ||
+              consecutiveFailures >= threshold;
+
+            if (shouldHandoff && handoffCount < maxHandoffs && options.waitForUserResume) {
+              const handoffMessage = challenge.detected
+                ? `Detected ${challenge.categories.join(', ')} challenge while executing ${action.type}. Evidence: ${challenge.evidence.join('; ')}. Last error: ${error}`
+                : `Stuck on ${action.type} after ${consecutiveFailures} failures: ${error}`;
+              const handoffOutput = agent.handoff(handoffMessage);
+              const lifecycleContext: HandoffLifecycleContext = {
+                ...failureContext,
+                handoffMessage,
+                handoffOutput,
+                sessionId: agent.getSessionId(),
+              };
+
+              await options.onHandoffRequired?.(lifecycleContext);
+              await options.waitForUserResume(lifecycleContext);
+              agent.resume();
+              agent.snapshot();
+              await options.onHandoffCompleted?.(lifecycleContext);
+
+              handoffCount += 1;
+              consecutiveFailures = 0;
+
+              try {
+                executeSingleAction(agent, action, outputs);
+                break;
+              } catch (retryErr) {
+                const retryMessage = actionErrorMessage(retryErr);
+                throw new Error(`Action failed after handoff resume: ${retryMessage}`);
+              }
+            }
+
+            if (attempts >= threshold) {
+              throw new Error(error);
+            }
+          }
+        }
+      }
+    }
+
+    return {
+      step: {
+        instruction,
+        passed: true,
+        output: outputs.filter(Boolean).join('\n').trim(),
+      },
+      meta: {
+        handoffTriggered: handoffCount > 0,
+        handoffCount,
+      },
+    };
+  } catch (err) {
+    return {
+      step: {
+        instruction,
+        passed: false,
+        output: outputs.filter(Boolean).join('\n').trim(),
+        error: actionErrorMessage(err),
+      },
+      meta: {
+        handoffTriggered: handoffCount > 0,
+        handoffCount,
       },
     };
   }

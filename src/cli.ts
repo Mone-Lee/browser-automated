@@ -20,6 +20,7 @@ import { executePlaywrightSpec } from './skills/playwright.js';
 import type { TestCase, TestRunSummary } from './types.js';
 
 const [, , command, ...args] = process.argv;
+const LIVE_VIEWPORT_DASHBOARD_URL = 'http://localhost:4848';
 
 async function main(): Promise<void> {
   switch (command) {
@@ -139,8 +140,64 @@ function promptUser(question: string): Promise<string> {
   });
 }
 
+function isDoneAnswer(input: string): boolean {
+  const value = input.trim().toLowerCase();
+  return value === 'done' || value === 'ok' || value === '继续' || value === '完成';
+}
+
+async function waitForHandoffDone(): Promise<void> {
+  while (true) {
+    const answer = await promptUser('已切换到真实浏览器，请处理验证码/OAuth/MFA 后输入 done 继续：\n> ');
+    if (isDoneAnswer(answer)) {
+      return;
+    }
+    console.log('未识别输入，请输入 done / ok / 继续 / 完成。');
+  }
+}
+
+function createHandoffInput(url: string, instruction: string, options: { liveViewport?: boolean; profile?: string } = {}) {
+  return {
+    url,
+    instruction,
+    profile: options.profile ?? 'Default',
+    liveViewport: options.liveViewport ?? true,
+    handoff: {
+      maxConsecutiveFailuresBeforeHandoff: 3,
+      maxHandoffsPerScenario: 1,
+      onActionFailure: async (context: { consecutiveFailures: number; error: string }) => {
+        if (context.consecutiveFailures >= 3) {
+          return;
+        }
+        console.log(`动作失败（${context.consecutiveFailures}/3）：${context.error}`);
+        const answer = await promptUser('输入 handoff 立即人工接管，或直接回车继续自动重试：\n> ');
+        return answer.trim().toLowerCase() === 'handoff' ? 'handoff' : 'continue';
+      },
+      onHandoffRequired: async (context: { handoffMessage: string; handoffOutput: string; sessionId?: string }) => {
+        console.log('\n=== User Handoff ===');
+        console.log(`Reason: ${context.handoffMessage}`);
+        if (context.sessionId) {
+          console.log(`Session: ${context.sessionId}`);
+        }
+        console.log(`Live viewport: ${LIVE_VIEWPORT_DASHBOARD_URL}`);
+        console.log('已打开可视浏览器，请手动完成验证码 / OAuth / MFA。');
+        console.log('完成后请在这里输入 done（或 ok / 继续 / 完成）以恢复自动化。');
+        if (context.handoffOutput?.trim()) {
+          console.log(context.handoffOutput.trim());
+        }
+      },
+      waitForUserResume: waitForHandoffDone,
+      onHandoffCompleted: async () => {
+        console.log('用户接管完成，恢复自动化执行。\n');
+      },
+    },
+  };
+}
+
 async function cmdBrowserE2E(args: string[]): Promise<void> {
-  const text = args.join(' ').trim();
+  const parsed = parseCliArgs(args);
+  const text = parsed.positionals.join(' ').trim();
+  const liveViewport = resolveLiveViewport(parsed.flags);
+  const profile = resolveProfile(parsed.flags);
 
   if (!text) {
     console.log(`使用方式：
@@ -158,6 +215,10 @@ async function cmdBrowserE2E(args: string[]): Promise<void> {
   }
 
   const service = new BrowserE2ESkillService();
+  if (liveViewport) {
+    console.log(`\nLive viewport: ${LIVE_VIEWPORT_DASHBOARD_URL}\n`);
+  }
+  console.log(`Profile: ${profile}`);
   const existing = service.checkForExistingTests(text);
 
   // ---------- 命中已有用例：告知用户并让其决策 ----------
@@ -197,8 +258,7 @@ async function cmdBrowserE2E(args: string[]): Promise<void> {
 
   // ---------- 无匹配或用户选 [2]：执行一次性 NL 测试 ----------
   const result = await service.runOneShotInstruction({
-    url: url!,
-    instruction: text,
+    ...createHandoffInput(url!, text, { liveViewport, profile }),
     autoGenerate: false,
   });
 
@@ -233,13 +293,18 @@ async function cmdE2E(args: string[]): Promise<void> {
 
   const assertion = getStringFlag(parsed.flags, 'assert');
   const autoGenerate = getBooleanFlag(parsed.flags, 'auto-generate');
+  const liveViewport = resolveLiveViewport(parsed.flags);
+  const profile = resolveProfile(parsed.flags);
   const generatedName = getStringFlag(parsed.flags, 'name');
   const tags = parseCsv(getStringFlag(parsed.flags, 'tags'));
 
   const service = new BrowserE2ESkillService();
+  if (liveViewport) {
+    console.log(`Live viewport: ${LIVE_VIEWPORT_DASHBOARD_URL}`);
+  }
+  console.log(`Profile: ${profile}`);
   const result = await service.trigger({
-    url,
-    instruction,
+    ...createHandoffInput(url, instruction, { liveViewport, profile }),
     assertion,
     autoGenerate,
     generatedName,
@@ -320,7 +385,7 @@ Commands:
   chat <url> <instruction>
        Execute a single natural language instruction in the browser.
 
-    e2e <url> <instruction> [--assert <assertion>] [--auto-generate] [--name <name>] [--tags <a,b>]
+    e2e <url> <instruction> [--assert <assertion>] [--auto-generate] [--name <name>] [--tags <a,b>] [--profile <name>] [--no-live-viewport]
       Trigger e2e skill workflow: prefer existing Playwright test, fallback to one-shot NL execution.
 
     e2e-gen <url> <instruction> [--name <name>] [--tags <a,b>]
@@ -331,6 +396,8 @@ Examples:
   browser-automated gen https://example.com "Fill the contact form and submit"
   browser-automated chat https://example.com "Click the sign-in button"
   browser-automated e2e https://example.com "Search for pricing and open contact"
+  browser-automated e2e https://example.com "Login and verify dashboard"
+  browser-automated e2e https://example.com "Login and verify dashboard" --profile Work --no-live-viewport
   browser-automated e2e-gen https://example.com "Search for pricing and open contact" --name "pricing contact flow"
 `);
 }
@@ -371,6 +438,20 @@ function getBooleanFlag(flags: Record<string, string | boolean>, key: string): b
   return flags[key] === true;
 }
 
+function resolveProfile(flags: Record<string, string | boolean>): string {
+  return getStringFlag(flags, 'profile') ?? 'Default';
+}
+
+function resolveLiveViewport(flags: Record<string, string | boolean>): boolean {
+  if (getBooleanFlag(flags, 'no-live-viewport')) {
+    return false;
+  }
+  if (getBooleanFlag(flags, 'live-viewport')) {
+    return true;
+  }
+  return true;
+}
+
 function parseCsv(value?: string): string[] {
   if (!value) {
     return [];
@@ -388,6 +469,7 @@ function printSkillExecutionResult(result: {
   execution: { passed: boolean; output?: string; steps?: Array<{ instruction: string; passed: boolean; error?: string; output?: string }>; error?: string };
   guidance?: string;
   generated?: { filePath: string };
+  handoff?: { triggered: boolean; count: number };
 }): void {
   console.log(`Mode: ${result.mode}`);
   if (result.matched) {
@@ -419,6 +501,10 @@ function printSkillExecutionResult(result: {
 
   if (result.generated) {
     console.log(`Generated file: ${result.generated.filePath}`);
+  }
+
+  if (result.handoff?.triggered) {
+    console.log(`Handoff: yes (${result.handoff.count})`);
   }
 
   if (result.guidance) {

@@ -35,10 +35,49 @@ export interface CodeExecutionResult {
 export interface SkillTriggerInput {
   url: string;
   instruction: string;
+  profile?: string;
   assertion?: string;
   autoGenerate?: boolean;
   generatedName?: string;
   tags?: string[];
+  liveViewport?: boolean;
+  handoff?: {
+    maxConsecutiveFailuresBeforeHandoff?: number;
+    maxHandoffsPerScenario?: number;
+    onActionFailure?: (context: {
+      instruction: string;
+      action: { type: string; value?: string; field?: string };
+      consecutiveFailures: number;
+      error: string;
+    }) => Promise<'handoff' | 'continue' | void> | 'handoff' | 'continue' | void;
+    onHandoffRequired?: (context: {
+      instruction: string;
+      action: { type: string; value?: string; field?: string };
+      consecutiveFailures: number;
+      error: string;
+      handoffMessage: string;
+      handoffOutput: string;
+      sessionId?: string;
+    }) => Promise<void> | void;
+    waitForUserResume?: (context: {
+      instruction: string;
+      action: { type: string; value?: string; field?: string };
+      consecutiveFailures: number;
+      error: string;
+      handoffMessage: string;
+      handoffOutput: string;
+      sessionId?: string;
+    }) => Promise<void> | void;
+    onHandoffCompleted?: (context: {
+      instruction: string;
+      action: { type: string; value?: string; field?: string };
+      consecutiveFailures: number;
+      error: string;
+      handoffMessage: string;
+      handoffOutput: string;
+      sessionId?: string;
+    }) => Promise<void> | void;
+  };
 }
 
 export interface GeneratedCodeArtifact {
@@ -53,4 +92,8 @@ export interface SkillTriggerResult {
   execution: CodeExecutionResult | TestResult;
   generated?: GeneratedCodeArtifact;
   guidance?: string;
+  handoff?: {
+    triggered: boolean;
+    count: number;
+  };
 }

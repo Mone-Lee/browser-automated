@@ -43,6 +43,59 @@ describe('BrowserAgent', () => {
       const agent = new BrowserAgent({ sessionId: 'test-session' });
       expect(() => agent.open('https://bad-url')).toThrow('navigation error');
     });
+
+    it('adds --headed when live viewport is enabled', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult(''));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session', liveViewport: true });
+      agent.open('https://example.com');
+
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'agent-browser',
+        ['--session', 'test-session', '--headed', 'open', 'https://example.com'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+    });
+
+    it('passes --profile when configured', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult(''));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session', profile: 'Default' });
+      agent.open('https://example.com');
+
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'agent-browser',
+        ['--profile', 'Default', '--session', 'test-session', 'open', 'https://example.com'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+    });
+
+    it('auto-opens dashboard once when live viewport initializes', () => {
+      (BrowserAgent as unknown as { autoOpenedDashboardUrls: Set<string> }).autoOpenedDashboardUrls.clear();
+
+      mockSpawnSync
+        .mockReturnValueOnce(makeOkResult(''))
+        .mockReturnValueOnce(makeOkResult('dashboard started'))
+        .mockReturnValueOnce(makeOkResult('Streaming disabled'))
+        .mockReturnValueOnce(makeOkResult('Streaming enabled on ws://127.0.0.1:9223'))
+        .mockReturnValue(makeOkResult(''));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session', liveViewport: true });
+      agent.open('https://example.com');
+      agent.open('https://example.com/next');
+
+      const openDashboardCommand = process.platform === 'darwin'
+        ? ['open', 'http://localhost:4848']
+        : process.platform === 'win32'
+          ? ['cmd', '/c', 'start', '', 'http://localhost:4848']
+          : ['xdg-open', 'http://localhost:4848'];
+
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        openDashboardCommand[0],
+        openDashboardCommand.slice(1),
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+    });
   });
 
   describe('chat()', () => {
@@ -115,12 +168,116 @@ describe('BrowserAgent', () => {
 
       expect(mockSpawnSync).toHaveBeenCalledWith(
         'agent-browser',
-        ['batch', '--json'],
+        ['--session', 'test-session', 'batch', '--json'],
         expect.objectContaining({
           input: JSON.stringify(commands),
           encoding: 'utf-8',
         }),
       );
+    });
+  });
+
+  describe('handoff()/resume()', () => {
+    it('calls handoff with the same session', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult('HANDOFF: waiting'));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session' });
+      const output = agent.handoff('Stuck on CAPTCHA');
+
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'agent-browser',
+        ['--session', 'test-session', 'handoff', 'Stuck on CAPTCHA'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+      expect(output).toContain('HANDOFF');
+    });
+
+    it('calls resume with the same session', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult('RESUME: ok'));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session' });
+      const output = agent.resume();
+
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'agent-browser',
+        ['--session', 'test-session', 'resume'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+      expect(output).toContain('RESUME');
+    });
+
+    it('falls back to a headed browser when handoff is unsupported', () => {
+      mockSpawnSync
+        .mockReturnValueOnce(makeErrorResult('Unknown command: handoff'))
+        .mockReturnValueOnce(makeOkResult('https://example.com/login\n'))
+        .mockReturnValueOnce(makeOkResult('opened headed browser'))
+        .mockReturnValueOnce(makeOkResult('Dashboard started at http://localhost:4848'))
+        .mockReturnValueOnce(makeOkResult('Streaming enabled on ws://127.0.0.1:61898'))
+        .mockReturnValueOnce(makeOkResult('Streaming disabled'))
+        .mockReturnValueOnce(makeOkResult('Streaming enabled on ws://127.0.0.1:9223'));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session' });
+      const output = agent.handoff('Need manual captcha');
+
+      expect(mockSpawnSync).toHaveBeenNthCalledWith(
+        1,
+        'agent-browser',
+        ['--session', 'test-session', 'handoff', 'Need manual captcha'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+      expect(mockSpawnSync).toHaveBeenNthCalledWith(
+        2,
+        'agent-browser',
+        ['--session', 'test-session', 'get', 'url'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+      expect(mockSpawnSync).toHaveBeenNthCalledWith(
+        3,
+        'agent-browser',
+        ['--session', 'test-session', '--headed', 'open', 'https://example.com/login'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+      expect(mockSpawnSync).toHaveBeenNthCalledWith(
+        4,
+        'agent-browser',
+        ['dashboard', 'start', '--port', '4848'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+      expect(mockSpawnSync).toHaveBeenNthCalledWith(
+        5,
+        'agent-browser',
+        ['--session', 'test-session', 'stream', 'status'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+      expect(mockSpawnSync).toHaveBeenNthCalledWith(
+        6,
+        'agent-browser',
+        ['--session', 'test-session', 'stream', 'disable'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+      expect(mockSpawnSync).toHaveBeenNthCalledWith(
+        7,
+        'agent-browser',
+        ['--session', 'test-session', 'stream', 'enable', '--port', '9223'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+      expect(output).toContain('HANDOFF_FALLBACK');
+    });
+
+    it('falls back to a no-op resume when resume is unsupported', () => {
+      mockSpawnSync.mockReturnValue(makeErrorResult('Unknown command: resume'));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session' });
+      const output = agent.resume();
+
+      expect(output).toContain('RESUME_FALLBACK');
+    });
+  });
+
+  describe('getSessionId()', () => {
+    it('returns the configured session id', () => {
+      const agent = new BrowserAgent({ sessionId: 'test-session' });
+      expect(agent.getSessionId()).toBe('test-session');
     });
   });
 
