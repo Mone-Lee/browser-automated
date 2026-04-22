@@ -1,7 +1,7 @@
 # browser-automated
 
 浏览器自动化，支持 e2e 测试、e2e 测试用例生成、浏览器自动化操作。  
-底层使用 [agent-browser](https://agent-browser.dev)（Vercel）对无头浏览器进行操作，支持通过**自然语言**描述来执行 e2e 自动化测试。
+底层使用 [agent-browser](https://agent-browser.dev)（Vercel）对浏览器进行操作，支持通过**自然语言**描述来执行 e2e 自动化测试。
 
 ## 功能特性
 
@@ -10,6 +10,7 @@
 - 🧠 **Skills 风格编排**：自然语言触发时优先命中已有 Playwright 用例，未命中时回退到一次性 NL 测试
 - 🧩 **代码沉淀闭环**：一次性 NL 测试通过后可自动生成并注册 Playwright 测试代码
 - 🤖 **BrowserAgent**：封装 `agent-browser` CLI 的 TypeScript 接口，支持 snapshot、screenshot、batch 等操作
+- 🙋 **User Handoff**：遇到验证码/OAuth/MFA 或连续失败时，自动切到真实浏览器由用户接管，完成后恢复自动化
 - 🔧 **CLI 工具**：`browser-automated run / gen / chat / e2e / e2e-gen`
 
 ## 安装
@@ -44,7 +45,22 @@ npx browser-automated chat https://example.com "点击登录按钮"
 
 ```bash
 npx browser-automated e2e https://example.com "打开 pricing 页面并进入 contact 页面" --assert "Contact 页面应可见"
+npx browser-automated e2e https://example.com "登录并验证仪表盘" --live-viewport
 ```
+
+一次性 `browser-e2e` / `e2e` 流程默认会使用可见浏览器窗口执行，便于你实时观察自动化过程。`--live-viewport` 现在可以视为显式声明该行为。
+
+### 复杂场景接管（User Handoff）
+
+当一次性自动化无法继续时（例如 CAPTCHA、OAuth 授权、多因素登录），`browser-e2e`/`e2e` 流程会在连续失败 3 次后自动触发接管。
+
+流程如下：
+
+1. 优先执行 `handoff`；如果当前 `agent-browser` 版本不支持该命令，则自动回退到同一 session 的可见浏览器窗口。
+2. CLI 提示你手动完成复杂步骤。
+3. 你输入 `done`（或 `ok`/`继续`/`完成`）后，自动执行 `resume`；如果该命令不可用，则直接沿用当前 session 继续跑后续动作。
+
+在动作失败提示时，也可手动输入 `handoff` 立即接管，不必等到 3 次失败。
 
 推荐自然语言用例模板：
 

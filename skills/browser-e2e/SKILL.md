@@ -20,7 +20,38 @@ One-shot execution is deterministic by default:
 - Does not depend on `agent-browser chat`.
 - Does not require `AI_GATEWAY_API_KEY` for one-shot execution.
 
+Default runtime behavior for one-shot execution:
+
+- Reuses Chrome login state with profile `Default` unless `--profile <name>` overrides it.
+- Live viewport is enabled by default; use `--no-live-viewport` to disable.
+- The dashboard page (`http://localhost:4848`) is auto-opened when live viewport is active.
+
 Note: if the target page has captcha, deterministic runs may still need captcha handling (manual input, test whitelist, or backend bypass policy).
+
+## User Handoff
+
+When headless automation cannot continue (CAPTCHA, complex auth, MFA), hand off control to the user:
+
+```bash
+# 1. Open a visible Chrome at the current page
+$B handoff "Stuck on CAPTCHA at login page"
+
+# 2. Ask user to finish manual steps
+#    "I've opened Chrome at the login page. Please solve the CAPTCHA
+#     and let me know when you're done."
+
+# 3. After user says done, continue from current state
+$B resume
+```
+
+### Handoff trigger policy
+
+- Immediate handoff when challenge signals are detected:
+	- CAPTCHA / bot detection
+	- OAuth authorization / consent flows
+	- MFA / 2FA verification flows
+- Fallback handoff after 3 consecutive failures when no challenge signal is detected.
+- Browser state (cookies, localStorage, tabs) is preserved across handoff and resume.
 
 ## Trigger
 
