@@ -1,4 +1,7 @@
-import type { TestCase, TestResult } from '../types.js';
+/**
+ * 定义 browser-e2e 测试复用链路、生成测试索引和代码生成结果所需的数据结构。
+ */
+import type { TestCase, TestResult } from '../../core/types.js';
 
 export interface GeneratedTestMeta {
   id: string;
@@ -32,7 +35,7 @@ export interface CodeExecutionResult {
   output: string;
 }
 
-export interface SkillTriggerInput {
+export interface BrowserE2ETriggerInput {
   url: string;
   instruction: string;
   profile?: string;
@@ -86,7 +89,7 @@ export interface GeneratedCodeArtifact {
   meta: GeneratedTestMeta;
 }
 
-export interface SkillTriggerResult {
+export interface BrowserE2ETriggerResult {
   mode: 'code' | 'one-shot';
   matched?: MatchCandidate | null;
   execution: CodeExecutionResult | TestResult;

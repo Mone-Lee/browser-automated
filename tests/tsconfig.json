@@ -1,0 +1,14 @@
+/**
+ * 测试目录单独维护一份 TypeScript 配置，让编辑器能正确检查 Vitest
+ * 文件，同时不影响只编译 src/ 的生产构建配置。
+ */
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "noEmit": true,
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["./**/*.ts", "../src/**/*.ts"],
+  "exclude": ["../dist", "../node_modules"]
+}

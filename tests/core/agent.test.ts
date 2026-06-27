@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { BrowserAgent } from '../src/agent.js';
+import { BrowserAgent } from '../../src/core/agent.js';
 
-// Spy on spawnSync so the tests never touch a real browser.
+// 监听 spawnSync，确保测试过程不会真的启动浏览器。
 vi.mock('node:child_process', () => ({
   spawnSync: vi.fn(),
 }));
@@ -114,6 +114,33 @@ describe('BrowserAgent', () => {
     });
   });
 
+  describe('chatJson()', () => {
+    it('passes --json to agent-browser chat and parses JSON output', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult('{"success":true,"text":"Done"}'));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session' });
+      const output = agent.chatJson('Click the login button');
+
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'agent-browser',
+        ['--session', 'test-session', 'chat', 'Click the login button', '--json'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+      expect(output.data).toEqual({ success: true, text: 'Done' });
+    });
+
+    it('keeps raw output when chat JSON parsing fails', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult('Done.'));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session' });
+      const output = agent.chatJson('Click the login button');
+
+      expect(output.data).toBeNull();
+      expect(output.raw).toBe('Done.');
+      expect(output.parseError).toBeTruthy();
+    });
+  });
+
   describe('snapshot()', () => {
     it('calls agent-browser snapshot with -i flag', () => {
       mockSpawnSync.mockReturnValue(makeOkResult('button[Submit]'));
@@ -127,6 +154,32 @@ describe('BrowserAgent', () => {
         expect.objectContaining({ encoding: 'utf-8' }),
       );
       expect(result).toBe('button[Submit]');
+    });
+  });
+
+  describe('snapshotJson()', () => {
+    it('calls agent-browser snapshot with -i and --json flags', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult('{"success":true,"data":{"snapshot":"button","refs":{"e1":{"role":"button"}}}}'));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session' });
+      const result = agent.snapshotJson();
+
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'agent-browser',
+        ['--session', 'test-session', 'snapshot', '-i', '--json'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+      expect(result.data).toEqual({
+        success: true,
+        data: {
+          snapshot: 'button',
+          refs: {
+            e1: {
+              role: 'button',
+            },
+          },
+        },
+      });
     });
   });
 

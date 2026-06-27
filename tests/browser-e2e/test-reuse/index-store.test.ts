@@ -6,7 +6,7 @@ import {
   loadGeneratedTestIndex,
   saveGeneratedTestIndex,
   upsertGeneratedTestMeta,
-} from '../src/skills/index-store.js';
+} from '../../../src/browser-e2e/test-reuse/index-store.js';
 
 describe('generated test index store', () => {
   it('loads empty index when file does not exist', () => {

@@ -1,28 +1,25 @@
 #!/usr/bin/env node
 /**
- * CLI for the browser-automated natural language e2e test runner.
- *
- * Usage:
- *   browser-automated run    <test-file.json>    Run test cases from a JSON file
- *   browser-automated gen    <url> <description> Generate a test case from a description
- *   browser-automated chat   <url> <instruction> Run a one-shot natural language instruction
+ * 统一承载 browser-opt、browser-e2e 与历史 browser-automated 入口的参数分发。
+ * 对外主产物是 browser-opt / browser-e2e；browser-automated 仅保留兼容旧命令。
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
-import { NaturalLanguageTestRunner } from './runner.js';
-import { TestCaseGenerator } from './generate.js';
-import { BrowserAgent } from './agent.js';
-import { executeDeterministicScenario } from './deterministic.js';
-import { BrowserE2ESkillService } from './skills/service.js';
-import { executePlaywrightSpec } from './skills/playwright.js';
-import type { TestCase, TestRunSummary } from './types.js';
+import { pathToFileURL } from 'node:url';
+import { NaturalLanguageTestRunner } from '../browser-e2e/runner.js';
+import { TestCaseGenerator } from '../browser-e2e/generate.js';
+import { BrowserAgent } from '../core/agent.js';
+import { executeDeterministicScenario } from '../browser-e2e/deterministic.js';
+import { BrowserE2ETestReuseService } from '../browser-e2e/test-reuse/service.js';
+import { executePlaywrightSpec } from '../browser-e2e/test-reuse/playwright.js';
+import { BrowserOptRunner, browserOptTemplate } from '../browser-opt/runner.js';
+import type { TestCase, TestRunSummary } from '../core/types.js';
 
-const [, , command, ...args] = process.argv;
 const LIVE_VIEWPORT_DASHBOARD_URL = 'http://localhost:4848';
 
-async function main(): Promise<void> {
+export async function runCli(command: string | undefined, args: string[]): Promise<void> {
   switch (command) {
     case 'run':
       await cmdRun(args);
@@ -36,6 +33,9 @@ async function main(): Promise<void> {
     case 'browser-e2e':
       await cmdBrowserE2E(args);
       break;
+    case 'browser-opt':
+      await cmdBrowserOpt(args);
+      break;
     case 'e2e':
       await cmdE2E(args);
       break;
@@ -43,13 +43,52 @@ async function main(): Promise<void> {
       await cmdE2EGen(args);
       break;
     default:
-      printUsage();
+      printUsage(command);
       process.exit(1);
   }
 }
 
+export async function runBrowserOptCli(args: string[]): Promise<void> {
+  await cmdBrowserOpt(args);
+}
+
+export async function runBrowserE2ECli(args: string[]): Promise<void> {
+  const [subcommand, ...rest] = args;
+  if (!subcommand) {
+    await cmdBrowserE2E([]);
+    return;
+  }
+
+  switch (subcommand) {
+    case 'run':
+      await cmdE2E(rest);
+      return;
+    case 'gen':
+      await cmdE2EGen(rest);
+      return;
+    case 'skill':
+      await cmdBrowserE2E(rest);
+      return;
+    default:
+      await cmdBrowserE2E(args);
+  }
+}
+
+function resolveMainEntrypoint(): { command: string | undefined; args: string[] } {
+  const executable = path.basename(process.argv[1] ?? '');
+  if (executable === 'browser-opt' || executable === 'browser-opt-cli.ts') {
+    return { command: 'browser-opt', args: process.argv.slice(2) };
+  }
+  if (executable === 'browser-e2e' || executable === 'browser-e2e-cli.ts') {
+    return { command: 'browser-e2e-bin', args: process.argv.slice(2) };
+  }
+
+  const [, , command, ...args] = process.argv;
+  return { command, args };
+}
+
 // ---------------------------------------------------------------------------
-// Commands
+// 命令处理
 // ---------------------------------------------------------------------------
 
 async function cmdRun(args: string[]): Promise<void> {
@@ -71,7 +110,7 @@ async function cmdRun(args: string[]): Promise<void> {
   } catch (err) {
     console.error(`Failed to read test file: ${err instanceof Error ? err.message : err}`);
     process.exit(1);
-    return; // unreachable but satisfies TypeScript definite assignment
+    return; // 仅用于满足 TypeScript 的确定赋值分析。
   }
 
   const runner = new NaturalLanguageTestRunner({ bail, screenshotOnFailure });
@@ -118,7 +157,7 @@ async function cmdChat(args: string[]): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// /browser-e2e — interactive skill entrypoint
+// /browser-e2e 交互式 Skill 入口
 // ---------------------------------------------------------------------------
 
 function extractUrlFromText(text: string): string | null {
@@ -201,10 +240,10 @@ async function cmdBrowserE2E(args: string[]): Promise<void> {
 
   if (!text) {
     console.log(`使用方式：
-  browser-automated browser-e2e <自然语言测试描述>
+      browser-e2e <自然语言测试描述>
 
 示例：
-  browser-automated browser-e2e 测试网站 https://example.com/login 的登录功能。\n\n目标：\n1. 打开登录页面。\n2. 输入用户名 "testuser" 和密码 "password123"。\n3. 点击登录按钮。\n4. 验证是否跳转到仪表盘页面（URL 包含 /dashboard 或看到欢迎文字）。`);
+  browser-e2e 测试网站 https://example.com/login 的登录功能。\n\n目标：\n1. 打开登录页面。\n2. 输入用户名 "testuser" 和密码 "password123"。\n3. 点击登录按钮。\n4. 验证是否跳转到仪表盘页面（URL 包含 /dashboard 或看到欢迎文字）。`);
     process.exit(1);
   }
 
@@ -214,7 +253,7 @@ async function cmdBrowserE2E(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  const service = new BrowserE2ESkillService();
+  const service = new BrowserE2ETestReuseService();
   if (liveViewport) {
     console.log(`\nLive viewport: ${LIVE_VIEWPORT_DASHBOARD_URL}\n`);
   }
@@ -279,6 +318,37 @@ async function cmdBrowserE2E(args: string[]): Promise<void> {
   process.exit(result.execution.passed ? 0 : 1);
 }
 
+async function cmdBrowserOpt(args: string[]): Promise<void> {
+  const parsed = parseCliArgs(args);
+  const text = parsed.positionals.join(' ').trim();
+  const liveViewport = resolveLiveViewport(parsed.flags);
+  const profile = resolveProfile(parsed.flags);
+  const outputDir = getStringFlag(parsed.flags, 'output-dir');
+
+  if (!text) {
+    console.log(`使用方式：
+  browser-opt <自然语言流程> [--profile <name>] [--no-live-viewport] [--output-dir <dir>]
+
+${browserOptTemplate()}`);
+    process.exit(1);
+  }
+
+  if (liveViewport) {
+    console.log(`Live viewport: ${LIVE_VIEWPORT_DASHBOARD_URL}`);
+  }
+  console.log(`Profile: ${profile}`);
+
+  const runner = new BrowserOptRunner();
+  const result = await runner.run(text, {
+    profile,
+    liveViewport,
+    outputDir,
+  });
+
+  printBrowserOptResult(result.report);
+  process.exit(result.passed ? 0 : 1);
+}
+
 async function cmdE2E(args: string[]): Promise<void> {
   const parsed = parseCliArgs(args);
   const [url, ...instructionParts] = parsed.positionals;
@@ -286,7 +356,7 @@ async function cmdE2E(args: string[]): Promise<void> {
 
   if (!url || !instruction) {
     console.error(
-      'Usage: browser-automated e2e <url> <instruction> [--assert <assertion>] [--auto-generate] [--name <name>] [--tags <a,b>]',
+      'Usage: browser-e2e run <url> <instruction> [--assert <assertion>] [--auto-generate] [--name <name>] [--tags <a,b>]',
     );
     process.exit(1);
   }
@@ -298,7 +368,7 @@ async function cmdE2E(args: string[]): Promise<void> {
   const generatedName = getStringFlag(parsed.flags, 'name');
   const tags = parseCsv(getStringFlag(parsed.flags, 'tags'));
 
-  const service = new BrowserE2ESkillService();
+  const service = new BrowserE2ETestReuseService();
   if (liveViewport) {
     console.log(`Live viewport: ${LIVE_VIEWPORT_DASHBOARD_URL}`);
   }
@@ -321,14 +391,14 @@ async function cmdE2EGen(args: string[]): Promise<void> {
   const instruction = instructionParts.join(' ').trim();
 
   if (!url || !instruction) {
-    console.error('Usage: browser-automated e2e-gen <url> <instruction> [--name <name>] [--tags <a,b>]');
+    console.error('Usage: browser-e2e gen <url> <instruction> [--name <name>] [--tags <a,b>]');
     process.exit(1);
   }
 
   const name = getStringFlag(parsed.flags, 'name');
   const tags = parseCsv(getStringFlag(parsed.flags, 'tags'));
 
-  const service = new BrowserE2ESkillService();
+  const service = new BrowserE2ETestReuseService();
   const generated = await service.generateCodeFromInstruction({
     url,
     instruction,
@@ -343,7 +413,7 @@ async function cmdE2EGen(args: string[]): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Output helpers
+// 输出辅助函数
 // ---------------------------------------------------------------------------
 
 function printSummary(summary: TestRunSummary): void {
@@ -371,9 +441,31 @@ function printSummary(summary: TestRunSummary): void {
   }
 }
 
-function printUsage(): void {
+function printUsage(command?: string): void {
+  if (command === 'browser-e2e-bin') {
+    console.log(`
+Usage: browser-e2e <natural-language-case> [options]
+       browser-e2e run <url> <instruction> [--assert <assertion>] [--auto-generate] [--name <name>] [--tags <a,b>]
+       browser-e2e gen <url> <instruction> [--name <name>] [--tags <a,b>]
+
+Commands:
+  <natural-language-case>
+      Skill 入口：提取 URL、匹配已有 Playwright 测试，未命中时执行一次性 NL 流程。
+
+  run <url> <instruction>
+      执行 E2E skill workflow：优先代码用例，未命中时回退一次性执行。
+
+  gen <url> <instruction>
+      从自然语言流程生成可复用 Playwright 测试。
+`);
+    return;
+  }
+
   console.log(`
 Usage: browser-automated <command> [options]
+
+Note:
+  browser-automated 是历史兼容入口；新集成请优先使用 browser-opt / browser-e2e。
 
 Commands:
   run  <test-file.json>  [--bail] [--screenshot-on-failure]
@@ -391,14 +483,18 @@ Commands:
     e2e-gen <url> <instruction> [--name <name>] [--tags <a,b>]
       Generate a reusable Playwright test from natural language flow.
 
+    browser-opt <natural-language-flow> [--profile <name>] [--no-live-viewport] [--output-dir <dir>]
+      Execute an M1 natural-language browser flow with screenshots, JSON snapshots, and a PASS/FAIL report.
+
 Examples:
   browser-automated run tests/login.json --screenshot-on-failure
   browser-automated gen https://example.com "Fill the contact form and submit"
   browser-automated chat https://example.com "Click the sign-in button"
-  browser-automated e2e https://example.com "Search for pricing and open contact"
-  browser-automated e2e https://example.com "Login and verify dashboard"
-  browser-automated e2e https://example.com "Login and verify dashboard" --profile Work --no-live-viewport
-  browser-automated e2e-gen https://example.com "Search for pricing and open contact" --name "pricing contact flow"
+  browser-e2e run https://example.com "Search for pricing and open contact"
+  browser-e2e run https://example.com "Login and verify dashboard"
+  browser-e2e run https://example.com "Login and verify dashboard" --profile Work --no-live-viewport
+  browser-e2e gen https://example.com "Search for pricing and open contact" --name "pricing contact flow"
+  browser-opt "测试 https://example.com 的搜索功能。\\n\\n目标：\\n1. 打开首页。\\n2. 验证页面包含 Example"
 `);
 }
 
@@ -512,7 +608,48 @@ function printSkillExecutionResult(result: {
   }
 }
 
-main().catch((err) => {
-  console.error(err instanceof Error ? err.message : err);
-  process.exit(1);
-});
+function printBrowserOptResult(report: {
+  status: 'PASS' | 'FAIL';
+  reportJsonPath: string;
+  reportMarkdownPath: string;
+  logPath: string;
+  screenshots: string[];
+  logs: string[];
+  steps: Array<{ index: number; instruction: string; passed: boolean; error?: string }>;
+}): void {
+  console.log(`Status: ${report.status}`);
+  console.log(`Report JSON: ${report.reportJsonPath}`);
+  console.log(`Report Markdown: ${report.reportMarkdownPath}`);
+  console.log(`Log: ${report.logPath}`);
+  console.log('Evidence screenshots:');
+  for (const screenshot of report.screenshots) {
+    console.log(`  - ${screenshot}`);
+  }
+  console.log('Detailed log:');
+  for (const log of report.logs) {
+    console.log(`  ${log}`);
+  }
+  for (const step of report.steps) {
+    const mark = step.passed ? 'PASS' : 'FAIL';
+    console.log(`${mark} ${step.index}. ${step.instruction}`);
+    if (step.error) {
+      console.log(`  Error: ${step.error}`);
+    }
+  }
+}
+
+async function main(): Promise<void> {
+  const entrypoint = resolveMainEntrypoint();
+  if (entrypoint.command === 'browser-e2e-bin') {
+    await runBrowserE2ECli(entrypoint.args);
+    return;
+  }
+  await runCli(entrypoint.command, entrypoint.args);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error(err instanceof Error ? err.message : err);
+    process.exit(1);
+  });
+}

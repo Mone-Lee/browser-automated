@@ -12,7 +12,9 @@
     }
   },
   "bin": {
-    "browser-automated": "dist/cli.js"
+    "browser-opt": "dist/cli/browser-opt.js",
+    "browser-e2e": "dist/cli/browser-e2e.js",
+    "browser-automated": "dist/cli/index.js"
   },
   "scripts": {
     "build": "tsc",

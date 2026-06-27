@@ -1,5 +1,8 @@
+/**
+ * 执行结构化自然语言 TestCase，作为 browser-e2e 的兼容运行器和测试基础设施。
+ */
 import * as path from 'node:path';
-import { createBrowserAgent, type BrowserAgentFactory, type BrowserAgent } from './agent.js';
+import { createBrowserAgent, type BrowserAgentFactory, type BrowserAgent } from '../core/agent.js';
 import { executeDeterministicStep } from './deterministic.js';
 import type {
   TestCase,
@@ -7,32 +10,10 @@ import type {
   TestRunSummary,
   StepResult,
   RunnerOptions,
-} from './types.js';
+} from '../core/types.js';
 
 /**
- * Runs e2e test cases described in natural language using the `agent-browser` CLI.
- *
- * Each test case is executed in an isolated browser session. Steps are processed
- * sequentially — an optional `assertion` on each step is evaluated via the `chat`
- * interface so the LLM can confirm the expected state.
- *
- * @example
- * ```ts
- * import { NaturalLanguageTestRunner } from 'browser-automated';
- *
- * const runner = new NaturalLanguageTestRunner({ screenshotOnFailure: true });
- *
- * const result = await runner.runOne({
- *   name: 'Google search',
- *   url: 'https://www.google.com',
- *   steps: [
- *     { instruction: 'Search for "agent-browser"' },
- *     { instruction: 'Click the first search result', assertion: 'A page other than Google should have loaded' },
- *   ],
- * });
- *
- * console.log(result.passed ? 'PASS' : 'FAIL');
- * ```
+ * NaturalLanguageTestRunner 按顺序执行 TestCase 中的步骤，并在失败时按需截图。
  */
 export class NaturalLanguageTestRunner {
   private readonly options: Required<RunnerOptions>;
@@ -48,7 +29,7 @@ export class NaturalLanguageTestRunner {
   }
 
   /**
-   * Run a single test case and return its result.
+   * 执行单个 TestCase 并返回完整结果。
    */
   async runOne(testCase: TestCase): Promise<TestResult> {
     const agent = this.agentFactory({ timeout: testCase.timeout });
@@ -74,7 +55,7 @@ export class NaturalLanguageTestRunner {
             try {
               agent.screenshot(screenshotPath);
             } catch {
-              // Screenshot is best-effort — don't mask the original failure.
+              // 截图是尽力行为，不覆盖原始失败原因。
             }
           }
           break;
@@ -97,7 +78,7 @@ export class NaturalLanguageTestRunner {
   }
 
   /**
-   * Run multiple test cases and return a summary.
+   * 按顺序执行多个 TestCase，并汇总通过和失败数量。
    */
   async run(testCases: TestCase[]): Promise<TestRunSummary> {
     const startTime = Date.now();
@@ -133,7 +114,7 @@ export class NaturalLanguageTestRunner {
   }
 }
 
-/** Replace characters that are invalid in file names with underscores. */
+/** 将文件名中的非法字符替换为下划线。 */
 function sanitizeFilename(name: string): string {
   return name.replace(/[^a-z0-9_-]/gi, '_').toLowerCase();
 }

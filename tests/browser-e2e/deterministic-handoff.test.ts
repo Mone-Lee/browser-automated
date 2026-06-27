@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { executeDeterministicScenarioWithHandoff } from '../src/deterministic.js';
-import type { BrowserAgent } from '../src/agent.js';
+import { executeDeterministicScenarioWithHandoff } from '../../src/browser-e2e/deterministic.js';
+import type { BrowserAgent } from '../../src/core/agent.js';
 
 function buildAgent(clickImpl: () => string): BrowserAgent {
   return {

@@ -1,3 +1,6 @@
+/**
+ * 读写生成测试索引，供 browser-e2e 根据自然语言命中已有 Playwright 测试。
+ */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { GeneratedTestIndex, GeneratedTestMeta } from './types.js';

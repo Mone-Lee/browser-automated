@@ -1,3 +1,6 @@
+/**
+ * 封装 agent-browser CLI，提供两个对外产物共享的浏览器 session、截图和 handoff 能力。
+ */
 import { spawnSync, SpawnSyncReturns } from 'node:child_process';
 import { AgentOptions } from './types.js';
 
@@ -5,12 +8,32 @@ const DEFAULT_TIMEOUT = 30_000;
 const DEFAULT_DASHBOARD_PORT = 4848;
 const DEFAULT_STREAM_PORT = 9223;
 
+export interface AgentBrowserJsonResult {
+  raw: string;
+  data: unknown | null;
+  parseError?: string;
+}
+
+function parseJsonOutput(raw: string): AgentBrowserJsonResult {
+  try {
+    return {
+      raw,
+      data: JSON.parse(raw) as unknown,
+    };
+  } catch (err) {
+    return {
+      raw,
+      data: null,
+      parseError: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 /**
- * Wrapper around the `agent-browser` CLI.
+ * `agent-browser` CLI 的封装层。
  *
- * Each instance manages an isolated browser session identified by `sessionId`.
- * Commands are executed synchronously via `spawnSync` so the caller can await
- * the result without setting up async plumbing around the child process.
+ * 每个实例都维护一个由 `sessionId` 标识的独立浏览器会话，并通过 `spawnSync`
+ * 同步执行命令，让上层无需自行处理额外的子进程异步编排。
  */
 export class BrowserAgent {
   private static autoOpenedDashboardUrls: Set<string> = new Set();
@@ -29,7 +52,7 @@ export class BrowserAgent {
     this.liveViewportReady = false;
   }
 
-  /** Return the agent-browser session id used by this agent. */
+  /** 返回当前 agent 使用的 agent-browser 会话 id。 */
   getSessionId(): string {
     return this.sessionId;
   }
@@ -38,7 +61,7 @@ export class BrowserAgent {
     return this.headed ? `http://localhost:${DEFAULT_DASHBOARD_PORT}` : null;
   }
 
-  /** Low-level helper — runs a single agent-browser command and returns stdout. */
+  /** 底层命令执行入口，负责调用单条 agent-browser 命令并返回 stdout。 */
   private run(args: string[], options: { headed?: boolean } = {}): string {
     const useHeaded = options.headed ?? this.headed;
     const result: SpawnSyncReturns<string> = spawnSync(
@@ -142,12 +165,12 @@ export class BrowserAgent {
     try {
       snapshotText = this.snapshot().toLowerCase();
     } catch {
-      // Best effort only.
+      // 这里只做尽力探测，不影响主流程。
     }
     try {
       urlText = this.getUrl().toLowerCase();
     } catch {
-      // Best effort only.
+      // 这里只做尽力探测，不影响主流程。
     }
 
     const combined = `${snapshotText}\n${urlText}\n${extraText ?? ''}`.toLowerCase();
@@ -184,67 +207,77 @@ export class BrowserAgent {
     }
   }
 
-  /** Navigate to a URL. */
+  /** 打开指定 URL。 */
   open(url: string): string {
     return this.run(['open', url]);
   }
 
-  /** Click an element by ref (e.g. e5 from snapshot output). */
+  /** 通过 ref 点击元素，例如 snapshot 结果中的 e5。 */
   click(ref: string): string {
     return this.run(['click', `@${ref.replace(/^@/, '')}`]);
   }
 
-  /** Fill an input by ref (e.g. e10 from snapshot output). */
+  /** 通过 ref 填充输入框，例如 snapshot 结果中的 e10。 */
   fill(ref: string, value: string): string {
     return this.run(['fill', `@${ref.replace(/^@/, '')}`, value]);
   }
 
-  /** Wait for a URL pattern (example: /Home). */
+  /** 等待 URL 命中某个模式，例如 `/Home`。 */
   waitForUrl(pattern: string): string {
     return this.run(['wait', '--url', pattern]);
   }
 
-  /** Wait until text appears on page. */
+  /** 等待页面出现指定文本。 */
   waitForText(text: string): string {
     return this.run(['wait', '--text', text]);
   }
 
-  /** Wait for a fixed duration in milliseconds. */
+  /** 按毫秒固定等待一段时间。 */
   waitMs(ms: number): string {
     return this.run(['wait', String(ms)]);
   }
 
   /**
-   * Execute a natural language instruction using `agent-browser chat`.
-   * The CLI interprets the instruction and performs the corresponding browser actions.
+   * 通过 `agent-browser chat` 执行自然语言指令。
+   * CLI 会解释这段指令，并完成对应的浏览器动作。
    */
   chat(instruction: string): string {
     return this.run(['chat', instruction]);
   }
 
-  /** Capture the accessibility tree (interactive elements only). Useful for assertions. */
+  /** 在 agent-browser 支持时，以 JSON 输出执行自然语言指令。 */
+  chatJson(instruction: string): AgentBrowserJsonResult {
+    return parseJsonOutput(this.run(['chat', instruction, '--json']));
+  }
+
+  /** 获取只包含可交互元素的无障碍树快照，便于做断言。 */
   snapshot(): string {
     return this.run(['snapshot', '-i']);
   }
 
-  /** Take a screenshot. */
+  /** 获取机器可读的可交互无障碍树快照。 */
+  snapshotJson(): AgentBrowserJsonResult {
+    return parseJsonOutput(this.run(['snapshot', '-i', '--json']));
+  }
+
+  /** 截图。 */
   screenshot(path?: string): string {
     return this.run(path ? ['screenshot', path] : ['screenshot']);
   }
 
-  /** Get the current page title. */
+  /** 获取当前页面标题。 */
   getTitle(): string {
     return this.run(['get', 'title']).trim();
   }
 
-  /** Get the current page URL. */
+  /** 获取当前页面 URL。 */
   getUrl(): string {
     return this.run(['get', 'url']).trim();
   }
 
   /**
-   * Execute multiple commands in one process invocation (lower overhead).
-   * Each element of `commands` is an array of arguments, e.g. `['open', 'https://example.com']`.
+   * 在一次进程调用中串行执行多条命令，减少多次启动命令的开销。
+   * `commands` 中的每一项都是参数数组，例如 `['open', 'https://example.com']`。
    */
   batch(commands: string[][]): string {
     const result = spawnSync('agent-browser', ['--session', this.sessionId, 'batch', '--json'], {
@@ -264,7 +297,7 @@ export class BrowserAgent {
     return result.stdout ?? '';
   }
 
-  /** Hand off to a real headed browser for user-driven interaction. */
+  /** 将控制权交给真实的有头浏览器，便于用户手动接管。 */
   handoff(message: string): string {
     try {
       return this.run(['handoff', message]);
@@ -287,7 +320,7 @@ export class BrowserAgent {
     }
   }
 
-  /** Resume automation after user handoff. */
+  /** 在用户接管完成后恢复自动化。 */
   resume(): string {
     try {
       return this.run(['resume']);
@@ -300,24 +333,23 @@ export class BrowserAgent {
     }
   }
 
-  /** Close the browser session. Errors are swallowed so cleanup always succeeds. */
+  /** 关闭浏览器会话；这里吞掉异常，保证清理阶段尽量顺利完成。 */
   close(): void {
     try {
       this.run(['close']);
     } catch {
-      // Ignore errors during cleanup — the session may already be gone.
+      // 清理阶段忽略关闭失败，常见原因是会话已经提前结束。
     }
   }
 }
 
 /**
- * Factory function for creating a {@link BrowserAgent}.
- * This is the preferred way to create agents — it can be easily swapped in
- * tests without needing to mock the ES module class constructor.
+ * 创建 {@link BrowserAgent} 的工厂函数。
+ * 这里作为首选入口，方便测试时替换实现，而不需要直接 mock ES module 类构造函数。
  */
 export function createBrowserAgent(options?: AgentOptions): BrowserAgent {
   return new BrowserAgent(options);
 }
 
-/** Type alias for the agent factory so callers can type-check injected factories. */
+/** agent 工厂的类型别名，便于调用方约束注入的工厂签名。 */
 export type BrowserAgentFactory = typeof createBrowserAgent;

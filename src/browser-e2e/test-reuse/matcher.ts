@@ -1,3 +1,6 @@
+/**
+ * 根据关键词、标签和自然语言 hints 为已有生成测试计算匹配候选。
+ */
 import type { GeneratedTestMeta, MatchCandidate, MatchResult } from './types.js';
 
 const TOKEN_SEPARATOR = /[^a-z0-9]+/i;
@@ -58,7 +61,7 @@ export function scoreMatch(query: string, test: GeneratedTestMeta): number {
   const keywordScore = scoreKeyword(query, test);
   const semanticScore = scoreSemantic(query, test);
 
-  // Keywords are strong signal. Semantic overlap is used as fallback.
+  // 关键词是强信号，语义 token 重叠只作为兜底信号。
   return Math.min(1, keywordScore * 0.7 + semanticScore * 0.3);
 }
 

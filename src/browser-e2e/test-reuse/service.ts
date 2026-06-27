@@ -1,7 +1,10 @@
-import { BrowserAgent } from '../agent.js';
+/**
+ * browser-e2e 的测试复用编排层，串联测试匹配、一次性执行、handoff 和代码生成。
+ */
+import { BrowserAgent } from '../../core/agent.js';
 import { executeDeterministicScenarioWithHandoff } from '../deterministic.js';
 import { TestCaseGenerator } from '../generate.js';
-import type { TestResult } from '../types.js';
+import type { TestResult } from '../../core/types.js';
 import { loadGeneratedTestIndex, upsertGeneratedTestMeta } from './index-store.js';
 import { findMatches } from './matcher.js';
 import {
@@ -9,11 +12,11 @@ import {
   executePlaywrightSpec,
   writePlaywrightSpec,
 } from './playwright.js';
-import type { GeneratedCodeArtifact, MatchResult, SkillTriggerInput, SkillTriggerResult } from './types.js';
+import type { BrowserE2ETriggerInput, BrowserE2ETriggerResult, GeneratedCodeArtifact, MatchResult } from './types.js';
 
 const STRONG_MATCH_THRESHOLD = 0.5;
 
-async function runOneShot(input: SkillTriggerInput): Promise<{ execution: TestResult; handoff: { triggered: boolean; count: number } }> {
+async function runOneShot(input: BrowserE2ETriggerInput): Promise<{ execution: TestResult; handoff: { triggered: boolean; count: number } }> {
   const agent = new BrowserAgent({
     liveViewport: input.liveViewport ?? true,
     profile: input.profile,
@@ -85,7 +88,7 @@ async function runOneShot(input: SkillTriggerInput): Promise<{ execution: TestRe
   }
 }
 
-export class BrowserE2ESkillService {
+export class BrowserE2ETestReuseService {
   private readonly generator: TestCaseGenerator;
 
   constructor(generator: TestCaseGenerator = new TestCaseGenerator()) {
@@ -99,7 +102,7 @@ export class BrowserE2ESkillService {
   }
 
   /** 跳过匹配，直接执行一次性自然语言 e2e，通过后按 autoGenerate 决定是否生成代码。 */
-  async runOneShotInstruction(input: SkillTriggerInput): Promise<SkillTriggerResult> {
+  async runOneShotInstruction(input: BrowserE2ETriggerInput): Promise<BrowserE2ETriggerResult> {
     const match = this.checkForExistingTests(input.instruction);
     const { execution, handoff } = await runOneShot(input);
 
@@ -127,7 +130,7 @@ export class BrowserE2ESkillService {
         handoff,
         guidance:
           `✓ 测试通过！如需生成可复用的 Playwright 测试代码，请运行：\n` +
-          `browser-automated e2e-gen "${input.url}" "${input.instruction}" --name "${suggestedName}"${maybeTagArg}`,
+          `browser-e2e gen "${input.url}" "${input.instruction}" --name "${suggestedName}"${maybeTagArg}`,
       };
     }
 
@@ -151,7 +154,7 @@ export class BrowserE2ESkillService {
   }
 
   /** 完整流程：先匹配已有代码用例，命中则执行；未命中则走一次性 NL 流程。 */
-  async trigger(input: SkillTriggerInput): Promise<SkillTriggerResult> {
+  async trigger(input: BrowserE2ETriggerInput): Promise<BrowserE2ETriggerResult> {
     const match = this.checkForExistingTests(input.instruction);
 
     if (match.best && match.best.score >= STRONG_MATCH_THRESHOLD) {

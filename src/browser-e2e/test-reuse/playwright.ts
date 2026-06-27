@@ -1,8 +1,11 @@
+/**
+ * 负责 Playwright 测试代码生成、生成测试元数据构建，以及单个 spec 的执行。
+ */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import type { TestCase } from '../types.js';
+import type { TestCase } from '../../core/types.js';
 import type { CodeExecutionResult, GeneratedTestMeta } from './types.js';
 
 export interface GeneratePlaywrightSpecOptions {
@@ -224,12 +227,12 @@ test('${escapeForTs(testCase.name)}', async () => {
   try {
     runAgent(['--session', sessionId, 'open', '${escapeForTs(testCase.url)}']);
 
-${stepBlocks || "    // No generated steps.\n    expect(true).toBeTruthy();"}
+${stepBlocks || "    // 未生成可执行步骤，保留一个显式通过断言。\n    expect(true).toBeTruthy();"}
   } finally {
     try {
       runAgent(['--session', sessionId, 'close']);
     } catch {
-      // Ignore cleanup failures.
+      // 清理失败不覆盖测试主体结果。
     }
   }
 });

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { findMatches, scoreMatch } from '../src/skills/matcher.js';
-import type { GeneratedTestMeta } from '../src/skills/types.js';
+import { findMatches, scoreMatch } from '../../../src/browser-e2e/test-reuse/matcher.js';
+import type { GeneratedTestMeta } from '../../../src/browser-e2e/test-reuse/types.js';
 
 const tests: GeneratedTestMeta[] = [
   {
