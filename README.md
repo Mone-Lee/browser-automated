@@ -85,6 +85,8 @@ npx browser-e2e gen https://example.com "打开 pricing 页面并进入 contact 
 - `skills/browser-opt`：只执行一次性浏览器操作并产出证据，不生成测试。
 - `skills/browser-e2e`：优先匹配已有 Playwright 测试；未命中时执行一次性流程；通过后可生成测试代码。
 
+`/browser-opt` 在其他项目中的安装、软链调试、`npm link` 后的更新规则，以及当前项目的即时测试方式见 [docs/browser-opt-debug.md](/Users/lee/Documents/project/browser-automated/docs/browser-opt-debug.md)。
+
 ## 开发
 
 ```bash
