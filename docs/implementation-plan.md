@@ -6,8 +6,8 @@
 
 最终输出形态为：
 
-- `CLI`：提供稳定、可脚本化、可集成 CI 的浏览器自动化与测试生成能力。
-- `Skill`：作为自然语言触发入口，面向 Codex/Agent 使用，编排 CLI 完成网页操作、流程复用和 E2E 测试生成。
+- `browser-opt` CLI / Skill：提供一次性自然语言浏览器控制与证据报告。
+- `browser-e2e` CLI / Skill：提供 E2E 测试执行、复用和 Playwright 测试生成。
 
 项目拆解为 3 个核心目标：
 
@@ -69,7 +69,7 @@ LLM 做语义补全与断言生成
 
 当前仓库已经具备以下基础：
 
-- `browser-automated` CLI 入口。
+- `browser-opt` 与 `browser-e2e` CLI 入口，`browser-automated` 仅作为历史兼容入口。
 - `BrowserAgent` 对 `agent-browser` CLI 的 TypeScript 封装。
 - 自然语言测试运行器。
 - 测试用例生成器。
@@ -88,14 +88,13 @@ CLI 是可复用执行能力的主入口，负责参数解析、流程编排、�
 
 目标命令：
 
-- `browser-automated chat <url> <instruction>`：执行单条自然语言操作。
-- `browser-automated run <case-file>`：执行结构化自然语言测试用例。
-- `browser-automated e2e <url> <instruction>`：执行自然语言 E2E 流程。
-- `browser-automated e2e-gen <url> <instruction>`：生成 Playwright Test。
-- `browser-automated browser-e2e <natural-language-case>`：Skill 主入口，负责自然语言整段解析、匹配、执行、生成。
-- `browser-automated workflow save/run/list`：沉淀和复用 Workflow。
-- `browser-automated trace inspect/export`：查看和导出 Action Trace。
-- `browser-automated handoff/resume`：显式触发用户接管与恢复。
+- `browser-opt <natural-language-flow>`：执行一次性自然语言网页操作，并输出证据报告。
+- `browser-e2e <natural-language-case>`：Skill 主入口，负责自然语言整段解析、匹配、执行、生成。
+- `browser-e2e run <url> <instruction>`：执行自然语言 E2E 流程。
+- `browser-e2e gen <url> <instruction>`：生成 Playwright Test。
+- `browser-e2e workflow save/run/list`：沉淀和复用 Workflow。
+- `browser-e2e trace inspect/export`：查看和导出 Action Trace。
+- `browser-e2e handoff/resume`：显式触发用户接管与恢复。
 
 ### 5.2 Skill 层
 
@@ -179,7 +178,7 @@ Trace 产物用于：
   ↓
 Skill 判断为操作任务
   ↓
-调用 browser-automated chat/e2e
+调用 browser-opt 或 browser-e2e
   ↓
 Agent Browser 打开页面并执行
   ↓
@@ -415,12 +414,12 @@ LLM 生成测试语义、命名、断言
 
 | 模块 | 状态 | 当前产物 | 下一步 |
 | --- | --- | --- | --- |
-| CLI 基础 | In Progress | `src/cli.ts`、`package.json` bin | 收敛命令职责和结果格式 |
-| Agent Browser 封装 | In Progress | `src/agent.ts` | 补充 trace 与结构化错误 |
-| 自然语言执行 | In Progress | `src/runner.ts`、`src/deterministic.ts` | 统一 step result |
+| CLI 基础 | In Progress | `src/cli/`、`package.json` bin | 收敛命令职责和结果格式 |
+| Agent Browser 封装 | In Progress | `src/core/agent.ts` | 补充 trace 与结构化错误 |
+| 自然语言执行 | In Progress | `src/browser-opt/runner.ts`、`src/browser-e2e/deterministic.ts` | 统一 step result |
 | Skill 入口 | In Progress | `skills/browser-e2e/SKILL.md` | 加入 workflow 复用说明 |
-| Playwright 生成 | In Progress | `src/skills/playwright.ts`、`tests/generated/` | 从 trace 生成更稳定 locator 和断言 |
-| 测试索引 | In Progress | `src/skills/index-store.ts`、`matcher.ts` | 扩展到 workflow index |
+| Playwright 生成 | In Progress | `src/browser-e2e/test-reuse/playwright.ts`、`tests/generated/` | 从 trace 生成更稳定 locator 和断言 |
+| 测试索引 | In Progress | `src/browser-e2e/test-reuse/index-store.ts`、`matcher.ts` | 扩展到 workflow index |
 | Workflow 复用 | Planned | 暂无独立模块 | 设计 schema 与 CLI |
 | Action Trace | Planned | 部分运行结果 | 落盘 schema 和导出命令 |
 | Handoff | In Progress | Skill/README 描述与部分测试 | 完整 session state 保存恢复 |

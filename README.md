@@ -1,174 +1,115 @@
 # browser-automated
 
-浏览器自动化，支持 e2e 测试、e2e 测试用例生成、浏览器自动化操作。  
-底层使用 [agent-browser](https://agent-browser.dev)（Vercel）对浏览器进行操作，支持通过**自然语言**描述来执行 e2e 自动化测试。
+自然语言浏览器自动化工具集。项目内部复用 `agent-browser`、确定性执行器、Playwright 生成器和 handoff 编排；对外只收敛为两个产物：
 
-## 功能特性
+- `browser-opt`：浏览器控制，适合一次性任务、即时操作、带证据报告的自然语言执行。
+- `browser-e2e`：E2E 测试执行与生成，适合复用已有测试、沉淀 Playwright 代码。
 
-- 🗣️ **自然语言 e2e 测试**：用自然语言描述测试步骤，由 `agent-browser chat` 驱动执行
-- 📝 **测试用例生成**：根据自然语言描述自动生成结构化测试用例（JSON 格式）
-- 🧠 **Skills 风格编排**：自然语言触发时优先命中已有 Playwright 用例，未命中时回退到一次性 NL 测试
-- 🧩 **代码沉淀闭环**：一次性 NL 测试通过后可自动生成并注册 Playwright 测试代码
-- 🤖 **BrowserAgent**：封装 `agent-browser` CLI 的 TypeScript 接口，支持 snapshot、screenshot、batch 等操作
-- 🙋 **User Handoff**：遇到验证码/OAuth/MFA 或连续失败时，自动切到真实浏览器由用户接管，完成后恢复自动化
-- 🔧 **CLI 工具**：`browser-automated run / gen / chat / e2e / e2e-gen`
+旧的 `browser-automated` CLI 仍保留为兼容入口，但新文档和新集成应优先使用 `browser-opt` / `browser-e2e`。
+
+## 能力划分
+
+| 能力 | 对外入口 | 主要代码 | 主要产物 |
+| --- | --- | --- | --- |
+| 自然语言执行网页操作 | `browser-opt` | `src/browser-opt/`、`src/core/agent.ts` | `artifacts/browser-opt/<run>/report.{json,md}`、截图、snapshot |
+| 沉淀可复用 Skill / Workflow | `skills/browser-opt`、`skills/browser-e2e` | `skills/*`、`src/browser-e2e/test-reuse/*` | Skill 文档、生成测试索引，后续扩展 workflow |
+| 生成 E2E 测试代码 | `browser-e2e gen`、`browser-e2e run --auto-generate` | `src/browser-e2e/generate.ts`、`src/browser-e2e/test-reuse/playwright.ts` | `tests/generated/*.spec.ts`、`tests/generated/index.json` |
+| handoff 机制 | `browser-e2e` 执行流程内置 | `src/cli/`、`src/browser-e2e/deterministic.ts`、`src/core/agent.ts` | 同一 session 的用户接管与恢复记录 |
+
+更详细的结构说明见 [docs/project-structure.md](/Users/lee/Documents/project/browser-automated/docs/project-structure.md)。
 
 ## 安装
 
 ```bash
 npm install
-# 安装 agent-browser 所需的 Chrome（首次使用）
 npx agent-browser install
 ```
 
 ## 快速开始
 
-### 运行测试用例文件
+一次性自然语言浏览器操作：
 
 ```bash
-npx browser-automated run examples/google-search.json
-```
-
-### 生成测试用例
-
-```bash
-npx browser-automated gen https://example.com "填写联系表单并提交"
-```
-
-### 执行单条自然语言指令
-
-```bash
-npx browser-automated chat https://example.com "点击登录按钮"
-```
-
-### Skills 模式执行 e2e（优先代码用例）
-
-```bash
-npx browser-automated e2e https://example.com "打开 pricing 页面并进入 contact 页面" --assert "Contact 页面应可见"
-npx browser-automated e2e https://example.com "登录并验证仪表盘" --live-viewport
-```
-
-一次性 `browser-e2e` / `e2e` 流程默认会使用可见浏览器窗口执行，便于你实时观察自动化过程。`--live-viewport` 现在可以视为显式声明该行为。
-
-### 复杂场景接管（User Handoff）
-
-当一次性自动化无法继续时（例如 CAPTCHA、OAuth 授权、多因素登录），`browser-e2e`/`e2e` 流程会在连续失败 3 次后自动触发接管。
-
-流程如下：
-
-1. 优先执行 `handoff`；如果当前 `agent-browser` 版本不支持该命令，则自动回退到同一 session 的可见浏览器窗口。
-2. CLI 提示你手动完成复杂步骤。
-3. 你输入 `done`（或 `ok`/`继续`/`完成`）后，自动执行 `resume`；如果该命令不可用，则直接沿用当前 session 继续跑后续动作。
-
-在动作失败提示时，也可手动输入 `handoff` 立即接管，不必等到 3 次失败。
-
-推荐自然语言用例模板：
-
-```text
-测试网站 <url> 的<功能>。
+npx browser-opt "测试 https://example.com 的搜索功能。
 
 目标：
-1. <步骤1>
-2. <步骤2>
-3. <步骤3>
-4. <验证步骤>
+1. 打开首页。
+2. 验证页面包含 \"Example\"。"
 ```
 
-登录示例：
+执行后会输出 PASS/FAIL、报告路径、日志路径和截图路径。
 
-```text
-测试网站 https://example.com/login 的登录功能。
+E2E skill 流程：
+
+```bash
+npx browser-e2e "测试网站 https://example.com/login 的登录功能。
 
 目标：
 1. 打开登录页面。
-2. 输入用户名 "testuser" 和密码 "password123"。
+2. 输入用户名 \"testuser\" 和密码 \"password123\"。
 3. 点击登录按钮。
-4. 验证是否跳转到仪表盘页面（URL 包含 /dashboard 或看到欢迎文字）。
+4. 验证 URL 包含 /dashboard。"
 ```
 
-### 从自然语言直接生成 Playwright 测试代码
+直接执行 E2E workflow：
 
 ```bash
-npx browser-automated e2e-gen https://example.com "打开 pricing 页面并进入 contact 页面" --name "pricing contact flow" --tags marketing,navigation
+npx browser-e2e run https://example.com "打开 pricing 页面并进入 contact 页面" --assert "Contact 页面应可见"
+```
+
+从自然语言生成 Playwright 测试：
+
+```bash
+npx browser-e2e gen https://example.com "打开 pricing 页面并进入 contact 页面" --name "pricing contact flow" --tags marketing,navigation
 ```
 
 生成产物：
 
-- `tests/generated/*.spec.ts`（Playwright 测试代码）
-- `tests/generated/index.json`（测试元数据索引，供下次自然语言触发优先命中）
+- `tests/generated/*.spec.ts`
+- `tests/generated/index.json`
 
-## 测试用例格式
+## Handoff
 
-测试用例为 JSON 文件，支持数组（多个用例）或单个对象：
+`browser-e2e` 在遇到 CAPTCHA、OAuth、MFA 或连续失败 3 次后会触发用户接管：
 
-```json
-[
-  {
-    "name": "Google 搜索",
-    "url": "https://www.google.com",
-    "steps": [
-      {
-        "instruction": "在搜索框中输入 \"TypeScript\" 并按 Enter"
-      },
-      {
-        "instruction": "点击第一条搜索结果",
-        "assertion": "应跳转到非 Google 页面"
-      }
-    ]
-  }
-]
-```
+1. 打开同一 session 的可见浏览器。
+2. 提示用户完成验证码、授权或 MFA。
+3. 用户输入 `done`、`ok`、`继续` 或 `完成` 后恢复自动化。
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `name` | string | 测试用例名称 |
-| `url` | string | 测试起始 URL |
-| `steps[].instruction` | string | 自然语言操作指令 |
-| `steps[].assertion` | string（可选）| 执行步骤后的断言描述 |
-| `timeout` | number（可选）| 超时毫秒数，默认 60000 |
+`--profile <name>` 可复用指定 Chrome profile，`--no-live-viewport` 可关闭可见浏览器。
 
-## 编程接口
+## Skill 入口
 
-```typescript
-import { NaturalLanguageTestRunner, TestCaseGenerator, BrowserAgent } from 'browser-automated';
+项目内置两个 Skill：
 
-// 运行自然语言测试
-const runner = new NaturalLanguageTestRunner({ screenshotOnFailure: true });
-const result = await runner.runOne({
-  name: '登录流程',
-  url: 'https://example.com/login',
-  steps: [
-    { instruction: '输入用户名 "admin"' },
-    { instruction: '输入密码 "password123"' },
-    { instruction: '点击登录按钮', assertion: '页面应跳转到 Dashboard' },
-  ],
-});
-console.log(result.passed ? 'PASS ✓' : 'FAIL ✗');
-
-// 生成测试用例
-const generator = new TestCaseGenerator();
-const testCase = await generator.generate(
-  'https://example.com',
-  '填写并提交注册表单',
-);
-console.log(JSON.stringify(testCase, null, 2));
-
-// 直接使用 BrowserAgent
-const agent = new BrowserAgent();
-agent.open('https://example.com');
-const snapshot = agent.snapshot();
-agent.chat('点击右上角的用户头像');
-agent.close();
-```
+- `skills/browser-opt`：只执行一次性浏览器操作并产出证据，不生成测试。
+- `skills/browser-e2e`：优先匹配已有 Playwright 测试；未命中时执行一次性流程；通过后可生成测试代码。
 
 ## 开发
 
 ```bash
-npm run build      # 编译 TypeScript
-npm test           # 运行单元测试
-npm run typecheck  # 类型检查
+npm run build
+npm test
+npm run typecheck
 ```
 
-## Copilot 开发环境
+## 目录速览
 
-`.github/workflows/copilot-setup-steps.yml` 会在 Copilot Coding Agent 开始工作前自动安装 Node.js 依赖和 Chrome 浏览器，无需手动配置。
+```text
+src/
+  cli/                    # browser-opt、browser-e2e 和兼容入口
+  core/                   # agent-browser 封装与共享类型
+  browser-opt/            # browser-opt 执行闭环与报告生成
+  browser-e2e/            # E2E 执行、生成、索引、匹配与 handoff
+
+skills/
+  browser-opt/            # 一次性浏览器控制 Skill
+  browser-e2e/            # E2E 执行与生成 Skill
+
+tests/
+  core/                   # BrowserAgent 等共享底层能力测试
+  browser-opt/            # browser-opt 执行闭环测试
+  browser-e2e/            # E2E 执行、生成、复用链路测试
+  cli/                    # CLI 参数和用户侧行为测试
+  generated/              # 生成的 Playwright 测试和索引
+```

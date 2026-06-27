@@ -1,0 +1,64 @@
+{
+  "name": "browser-opt",
+  "version": "0.1.0",
+  "description": "M1 natural-language browser execution loop with agent-browser evidence reports",
+  "triggers": [
+    "browser-opt",
+    "natural language browser flow",
+    "execute browser flow",
+    "自然语言执行浏览器流程"
+  ],
+  "inputs": {
+    "type": "object",
+    "required": [
+      "flow"
+    ],
+    "properties": {
+      "flow": {
+        "type": "string",
+        "description": "Full natural-language browser flow including a URL and expected steps"
+      },
+      "profile": {
+        "type": "string",
+        "description": "Chrome profile name or path, default Default"
+      },
+      "liveViewport": {
+        "type": "boolean",
+        "description": "Whether to show a visible live browser viewport, default true"
+      },
+      "outputDir": {
+        "type": "string",
+        "description": "Optional directory for evidence reports"
+      }
+    }
+  },
+  "outputs": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "enum": [
+          "PASS",
+          "FAIL"
+        ]
+      },
+      "reportJsonPath": {
+        "type": "string"
+      },
+      "reportMarkdownPath": {
+        "type": "string"
+      },
+      "screenshotPaths": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "logPaths": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

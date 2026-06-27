@@ -70,14 +70,14 @@ Use `/browser-e2e` prefix followed by the full natural language description to i
 The agent translates this into:
 
 ```bash
-browser-automated browser-e2e "<full natural language text>"
+browser-e2e "<full natural language text>"
 ```
 
 ## CLI commands
 
-- `browser-automated browser-e2e <自然语言测试描述>` — 主入口，提取 URL、检查已有用例、交互式决策
-- `browser-automated e2e <url> <instruction> [--assert <assertion>] [--auto-generate] [--name <name>] [--tags <a,b>]`
-- `browser-automated e2e-gen <url> <instruction> [--name <name>] [--tags <a,b>]`
+- `browser-e2e <自然语言测试描述>` — 主入口，提取 URL、检查已有用例、交互式决策
+- `browser-e2e run <url> <instruction> [--assert <assertion>] [--auto-generate] [--name <name>] [--tags <a,b>]`
+- `browser-e2e gen <url> <instruction> [--name <name>] [--tags <a,b>]`
 
 Deterministic action patterns recognized from natural language steps:
 
