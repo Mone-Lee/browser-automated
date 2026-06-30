@@ -8,9 +8,11 @@ export {
   extractBrowserOptUrl,
   splitBrowserOptSteps,
 } from './runner.js';
+
 export type {
+  BrowserOptStatus,
   BrowserOptReport,
   BrowserOptRunResult,
   BrowserOptRunnerOptions,
   BrowserOptStepResult,
-} from './runner.js';
+} from './type.js';

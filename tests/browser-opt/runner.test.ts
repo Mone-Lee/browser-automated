@@ -60,6 +60,8 @@ function buildAgent(options: {
       }
       return filePath ?? '/tmp/screenshot.png';
     }),
+    fill: vi.fn(() => 'filled'),
+    click: vi.fn(() => 'clicked'),
     chatJson: vi.fn(options.chat ?? (() => ({ raw: '{"success":true}', data: { success: true } }))),
     close: vi.fn(() => {}),
   } as unknown as BrowserAgent;
@@ -109,16 +111,20 @@ describe('BrowserOptRunner', () => {
 
     const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。', {
       outputDir,
-      liveViewport: false,
       profile: 'Work',
     });
 
     expect(result.passed).toBe(true);
-    expect(capturedOptions[0]).toEqual(expect.objectContaining({ profile: 'Work', liveViewport: false }));
+    expect(capturedOptions[0]).toEqual(expect.objectContaining({
+      profile: 'Work',
+      liveViewport: true,
+      openLiveDashboard: false,
+    }));
     expect((agent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('https://example.com');
     expect((agent.snapshotJson as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(3);
     expect((agent.screenshot as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(3);
     expect((agent.chatJson as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect((agent.close as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect(fs.existsSync(result.report.reportJsonPath)).toBe(true);
     expect(fs.existsSync(result.report.reportMarkdownPath)).toBe(true);
     expect(result.report.status).toBe('PASS');
@@ -129,7 +135,49 @@ describe('BrowserOptRunner', () => {
     ]);
   });
 
-  it('executes natural-language action steps with agent-browser chat JSON', async () => {
+  it('closes the browser session only when requested', async () => {
+    const outputDir = makeTempDir();
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open snapshot', { e1: { role: 'heading', name: 'Example' } }),
+        snapshotJson('before snapshot', { e1: { role: 'heading', name: 'Example' } }),
+        snapshotJson('after snapshot with Example', { e1: { role: 'heading', name: 'Example' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。', {
+      outputDir,
+      closeOnComplete: true,
+    });
+
+    expect(result.passed).toBe(true);
+    expect((agent.close as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+  });
+
+  it('executes field input steps with deterministic fill commands by default', async () => {
+    const outputDir = makeTempDir();
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before visit'),
+        snapshotJson('after visit'),
+        snapshotJson('before input', { e2: { role: 'textbox', name: '直播间名称' } }),
+        snapshotJson('after 安选公开直播自动化', { e2: { role: 'textbox', name: '直播间名称' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('执行创建安选公开直播流程：\n1. 访问https://test-live.ifengqun.com/live/create?time=2\n2. 直播间名称输入“安选公开直播自动化”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('https://test-live.ifengqun.com/live/create?time=2');
+    expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e2', '安选公开直播自动化');
+    expect((agent.chatJson as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(result.report.steps[1].logs.join('\n')).toContain('deterministic agent-browser command');
+  });
+
+  it('executes natural-language action steps with agent-browser chat JSON when requested', async () => {
     const outputDir = makeTempDir();
     const agent = buildAgent({
       snapshots: [
@@ -140,7 +188,10 @@ describe('BrowserOptRunner', () => {
     });
     const runner = new BrowserOptRunner(makeFactory(agent));
 
-    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 点击搜索按钮。', { outputDir });
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 点击搜索按钮。', {
+      outputDir,
+      useAgentChat: true,
+    });
 
     expect(result.passed).toBe(true);
     expect((agent.chatJson as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('点击搜索按钮。');
@@ -188,7 +239,10 @@ describe('BrowserOptRunner', () => {
     });
     const runner = new BrowserOptRunner(makeFactory(agent));
 
-    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 点击第一个结果。', { outputDir });
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 点击第一个结果。', {
+      outputDir,
+      useAgentChat: true,
+    });
 
     expect(result.passed).toBe(true);
     expect(chat).toHaveBeenCalledTimes(2);

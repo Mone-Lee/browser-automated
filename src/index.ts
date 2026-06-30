@@ -25,6 +25,7 @@ export type {
   RunnerOptions,
 } from './core/index.js';
 export type {
+  BrowserOptStatus,
   BrowserOptReport,
   BrowserOptRunResult,
   BrowserOptRunnerOptions,

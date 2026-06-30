@@ -1,0 +1,74 @@
+/**
+ * browser-opt 类型定义文件，集中承载对外报告结构以及 runner 内部共用的
+ * 快照、动作和执行选项类型，避免执行逻辑与类型声明交错在同一个文件里。
+ */
+import type { AgentBrowserJsonResult } from '../core/agent.js';
+
+export type BrowserOptStatus = 'PASS' | 'FAIL';
+
+export interface BrowserOptStepResult {
+  index: number;
+  instruction: string;
+  passed: boolean;
+  attempts: number;
+  beforeSnapshotPath: string;
+  afterSnapshotPath: string;
+  beforeScreenshotPath: string;
+  afterScreenshotPath: string;
+  actionOutput?: string;
+  verification?: string;
+  error?: string;
+  logs: string[];
+}
+
+export interface BrowserOptReport {
+  status: BrowserOptStatus;
+  url: string;
+  flow: string;
+  startedAt: string;
+  endedAt: string;
+  durationMs: number;
+  outputDir: string;
+  reportJsonPath: string;
+  reportMarkdownPath: string;
+  logPath: string;
+  screenshots: string[];
+  logs: string[];
+  steps: BrowserOptStepResult[];
+}
+
+export interface BrowserOptRunResult {
+  passed: boolean;
+  report: BrowserOptReport;
+}
+
+export interface BrowserOptRunnerOptions {
+  profile?: string;
+  liveViewport?: boolean;
+  closeOnComplete?: boolean;
+  outputDir?: string;
+  timeout?: number;
+  useAgentChat?: boolean;
+}
+
+export interface BrowserOptStepExecutionOptions {
+  useAgentChat: boolean;
+}
+
+export interface SnapshotEvidence {
+  output: AgentBrowserJsonResult;
+  text: string;
+  nodeCount: number;
+}
+
+export interface SnapshotNode {
+  ref: string;
+  role: string;
+  label: string;
+}
+
+export type DeterministicAction =
+  | { type: 'open'; url: string }
+  | { type: 'fill'; field: string; value: string }
+  | { type: 'click'; target: string }
+  | { type: 'assert-text'; text: string };
