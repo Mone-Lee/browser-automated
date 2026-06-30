@@ -41,6 +41,7 @@ export class BrowserAgent {
   private readonly sessionId: string;
   private readonly timeout: number;
   private readonly headed: boolean;
+  private readonly openLiveDashboard: boolean;
   private readonly profile: string | null;
   private liveViewportReady: boolean;
 
@@ -48,6 +49,7 @@ export class BrowserAgent {
     this.sessionId = options.sessionId ?? `session-${Date.now()}`;
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT;
     this.headed = options.headed ?? options.liveViewport ?? false;
+    this.openLiveDashboard = options.openLiveDashboard ?? true;
     this.profile = options.profile ?? null;
     this.liveViewportReady = false;
   }
@@ -87,7 +89,7 @@ export class BrowserAgent {
       );
     }
 
-    if (useHeaded && args[0] === 'open') {
+    if (useHeaded && this.openLiveDashboard && args[0] === 'open') {
       this.ensureLiveViewport();
     }
 

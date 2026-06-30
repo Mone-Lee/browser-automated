@@ -85,6 +85,8 @@ export interface AgentOptions {
   headed?: boolean;
   /** 可见浏览器窗口的语义化别名。 */
   liveViewport?: boolean;
+  /** 是否自动打开 agent-browser 的实时截图面板。 */
+  openLiveDashboard?: boolean;
   /** agent-browser 复用的 Chrome profile 名称或路径。 */
   profile?: string;
 }

@@ -96,6 +96,28 @@ describe('BrowserAgent', () => {
         expect.objectContaining({ encoding: 'utf-8' }),
       );
     });
+
+    it('keeps headed browser visible without opening dashboard when disabled', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult(''));
+
+      const agent = new BrowserAgent({
+        sessionId: 'test-session',
+        liveViewport: true,
+        openLiveDashboard: false,
+      });
+      agent.open('https://example.com');
+
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'agent-browser',
+        ['--session', 'test-session', '--headed', 'open', 'https://example.com'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+      expect(mockSpawnSync).not.toHaveBeenCalledWith(
+        'agent-browser',
+        ['dashboard', 'start', '--port', '4848'],
+        expect.anything(),
+      );
+    });
   });
 
   describe('chat()', () => {
