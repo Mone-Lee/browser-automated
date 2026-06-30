@@ -82,7 +82,7 @@ node dist/cli/browser-opt.js "测试 https://example.com。
 2. 验证页面包含 \"Example\"。" --output-dir ./artifacts/browser-opt/smoke
 ```
 
-这个命令会真正调用 `agent-browser` CLI，执行浏览器打开、snapshot、截图和报告生成。`--no-live-viewport` 只表示关闭可见实时视窗，不表示跳过 `agent-browser`。
+这个命令会真正调用 `agent-browser` CLI，执行浏览器打开、snapshot、确定性动作、截图和报告生成。`browser-opt` 默认显示并保留真实浏览器窗口，便于观察操作流程和执行后的页面状态，但不会打开 agent-browser 的 `http://localhost:4848` 截图面板；如需无头执行，可额外传 `--no-live-viewport`。如需旧的 `agent-browser chat` 路径，可额外传 `--agent-chat`，但这可能需要 `AI_GATEWAY_API_KEY`。
 
 执行后检查产物：
 

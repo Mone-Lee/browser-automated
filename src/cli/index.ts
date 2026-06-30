@@ -321,31 +321,28 @@ async function cmdBrowserE2E(args: string[]): Promise<void> {
 async function cmdBrowserOpt(args: string[]): Promise<void> {
   const parsed = parseCliArgs(args);
   const text = parsed.positionals.join(' ').trim();
-  const liveViewport = resolveLiveViewport(parsed.flags);
+  const liveViewport = resolveBrowserOptLiveViewport(parsed.flags);
   const profile = resolveProfile(parsed.flags);
   const outputDir = getStringFlag(parsed.flags, 'output-dir');
+  const useAgentChat = getBooleanFlag(parsed.flags, 'agent-chat');
 
   if (!text) {
     console.log(`使用方式：
-  browser-opt <自然语言流程> [--profile <name>] [--no-live-viewport] [--output-dir <dir>]
+  browser-opt <自然语言流程> [--profile <name>] [--no-live-viewport] [--output-dir <dir>] [--agent-chat]
 
 ${browserOptTemplate()}`);
     process.exit(1);
   }
-
-  if (liveViewport) {
-    console.log(`Live viewport: ${LIVE_VIEWPORT_DASHBOARD_URL}`);
-  }
-  console.log(`Profile: ${profile}`);
 
   const runner = new BrowserOptRunner();
   const result = await runner.run(text, {
     profile,
     liveViewport,
     outputDir,
+    useAgentChat,
   });
 
-  printBrowserOptResult(result.report);
+  printBrowserOptResult(result);
   process.exit(result.passed ? 0 : 1);
 }
 
@@ -548,6 +545,16 @@ function resolveLiveViewport(flags: Record<string, string | boolean>): boolean {
   return true;
 }
 
+function resolveBrowserOptLiveViewport(flags: Record<string, string | boolean>): boolean {
+  if (getBooleanFlag(flags, 'no-live-viewport')) {
+    return false;
+  }
+  if (getBooleanFlag(flags, 'live-viewport')) {
+    return true;
+  }
+  return true;
+}
+
 function parseCsv(value?: string): string[] {
   if (!value) {
     return [];
@@ -608,15 +615,24 @@ function printSkillExecutionResult(result: {
   }
 }
 
-function printBrowserOptResult(report: {
-  status: 'PASS' | 'FAIL';
-  reportJsonPath: string;
-  reportMarkdownPath: string;
-  logPath: string;
-  screenshots: string[];
-  logs: string[];
-  steps: Array<{ index: number; instruction: string; passed: boolean; error?: string }>;
+function printBrowserOptResult(result: {
+  passed: boolean;
+  report: {
+    status: 'PASS' | 'FAIL';
+    reportJsonPath: string;
+    reportMarkdownPath: string;
+    logPath: string;
+    screenshots: string[];
+    logs: string[];
+    steps: Array<{ index: number; instruction: string; passed: boolean; error?: string }>;
+  };
 }): void {
+  if (result.passed) {
+    console.log('执行成功');
+    return;
+  }
+
+  const report = result.report;
   console.log(`Status: ${report.status}`);
   console.log(`Report JSON: ${report.reportJsonPath}`);
   console.log(`Report Markdown: ${report.reportMarkdownPath}`);

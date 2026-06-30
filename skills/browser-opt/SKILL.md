@@ -1,12 +1,14 @@
 ---
 name: browser-opt
-description: Execute natural-language browser flows with agent-browser and produce PASS/FAIL evidence reports.
-summary: Run M1 natural-language browser execution loops with screenshots, JSON snapshots, retries, and detailed logs.
+description: Execute natural-language browser flows with agent-browser and produce simplified PASS/FAIL results.
+summary: Run deterministic browser execution loops with screenshots, JSON snapshots, retries, and concise success output.
 ---
 
 # browser-opt skill
 
-This skill is the M1 natural-language execution entrypoint. It is intentionally separate from `browser-e2e`: `browser-opt` runs the flow now and reports evidence; it does not match generated tests or create Playwright code.
+This skill is the deterministic browser execution entrypoint. It is intentionally separate from `browser-e2e`: `browser-opt` runs the flow now and reports evidence; it does not match generated tests or create Playwright code.
+
+By default, the calling AI is responsible for understanding the page from `snapshot --json`; `agent-browser` only executes deterministic commands such as `open`, `fill @ref`, `click @ref`, screenshots, and waits. Do not use `agent-browser chat` unless the user explicitly asks for the legacy chat mode or passes `--agent-chat`.
 
 ## First-use reminder
 
@@ -41,13 +43,14 @@ After the reminder, execute the user's supplied flow without asking for confirma
 
 Every execution must follow these rules:
 
-- Strictly run an `open -> snapshot --json -> act -> re-snapshot` loop.
+- Strictly run an `open -> snapshot --json -> deterministic act -> re-snapshot` loop.
 - Take a screenshot for every step.
 - Use text matching or element existence checks for verification points.
 - Retry with a fresh snapshot when an action fails or an element reference is stale.
 - Use `--json` output when parsing elements.
 - After every step, reason about the current page state and the next action.
 - If a reference becomes invalid, take a fresh snapshot before retrying.
+- Prefer deterministic commands and element refs over natural-language `chat`.
 - Final report must include `PASS` or `FAIL`, evidence screenshot paths, and detailed logs.
 
 ## Trigger
@@ -77,7 +80,10 @@ Optional runtime flags:
 browser-opt "<flow>" --profile Default
 browser-opt "<flow>" --no-live-viewport
 browser-opt "<flow>" --output-dir ./artifacts/browser-opt
+browser-opt "<flow>" --agent-chat
 ```
+
+`browser-opt` shows and keeps the real headed browser by default so the user can watch the operation and inspect the final page state, but it must not open the agent-browser dashboard at `http://localhost:4848`. Use `--no-live-viewport` only when the user explicitly wants headless execution. `--agent-chat` is a legacy compatibility mode. It may require `AI_GATEWAY_API_KEY`; avoid it when the caller can inspect snapshots and produce deterministic actions.
 
 ## Output
 
@@ -90,4 +96,7 @@ Expected artifacts:
 - `00-open.png`, `01-before.png`, `01-after.png`, and later step screenshots.
 - `*.snapshot.json` files captured through `agent-browser snapshot -i --json`.
 
-The assistant response should summarize only the status, report paths, screenshot paths, and any failing step.
+The assistant response must be concise:
+
+- If the run succeeds, reply only with `执行成功`.
+- If the run fails, summarize the failure status, report paths, screenshot paths, and failing step.

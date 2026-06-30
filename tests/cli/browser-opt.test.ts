@@ -21,13 +21,14 @@ function makeTempDir(): string {
   return dir;
 }
 
-function runCli(args: string[]) {
+function runCli(args: string[], env: Record<string, string> = {}) {
   return spawnSync('node', ['--import', 'tsx', 'src/cli/index.ts', ...args], {
     cwd: path.resolve(import.meta.dirname, '../..'),
     encoding: 'utf-8',
     env: {
       ...process.env,
       PATH: `${makeTempAgentBrowserBin()}${path.delimiter}${process.env.PATH ?? ''}`,
+      ...env,
     },
   });
 }
@@ -40,6 +41,7 @@ function makeTempAgentBrowserBin(): string {
     `#!/usr/bin/env node
 const fs = require('node:fs');
 const args = process.argv.slice(2);
+if (process.env.AGENT_BROWSER_LOG) fs.appendFileSync(process.env.AGENT_BROWSER_LOG, args.join(' ') + '\\n');
 const commandIndex = args.findIndex((arg) => !arg.startsWith('--') && arg !== 'Default' && arg !== 'session-' && !/^session-/.test(arg));
 const command = args[commandIndex];
 if (command === 'open') {
@@ -50,6 +52,10 @@ if (command === 'open') {
   const target = args[args.length - 1];
   if (target && target.endsWith('.png')) fs.writeFileSync(target, 'png');
   process.stdout.write(target || '/tmp/screenshot.png');
+} else if (command === 'fill') {
+  process.stdout.write('filled');
+} else if (command === 'click') {
+  process.stdout.write('clicked');
 } else if (command === 'chat') {
   process.stdout.write(JSON.stringify({ success: true, text: 'Done' }));
 } else if (command === 'close') {
@@ -76,17 +82,39 @@ describe('browser-opt CLI', () => {
 
   it('uses --output-dir and exits zero for a passing flow', () => {
     const outputDir = makeTempDir();
+    const commandLog = path.join(makeTempDir(), 'agent-browser.log');
     const result = runCli([
       'browser-opt',
       '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。',
-      '--no-live-viewport',
+      '--output-dir',
+      outputDir,
+    ], { AGENT_BROWSER_LOG: commandLog });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe('执行成功');
+    expect(result.stdout).not.toContain('Status: PASS');
+    expect(result.stdout).not.toContain(outputDir);
+    const commands = fs.readFileSync(commandLog, 'utf-8');
+    expect(commands).toContain('--headed open https://example.com');
+    expect(commands).not.toContain('dashboard start');
+    expect(commands).not.toContain('close');
+    expect(fs.readdirSync(outputDir).some((entry) => fs.existsSync(path.join(outputDir, entry, 'report.json')))).toBe(true);
+  });
+
+  it('prints report details when a flow fails', () => {
+    const outputDir = makeTempDir();
+    const result = runCli([
+      'browser-opt',
+      '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Missing"。',
       '--output-dir',
       outputDir,
     ]);
 
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain('Status: PASS');
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('Status: FAIL');
+    expect(result.stdout).toContain('Report JSON:');
     expect(result.stdout).toContain(outputDir);
-    expect(fs.readdirSync(outputDir).some((entry) => fs.existsSync(path.join(outputDir, entry, 'report.json')))).toBe(true);
+    expect(result.stdout).toContain('FAIL 1.');
+    expect(result.stdout).not.toContain('执行成功');
   });
 });

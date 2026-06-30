@@ -2,7 +2,7 @@
 
 自然语言浏览器自动化工具集。项目内部复用 `agent-browser`、确定性执行器、Playwright 生成器和 handoff 编排；对外只收敛为两个产物：
 
-- `browser-opt`：浏览器控制，适合一次性任务、即时操作、带证据报告的自然语言执行。
+- `browser-opt`：浏览器控制，适合一次性任务、即时操作、带证据报告的自然语言入口和确定性执行。
 - `browser-e2e`：E2E 测试执行与生成，适合复用已有测试、沉淀 Playwright 代码。
 
 旧的 `browser-automated` CLI 仍保留为兼容入口，但新文档和新集成应优先使用 `browser-opt` / `browser-e2e`。
@@ -11,7 +11,7 @@
 
 | 能力 | 对外入口 | 主要代码 | 主要产物 |
 | --- | --- | --- | --- |
-| 自然语言执行网页操作 | `browser-opt` | `src/browser-opt/`、`src/core/agent.ts` | `artifacts/browser-opt/<run>/report.{json,md}`、截图、snapshot |
+| 自然语言入口、确定性执行网页操作 | `browser-opt` | `src/browser-opt/`、`src/core/agent.ts` | `artifacts/browser-opt/<run>/report.{json,md}`、截图、snapshot |
 | 沉淀可复用 Skill / Workflow | `skills/browser-opt`、`skills/browser-e2e` | `skills/*`、`src/browser-e2e/test-reuse/*` | Skill 文档、生成测试索引，后续扩展 workflow |
 | 生成 E2E 测试代码 | `browser-e2e gen`、`browser-e2e run --auto-generate` | `src/browser-e2e/generate.ts`、`src/browser-e2e/test-reuse/playwright.ts` | `tests/generated/*.spec.ts`、`tests/generated/index.json` |
 | handoff 机制 | `browser-e2e` 执行流程内置 | `src/cli/`、`src/browser-e2e/deterministic.ts`、`src/core/agent.ts` | 同一 session 的用户接管与恢复记录 |
@@ -37,7 +37,7 @@ npx browser-opt "测试 https://example.com 的搜索功能。
 2. 验证页面包含 \"Example\"。"
 ```
 
-执行后会输出 PASS/FAIL、报告路径、日志路径和截图路径。
+执行成功时只输出 `执行成功`；执行失败时才输出报告路径、日志路径、截图路径和失败步骤。默认模式会把常见访问、输入、点击和验证步骤转成确定性 `agent-browser` 命令；只有显式传 `--agent-chat` 时才使用旧的 `agent-browser chat` 兼容模式。`browser-opt` 默认显示并保留真实浏览器，便于观察操作流程和执行后的页面状态，但不会打开 agent-browser 的 `http://localhost:4848` 截图面板。
 
 E2E skill 流程：
 

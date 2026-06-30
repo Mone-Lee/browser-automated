@@ -1,7 +1,7 @@
 {
   "name": "browser-opt",
   "version": "0.1.0",
-  "description": "M1 natural-language browser execution loop with agent-browser evidence reports",
+  "description": "M1 natural-language browser execution loop with simplified PASS/FAIL results",
   "triggers": [
     "browser-opt",
     "natural language browser flow",
@@ -24,7 +24,7 @@
       },
       "liveViewport": {
         "type": "boolean",
-        "description": "Whether to show a visible live browser viewport, default true"
+        "description": "Whether to show the real headed browser, default true; this does not open the agent-browser dashboard"
       },
       "outputDir": {
         "type": "string",
