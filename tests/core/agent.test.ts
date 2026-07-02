@@ -233,6 +233,22 @@ describe('BrowserAgent', () => {
     });
   });
 
+  describe('upload()', () => {
+    it('calls agent-browser upload with a ref and local files', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult('uploaded'));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session' });
+      const output = agent.upload('e3', ['/tmp/image.png']);
+
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'agent-browser',
+        ['--session', 'test-session', 'upload', '@e3', '/tmp/image.png'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+      expect(output).toBe('uploaded');
+    });
+  });
+
   describe('batch()', () => {
     it('pipes commands as JSON to agent-browser batch --json', () => {
       mockSpawnSync.mockReturnValue(makeOkResult('[]'));

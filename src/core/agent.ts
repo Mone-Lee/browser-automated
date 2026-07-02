@@ -224,6 +224,16 @@ export class BrowserAgent {
     return this.run(['fill', `@${ref.replace(/^@/, '')}`, value]);
   }
 
+  /** 通过 ref 或选择器把本地文件上传到文件选择控件。 */
+  upload(refOrSelector: string, filePaths: string[]): string {
+    const target = /^@/.test(refOrSelector)
+      ? refOrSelector
+      : /^[a-z]\d+$/i.test(refOrSelector)
+        ? `@${refOrSelector}`
+        : refOrSelector;
+    return this.run(['upload', target, ...filePaths]);
+  }
+
   /** 等待 URL 命中某个模式，例如 `/Home`。 */
   waitForUrl(pattern: string): string {
     return this.run(['wait', '--url', pattern]);

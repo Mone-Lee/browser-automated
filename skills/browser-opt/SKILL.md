@@ -10,6 +10,34 @@ This skill is the deterministic browser execution entrypoint. It is intentionall
 
 By default, the calling AI is responsible for understanding the page from `snapshot --json`; `agent-browser` only executes deterministic commands such as `open`, `fill @ref`, `click @ref`, screenshots, and waits. Do not use `agent-browser chat` unless the user explicitly asks for the legacy chat mode or passes `--agent-chat`.
 
+## Image upload examples
+
+For test environments, describe upload steps as automatic URL uploads. `browser-opt` downloads the remote image into the run evidence directory and calls `agent-browser upload` with the local file path:
+
+```text
+/browser-opt 测试 https://example.com/live/create 的直播间创建流程。
+
+目标：
+1. 打开页面。
+2. 在“直播间名称”输入“自动化测试直播间”。
+3. 自动上传“直播间分享封面”，图片来源 URL 为“https://stantic.ifengqun.com/front/fq-ecmiddle-sys/upload/82243689cae75e27b3867a5cbdd4292b.png”。
+4. 自动上传“直播间封面”，图片来源 URL 为“https://stantic.ifengqun.com/front/fq-ecmiddle-sys/upload/82243689cae75e27b3867a5cbdd4292b.png”。
+5. 验证页面显示封面预览或上传成功状态。
+```
+
+For production environments, describe upload steps as manual handoff so the operator can choose real local images through the system file picker:
+
+```text
+/browser-opt 操作 https://example.com/live/create 的直播间创建流程。
+
+目标：
+1. 打开页面。
+2. 在“直播间名称”输入“正式直播间名称”。
+3. handoff 给操作人员：请手动选择“直播间分享封面”的本地真实图片，并在裁剪/确认完成后恢复自动化。
+4. handoff 给操作人员：请手动选择“直播间封面”的本地真实图片，并在裁剪/确认完成后恢复自动化。
+5. 验证页面显示封面预览或上传成功状态。
+```
+
 ## First-use reminder
 
 For the first `browser-opt` invocation in each conversation, remind the user of the universal test template and the natural-language example before running the CLI:

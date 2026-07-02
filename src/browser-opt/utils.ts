@@ -12,7 +12,7 @@ import type {
 } from './type.js';
 
 const DEFAULT_OUTPUT_ROOT = path.join(process.cwd(), 'artifacts', 'browser-opt');
-const URL_RE = /https?:\/\/[^\s。，、，)）]+/i;
+const URL_RE = /https?:\/\/[^\s。，、，)）"'“”]+/i;
 const QUOTED_VALUE_RE = /["“]([^"”]+)["”]/;
 
 /** 从自然语言描述中提取第一个 URL，作为 browser-opt 的起始页面。 */
@@ -52,6 +52,18 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
     return { type: 'open', url };
   }
 
+  if (/handoff|人工|手动|操作人员/.test(normalized) && /上传|选择.*(?:图片|文件|封面)/.test(normalized)) {
+    return { type: 'handoff', message: normalized };
+  }
+
+  if (url && /上传|upload/.test(normalized)) {
+    return {
+      type: 'upload',
+      field: parseUploadFieldName(normalized) ?? '文件',
+      source: url,
+    };
+  }
+
   const quoted = normalized.match(QUOTED_VALUE_RE)?.[1]?.trim();
   if (quoted && /输入|填写|填入|type|fill/i.test(normalized)) {
     return {
@@ -73,6 +85,22 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
   const expectedText = parseExpectedText(normalized);
   if (expectedText && isVerificationStep(normalized)) {
     return { type: 'assert-text', text: expectedText };
+  }
+
+  return null;
+}
+
+/** 从上传步骤中提取字段名，优先识别引号中的控件名称。 */
+function parseUploadFieldName(instruction: string): string | null {
+  const quoted = instruction.match(/[“"]([^”"]+)[”"]/)?.[1]?.trim();
+  if (quoted && !URL_RE.test(quoted)) {
+    return quoted;
+  }
+
+  const beforeSource = instruction.split(URL_RE)[0]?.trim() ?? instruction;
+  const object = beforeSource.match(/(?:自动)?上传\s*([^，,。；\n]+?)(?:，|,|图片来源|文件来源|来源|$)/)?.[1]?.trim();
+  if (object) {
+    return object.replace(/^["“]|["”]$/g, '').replace(/[：:]$/g, '').trim();
   }
 
   return null;
@@ -102,6 +130,18 @@ export function findTextboxRef(snapshot: SnapshotEvidence, field: string): strin
 export function findClickableRef(snapshot: SnapshotEvidence, target: string): string | null {
   const nodes = getSnapshotNodes(snapshot).filter((node) => !isTextboxRole(node.role));
   return findBestNodeRef(nodes, target) ?? nodes[0]?.ref ?? null;
+}
+
+/** 查找上传控件，先匹配文件输入，再回退到同名上传按钮。 */
+export function findUploadRef(snapshot: SnapshotEvidence, field: string): string | null {
+  const nodes = getSnapshotNodes(snapshot);
+  const fileInputs = nodes.filter((node) => isFileInputRole(node.role, node.label));
+  const fileInputRef = findBestNodeRef(fileInputs, field) ?? fileInputs[0]?.ref;
+  if (fileInputRef) {
+    return fileInputRef;
+  }
+
+  return findBestNodeRef(nodes.filter((node) => !isTextboxRole(node.role)), field);
 }
 
 /** 在候选节点集合里做一次精确优先、字符兜底的模糊匹配。 */
@@ -183,6 +223,11 @@ function isTextboxRole(role: string): boolean {
   return /textbox|input|searchbox|combobox|textarea/i.test(role);
 }
 
+/** 识别 snapshot 中可能代表文件上传的输入控件。 */
+function isFileInputRole(role: string, label: string): boolean {
+  return /file/i.test(role) || /上传|upload|选择文件|choose\s+file/i.test(label);
+}
+
 /** 归一化待匹配文本，减少空格和中英文标点对匹配结果的干扰。 */
 function normalizeMatchText(value: string): string {
   return value.toLowerCase().replace(/\s+/g, '').replace(/[：:，,。；"'“”]/g, '').trim();
@@ -213,7 +258,7 @@ function findFirstStringProperty(value: unknown, keys: string[]): string | null 
 
 /** 判断一条自然语言步骤是否主要承担验证职责。 */
 export function isVerificationStep(instruction: string): boolean {
-  return /验证|断言|检查|确认|verify|assert|expect|should|包含|存在|至少\s*\d+/i.test(instruction);
+  return /验证|断言|检查|verify|assert|expect|should|包含|存在|至少\s*\d+/i.test(instruction);
 }
 
 /** 对步骤执行后的页面状态做验证，生成可直接写入报告的结果说明。 */
@@ -263,14 +308,17 @@ function parseAtLeastCount(instruction: string): number | null {
 
 /** 从自然语言断言中提取预期文本，兼容引号和“包含/显示”类说法。 */
 function parseExpectedText(instruction: string): string | null {
+  const contains = instruction.match(/(?:包含|看到|显示|contains?|include[s]?)\s*([^。；\n]+)/i);
+  if (contains?.[1]) {
+    return contains[1]
+      .replace(/至少\s*\d+.*$/, '')
+      .replace(/^["“]|["”]$/g, '')
+      .trim();
+  }
+
   const quoted = instruction.match(/["“]([^"”]+)["”]/);
   if (quoted?.[1]) {
     return quoted[1].trim();
-  }
-
-  const contains = instruction.match(/(?:包含|看到|显示|contains?|include[s]?)\s*([^。；\n]+)/i);
-  if (contains?.[1]) {
-    return contains[1].replace(/至少\s*\d+.*$/, '').trim();
   }
 
   return null;

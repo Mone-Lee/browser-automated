@@ -17,6 +17,7 @@ import type { AgentOptions } from '../../src/core/types.js';
 const tempDirs: string[] = [];
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -62,6 +63,8 @@ function buildAgent(options: {
     }),
     fill: vi.fn(() => 'filled'),
     click: vi.fn(() => 'clicked'),
+    upload: vi.fn(() => 'uploaded'),
+    handoff: vi.fn(() => 'HANDOFF: waiting'),
     chatJson: vi.fn(options.chat ?? (() => ({ raw: '{"success":true}', data: { success: true } }))),
     close: vi.fn(() => {}),
   } as unknown as BrowserAgent;
@@ -177,6 +180,54 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps[1].logs.join('\n')).toContain('deterministic agent-browser command');
   });
 
+  it('downloads URL images and uploads them with deterministic upload commands', async () => {
+    const outputDir = makeTempDir();
+    const fetchMock = vi.fn(async () => new Response('image-bytes', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before upload', { e3: { role: 'file', name: '直播间分享封面' } }),
+        snapshotJson('after upload with 封面预览', { e3: { role: 'file', name: '直播间分享封面' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/live/create。\n\n目标：\n1. 自动上传“直播间分享封面”，图片来源 URL 为“https://stantic.ifengqun.com/front/fq-ecmiddle-sys/upload/82243689cae75e27b3867a5cbdd4292b.png”。',
+      { outputDir },
+    );
+
+    const uploadCalls = (agent.upload as ReturnType<typeof vi.fn>).mock.calls;
+    const uploadedPath = uploadCalls[0]?.[1]?.[0] as string;
+    expect(result.passed).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith('https://stantic.ifengqun.com/front/fq-ecmiddle-sys/upload/82243689cae75e27b3867a5cbdd4292b.png');
+    expect(uploadCalls[0]?.[0]).toBe('e3');
+    expect(uploadedPath).toContain(path.join('uploads', '82243689cae75e27b3867a5cbdd4292b.png'));
+    expect(fs.readFileSync(uploadedPath, 'utf-8')).toBe('image-bytes');
+    expect(result.report.steps[0].actionOutput).toContain('upload @e3');
+  });
+
+  it('hands off manual production upload steps to the operator', async () => {
+    const outputDir = makeTempDir();
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before manual upload'),
+        snapshotJson('after manual upload with preview'),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('操作 https://example.com/live/create。\n\n目标：\n1. handoff 给操作人员：请手动选择“直播间分享封面”的本地真实图片，并在裁剪/确认完成后恢复自动化。', {
+      outputDir,
+    });
+
+    expect(result.passed).toBe(true);
+    expect((agent.handoff as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('handoff 给操作人员：请手动选择“直播间分享封面”的本地真实图片，并在裁剪/确认完成后恢复自动化。');
+    expect(result.report.steps[0].actionOutput).toContain('handoff');
+  });
+
   it('executes natural-language action steps with agent-browser chat JSON when requested', async () => {
     const outputDir = makeTempDir();
     const agent = buildAgent({
@@ -196,6 +247,26 @@ describe('BrowserOptRunner', () => {
     expect(result.passed).toBe(true);
     expect((agent.chatJson as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('点击搜索按钮。');
     expect(result.report.steps[0].logs.join('\n')).toContain('agent-browser chat --json');
+  });
+
+  it('keeps verification active for compound action and assertion steps', async () => {
+    const outputDir = makeTempDir();
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before click', { e1: { role: 'button', name: '提交' } }),
+        snapshotJson('after click without success text', { e1: { role: 'button', name: '提交' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 点击“提交”并验证页面包含“成功”。', {
+      outputDir,
+    });
+
+    expect(result.passed).toBe(false);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e1');
+    expect(result.report.steps[0].error).toContain('页面未包含文本：成功');
   });
 
   it('verifies at least N elements using snapshot refs', async () => {

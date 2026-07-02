@@ -20,6 +20,7 @@ import {
   extractBrowserOptUrl,
   findClickableRef,
   findTextboxRef,
+  findUploadRef,
   isVerificationStep,
   parseDeterministicAction,
   renderMarkdownReport,
@@ -166,11 +167,12 @@ async function executeStep(
   let attempts = 0;
   let actionOutput = '';
   let actionError: string | undefined;
+  const parsedAction = parseDeterministicAction(instruction);
 
   while (attempts < 2) {
     attempts += 1;
     try {
-      if (!isVerificationStep(instruction)) {
+      if (!isVerificationStep(instruction) || (parsedAction && parsedAction.type !== 'assert-text')) {
         if (options.useAgentChat) {
           const chat = agent.chatJson(instruction);
           actionOutput = summarizeJsonResult(chat);
@@ -179,7 +181,7 @@ async function executeStep(
             logs.push(`attempt ${attempts}: chat JSON parse fallback: ${chat.parseError}`);
           }
         } else {
-          const deterministic = executeDeterministicInstruction(agent, instruction, actionSnapshot);
+          const deterministic = await executeDeterministicInstruction(agent, instruction, actionSnapshot, outputDir);
           if (!deterministic) {
             throw new Error('无法将步骤解析为确定性命令。请把步骤写成访问 URL、字段输入“值”、点击“按钮文案”或验证页面包含“文本”；如需旧模式可加 --agent-chat。');
           }
@@ -224,6 +226,24 @@ async function executeStep(
     };
   }
 
+  if (parsedAction && parsedAction.type !== 'assert-text' && !isVerificationStep(instruction)) {
+    const verification = '动作步骤已完成，已重新 snapshot。';
+    logs.push(`verification passed: ${verification}`);
+    return {
+      index,
+      instruction,
+      passed: true,
+      attempts,
+      beforeSnapshotPath,
+      afterSnapshotPath,
+      beforeScreenshotPath,
+      afterScreenshotPath,
+      actionOutput,
+      verification,
+      logs,
+    };
+  }
+
   const verification = verifyStep(instruction, afterSnapshot);
   if (!verification.passed) {
     logs.push(`verification failed: ${verification.message}`);
@@ -248,11 +268,12 @@ async function executeStep(
 }
 
 /** 将自然语言动作直接映射到确定性命令，避免默认依赖 agent-browser chat。 */
-function executeDeterministicInstruction(
+async function executeDeterministicInstruction(
   agent: BrowserAgent,
   instruction: string,
   snapshot: SnapshotEvidence,
-): string | null {
+  outputDir: string,
+): Promise<string | null> {
   const action = parseDeterministicAction(instruction);
   if (!action) {
     return null;
@@ -280,7 +301,44 @@ function executeDeterministicInstruction(
     return `click @${ref}\n${output}`.trim();
   }
 
+  if (action.type === 'upload') {
+    const ref = findUploadRef(snapshot, action.field);
+    if (!ref) {
+      throw new Error(`无法找到上传控件：${action.field}`);
+    }
+    const filePath = await prepareUploadFile(action.source, outputDir);
+    const output = agent.upload(ref, [filePath]);
+    return `upload @${ref} ${filePath}\n${output}`.trim();
+  }
+
+  if (action.type === 'handoff') {
+    const output = agent.handoff(action.message);
+    return `handoff ${JSON.stringify(action.message)}\n${output}`.trim();
+  }
+
   return null;
+}
+
+/** 将远程上传素材下载到本次证据目录，让 agent-browser upload 使用稳定的本地路径。 */
+async function prepareUploadFile(source: string, outputDir: string): Promise<string> {
+  if (!/^https?:\/\//i.test(source)) {
+    return path.resolve(source);
+  }
+
+  const uploadsDir = path.join(outputDir, 'uploads');
+  fs.mkdirSync(uploadsDir, { recursive: true });
+
+  const url = new URL(source);
+  const basename = path.basename(url.pathname) || 'upload-file';
+  const filePath = path.join(uploadsDir, basename);
+  const response = await fetch(source);
+  if (!response.ok) {
+    throw new Error(`下载上传文件失败：${response.status} ${response.statusText}`);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  fs.writeFileSync(filePath, buffer);
+  return filePath;
 }
 
 /** 采集一份机器可读快照并同时落盘，供动作匹配与报告复用。 */
