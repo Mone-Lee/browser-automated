@@ -54,6 +54,7 @@ function buildAgent(options: {
 
   return {
     open: vi.fn(() => 'opened'),
+    getSessionId: vi.fn(() => 'browser-opt-test-session'),
     snapshotJson: vi.fn(() => snapshots.shift() ?? snapshotJson('fallback')),
     screenshot: vi.fn((filePath?: string) => {
       if (filePath) {
@@ -65,6 +66,8 @@ function buildAgent(options: {
     click: vi.fn(() => 'clicked'),
     upload: vi.fn(() => 'uploaded'),
     handoff: vi.fn(() => 'HANDOFF: waiting'),
+    resume: vi.fn(() => 'RESUME_FALLBACK: continuing session browser-opt-test-session without an explicit resume command.'),
+    stateSave: vi.fn(() => 'state saved'),
     chatJson: vi.fn(options.chat ?? (() => ({ raw: '{"success":true}', data: { success: true } }))),
     waitMs: vi.fn(() => 'waited'),
     close: vi.fn(() => {}),
@@ -174,7 +177,7 @@ describe('BrowserOptRunner', () => {
     const capturedOptions: AgentOptions[] = [];
     const runner = new BrowserOptRunner(makeFactory(agent, capturedOptions));
 
-    const result = await runner.run('执行创建安选公开直播流程：\n1. 访问https://test-live.ifengqun.com/live/create?time=2\n2. 直播间名称输入“安选公开直播自动化”', { outputDir });
+    const result = await runner.run('执行创建安选公开直播流程：\n1. 访问https://test-live.ifengqun.com/live/create?time=2\n2. 直播间名称输入‘安选公开直播自动化’', { outputDir });
 
     expect(result.passed).toBe(true);
     expect(capturedOptions[0]).toEqual(expect.objectContaining({
@@ -232,7 +235,67 @@ describe('BrowserOptRunner', () => {
 
     expect(result.passed).toBe(false);
     expect((agent.fill as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
-    expect(result.report.steps[1].error).toContain('当前页面仍在登录页');
+    expect(result.report.handoffTriggered).toBe(true);
+    expect((agent.handoff as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect(result.report.logs.join('\n')).toContain('初始化打开目标页面后检测到登录页跳转');
+  });
+
+  it('resumes after login handoff when the caller provides a resume hook', async () => {
+    const outputDir = makeTempDir();
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('登录远方的梦想直播平台', { e1: { role: 'textbox', name: '请输入手机号' } }),
+        snapshotJson('创建直播页', { e2: { role: 'textbox', name: '直播间名称' } }),
+        snapshotJson('before visit after resume', { e2: { role: 'textbox', name: '直播间名称' } }),
+        snapshotJson('after visit after resume', { e2: { role: 'textbox', name: '直播间名称' } }),
+        snapshotJson('before input', { e2: { role: 'textbox', name: '直播间名称' } }),
+        snapshotJson('after 安选公开直播自动化', { e2: { role: 'textbox', name: '直播间名称' } }),
+      ],
+    });
+    const onHandoffRequired = vi.fn(async () => {});
+    const waitForUserResume = vi.fn(async () => {});
+    const onHandoffCompleted = vi.fn(async () => {});
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('执行创建安选公开直播流程：\n1. 访问 https://test-live.ifengqun.com/live/create?time=2\n2. 直播间名称输入“安选公开直播自动化”', {
+      outputDir,
+      handoff: {
+        onHandoffRequired,
+        waitForUserResume,
+        onHandoffCompleted,
+      },
+    });
+
+    expect(result.passed).toBe(true);
+    expect((agent.handoff as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((agent.resume as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect(waitForUserResume).toHaveBeenCalledTimes(1);
+    expect(onHandoffRequired).toHaveBeenCalledTimes(1);
+    expect(onHandoffCompleted).toHaveBeenCalledTimes(1);
+    expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e2', '安选公开直播自动化');
+  });
+
+  it('keeps ordinary action failures as normal errors instead of handoff', async () => {
+    const outputDir = makeTempDir();
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open', { e1: { role: 'heading', name: '创建直播' } }),
+        snapshotJson('before input', { e1: { role: 'heading', name: '创建直播' } }),
+        snapshotJson('after input', { e1: { role: 'heading', name: '创建直播' } }),
+        snapshotJson('retry input', { e1: { role: 'heading', name: '创建直播' } }),
+        snapshotJson('after retry', { e1: { role: 'heading', name: '创建直播' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('执行创建安选公开直播流程：https://example.com/live/create\n1. 直播间名称输入“安选公开直播自动化”', {
+      outputDir,
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.report.handoffTriggered).not.toBe(true);
+    expect((agent.handoff as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(result.report.steps[0].error).toContain('无法找到输入框：直播间名称');
   });
 
   it('downloads URL images and uploads them with deterministic upload commands', async () => {

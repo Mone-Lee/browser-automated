@@ -10,6 +10,7 @@ export interface BrowserOptStepResult {
   index: number;
   instruction: string;
   passed: boolean;
+  handoffTriggered?: boolean;
   attempts: number;
   beforeSnapshotPath: string;
   afterSnapshotPath: string;
@@ -23,6 +24,7 @@ export interface BrowserOptStepResult {
 
 export interface BrowserOptReport {
   status: BrowserOptStatus;
+  handoffTriggered?: boolean;
   url: string;
   flow: string;
   startedAt: string;
@@ -44,6 +46,7 @@ export interface BrowserOptRunResult {
 
 export interface BrowserOptRunnerOptions {
   profile?: string;
+  sessionName?: string;
   statePath?: string;
   reuseRunningBrowser?: boolean;
   liveViewport?: boolean;
@@ -51,11 +54,27 @@ export interface BrowserOptRunnerOptions {
   outputDir?: string;
   timeout?: number;
   useAgentChat?: boolean;
+  authStateSavePath?: string;
+  handoff?: BrowserOptHandoffOptions;
 }
 
 export interface BrowserOptStepExecutionOptions {
   useAgentChat: boolean;
   alreadyOpenedUrl?: string;
+  authStateSavePath?: string;
+  handoff?: BrowserOptHandoffOptions;
+}
+
+export interface BrowserOptHandoffContext {
+  message: string;
+  output: string;
+  sessionId?: string;
+}
+
+export interface BrowserOptHandoffOptions {
+  onHandoffRequired?: (context: BrowserOptHandoffContext) => Promise<void> | void;
+  waitForUserResume?: (context: BrowserOptHandoffContext) => Promise<void> | void;
+  onHandoffCompleted?: (context: BrowserOptHandoffContext) => Promise<void> | void;
 }
 
 export interface SnapshotEvidence {

@@ -60,7 +60,11 @@ const command = args[commandIndex];
 if (command === 'open') {
   process.stdout.write('opened');
 } else if (command === 'snapshot') {
-  process.stdout.write(JSON.stringify({ success: true, data: { snapshot: 'Example page', refs: { e1: { role: 'heading', name: 'Example' } } } }));
+  const snapshotText = process.env.AGENT_BROWSER_SNAPSHOT_TEXT || 'Example page';
+  const snapshotRefs = process.env.AGENT_BROWSER_LOGIN_SNAPSHOT
+    ? { e1: { role: 'textbox', name: '请输入手机号' } }
+    : { e1: { role: 'heading', name: 'Example' } };
+  process.stdout.write(JSON.stringify({ success: true, data: { snapshot: snapshotText, refs: snapshotRefs } }));
 } else if (command === 'screenshot') {
   const target = args[args.length - 1];
   if (target && target.endsWith('.png')) fs.writeFileSync(target, 'png');
@@ -69,6 +73,8 @@ if (command === 'open') {
   process.stdout.write('filled');
 } else if (command === 'click') {
   process.stdout.write('clicked');
+} else if (command === 'handoff') {
+  process.stdout.write('handoff requested');
 } else if (command === 'chat') {
   process.stdout.write(JSON.stringify({ success: true, text: 'Done' }));
 } else if (command === 'close') {
@@ -156,5 +162,41 @@ describe('browser-opt CLI', () => {
     expect(result.stdout).toContain(outputDir);
     expect(result.stdout).toContain('FAIL 1.');
     expect(result.stdout).not.toContain('执行成功');
+  });
+
+  it('keeps ordinary deterministic action failures on exit code 1', () => {
+    const outputDir = makeTempDir();
+    const result = runCli([
+      'browser-opt',
+      '执行创建安选公开直播流程：https://example.com/live/create\n1. 直播间名称输入“安选公开直播自动化”',
+      '--output-dir',
+      outputDir,
+    ], {
+      AGENT_BROWSER_SNAPSHOT_TEXT: '创建直播页',
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('Status: FAIL');
+    expect(result.stdout).not.toContain('Handoff: 已触发');
+  });
+
+  it('exits with handoff code when the target page redirects to login', () => {
+    const outputDir = makeTempDir();
+    const commandLog = path.join(makeTempDir(), 'agent-browser.log');
+    const result = runCli([
+      'browser-opt',
+      '执行创建安选公开直播流程：\n1. 访问 https://example.com/live/create\n2. 直播间名称输入“安选公开直播自动化”',
+      '--output-dir',
+      outputDir,
+    ], {
+      AGENT_BROWSER_LOG: commandLog,
+      AGENT_BROWSER_LOGIN_SNAPSHOT: '1',
+      AGENT_BROWSER_SNAPSHOT_TEXT: '登录远方的梦想直播平台',
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('Handoff: 已触发，请先在浏览器中完成登录后再重试。');
+    expect(result.stdout).toContain('初始化打开目标页面后检测到登录页跳转');
+    expect(fs.readFileSync(commandLog, 'utf-8')).toContain('handoff');
   });
 });

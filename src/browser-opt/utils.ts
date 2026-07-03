@@ -13,7 +13,7 @@ import type {
 
 const DEFAULT_OUTPUT_ROOT = path.join(process.cwd(), 'artifacts', 'browser-opt');
 const URL_RE = /https?:\/\/[^\s。，、，)）"'“”]+/i;
-const QUOTED_VALUE_RE = /["“]([^"”]+)["”]/;
+const QUOTED_VALUE_RE = /["“‘']([^"”’']+)["”’']/;
 
 /** 从自然语言描述中提取第一个 URL，作为 browser-opt 的起始页面。 */
 export function extractBrowserOptUrl(text: string): string | null {

@@ -86,6 +86,9 @@ export function printBrowserOptResult(result: BrowserOptRunResult): void {
 
   const { report } = result;
   console.log(`Status: ${report.status}`);
+  if (report.handoffTriggered) {
+    console.log('Handoff: 已触发，请先在浏览器中完成登录后再重试。');
+  }
   console.log(`Report JSON: ${report.reportJsonPath}`);
   console.log(`Report Markdown: ${report.reportMarkdownPath}`);
   console.log(`Log: ${report.logPath}`);
@@ -100,6 +103,9 @@ export function printBrowserOptResult(result: BrowserOptRunResult): void {
   for (const step of report.steps) {
     const mark = step.passed ? 'PASS' : 'FAIL';
     console.log(`${mark} ${step.index}. ${step.instruction}`);
+    if (step.handoffTriggered && step.verification) {
+      console.log(`  Handoff: ${step.verification}`);
+    }
     if (step.error) {
       console.log(`  Error: ${step.error}`);
     }

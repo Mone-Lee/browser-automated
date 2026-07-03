@@ -13,21 +13,16 @@ import {
 import { BROWSER_OPT_USAGE } from '../utils/constants.js';
 import { printBrowserOptResult } from '../utils/output.js';
 
+const BROWSER_OPT_EXIT_CODE_FAILURE = 1;
+const BROWSER_OPT_EXIT_CODE_HANDOFF = 2;
 const DEFAULT_BROWSER_PROFILE = 'Default';
 
 export async function cmdBrowserOpt(args: string[]): Promise<void> {
   const parsed = parseCliArgs(args);
   const text = parsed.positionals.join(' ').trim();
-  const liveViewport = resolveLiveViewport(parsed.flags);
-  const statePath = resolveStatePath(parsed.flags);
-  const reuseRunningBrowser = resolveReuseRunningBrowser(parsed.flags, statePath);
-  const profile = resolveProfile(parsed.flags);
-  const outputDir = getStringFlag(parsed.flags, 'output-dir');
-  const useAgentChat = getBooleanFlag(parsed.flags, 'agent-chat');
-
   if (!text) {
     console.log(`${BROWSER_OPT_USAGE}\n\n${browserOptTemplate()}`);
-    process.exit(1);
+    process.exit(BROWSER_OPT_EXIT_CODE_FAILURE);
   }
 
   const liveViewport = resolveLiveViewport(parsed.flags);
@@ -44,5 +39,9 @@ export async function cmdBrowserOpt(args: string[]): Promise<void> {
   });
 
   printBrowserOptResult(result);
-  process.exit(result.passed ? 0 : 1);
+  if (result.passed) {
+    process.exit(0);
+  }
+
+  process.exit(result.report.handoffTriggered ? BROWSER_OPT_EXIT_CODE_HANDOFF : BROWSER_OPT_EXIT_CODE_FAILURE);
 }

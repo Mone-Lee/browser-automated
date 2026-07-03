@@ -7,6 +7,8 @@ import * as path from 'node:path';
 import { BrowserAgent, createBrowserAgent, type BrowserAgentFactory } from '../core/agent.js';
 import type { AgentOptions } from '../core/types.js';
 import type {
+  BrowserOptHandoffOptions,
+  BrowserOptHandoffContext,
   BrowserOptReport,
   BrowserOptRunResult,
   BrowserOptRunnerOptions,
@@ -66,9 +68,11 @@ export class BrowserOptRunner {
     const logs: string[] = [];
     const screenshots: string[] = [];
     const stepResults: BrowserOptStepResult[] = [];
+    let handoffTriggered = false;
     let fatalError: string | undefined;
     const agent = this.agentFactory({
       profile: options.profile,
+      sessionName: options.sessionName,
       statePath: options.statePath,
       reuseRunningBrowser: options.reuseRunningBrowser ?? false,
       liveViewport: options.liveViewport ?? true,
@@ -89,14 +93,35 @@ export class BrowserOptRunner {
       logs.push(`screenshot: ${openScreenshotPath}`);
       logs.push(`page-state: ${summarizeSnapshot(openSnapshot)}`);
 
-      for (let index = 0; index < steps.length; index++) {
+      if (shouldTriggerLoginHandoff(flow, url, openSnapshot)) {
+        const handoff = triggerLoginHandoff(agent, logs, '初始化打开目标页面后检测到登录页跳转');
+        handoffTriggered = true;
+        const resumed = await resumeFromHandoff(agent, logs, handoff, options.handoff, options.authStateSavePath);
+        if (resumed) {
+          handoffTriggered = false;
+          const resumedSnapshot = captureSettledSnapshot(agent, openSnapshotPath, logs);
+          agent.screenshot(openScreenshotPath);
+          logs.push(`resume-snapshot: ${openSnapshotPath}`);
+          logs.push(`resume-screenshot: ${openScreenshotPath}`);
+          logs.push(`resume-state: ${summarizeSnapshot(resumedSnapshot)}`);
+        } else {
+          fatalError = handoff.message;
+        }
+      }
+
+      for (let index = 0; index < steps.length && !handoffTriggered; index++) {
         const result = await executeStep(agent, outputDir, index + 1, steps[index], {
           useAgentChat: options.useAgentChat ?? false,
           alreadyOpenedUrl: index === 0 ? url : undefined,
+          authStateSavePath: options.authStateSavePath,
+          handoff: options.handoff,
         });
         stepResults.push(result);
         screenshots.push(result.beforeScreenshotPath, result.afterScreenshotPath);
         logs.push(...result.logs);
+        if (result.handoffTriggered) {
+          handoffTriggered = true;
+        }
 
         if (!result.passed) {
           break;
@@ -118,6 +143,7 @@ export class BrowserOptRunner {
     const logPath = path.join(outputDir, 'run.log');
     const report: BrowserOptReport = {
       status: passed ? 'PASS' : 'FAIL',
+      handoffTriggered,
       url,
       flow,
       startedAt: startedAt.toISOString(),
@@ -215,6 +241,33 @@ async function executeStep(
   logs.push(`after-state: ${summarizeSnapshot(afterSnapshot)}`);
   logs.push(`after-screenshot: ${afterScreenshotPath}`);
 
+  if (isHandoffActionOutput(actionOutput) && parsedAction?.type !== 'handoff') {
+    const verification = extractHandoffMessage(actionOutput) ?? '已触发人工接管。';
+    const handoff = buildHandoffContext(agent, verification, actionOutput);
+    logs.push(`verification paused: ${verification}`);
+    const resumed = await resumeFromHandoff(agent, logs, handoff, options.handoff, options.authStateSavePath);
+    if (resumed) {
+      return executeStep(agent, outputDir, index, instruction, {
+        ...options,
+        alreadyOpenedUrl: undefined,
+      });
+    }
+    return {
+      index,
+      instruction,
+      passed: false,
+      handoffTriggered: true,
+      attempts,
+      beforeSnapshotPath,
+      afterSnapshotPath,
+      beforeScreenshotPath,
+      afterScreenshotPath,
+      actionOutput,
+      verification,
+      logs,
+    };
+  }
+
   if (actionError) {
     return {
       index,
@@ -251,6 +304,30 @@ async function executeStep(
 
   const verification = verifyStep(instruction, afterSnapshot);
   if (!verification.passed) {
+    if (shouldTriggerLoginHandoff(instruction, options.alreadyOpenedUrl, afterSnapshot)) {
+      const handoff = triggerLoginHandoff(agent, logs, `步骤 ${index} 验证时检测到登录页跳转`);
+      const resumed = await resumeFromHandoff(agent, logs, handoff, options.handoff, options.authStateSavePath);
+      if (resumed) {
+        return executeStep(agent, outputDir, index, instruction, {
+          ...options,
+          alreadyOpenedUrl: undefined,
+        });
+      }
+      return {
+        index,
+        instruction,
+        passed: false,
+        handoffTriggered: true,
+        attempts,
+        beforeSnapshotPath,
+        afterSnapshotPath,
+        beforeScreenshotPath,
+        afterScreenshotPath,
+        actionOutput: [actionOutput, handoff.output].filter(Boolean).join('\n').trim(),
+        verification: handoff.message,
+        logs,
+      };
+    }
     logs.push(`verification failed: ${verification.message}`);
   } else {
     logs.push(`verification passed: ${verification.message}`);
@@ -296,7 +373,10 @@ async function executeDeterministicInstruction(
     const ref = findTextboxRef(snapshot, action.field);
     if (!ref) {
       if (isLoginLikeSnapshot(snapshot)) {
-        throw new Error(`当前页面仍在登录页，无法找到输入框：${action.field}。请使用 --state <auth-state.json> 复用登录态，或先完成登录后保存 state。`);
+        return buildLoginHandoffActionOutput(
+          agent,
+          `当前页面仍在登录页，无法继续填写“${action.field}”，请先完成登录后再继续自动化。`,
+        );
       }
       throw new Error(`无法找到输入框：${action.field}`);
     }
@@ -408,6 +488,94 @@ function normalizeUrlForCompare(value: string): string {
   } catch {
     return value.trim().replace(/\/$/, '');
   }
+}
+
+/** 把 handoff 文案与底层输出组装成统一上下文，供恢复逻辑和 CLI 提示复用。 */
+function buildHandoffContext(agent: BrowserAgent, message: string, output: string): BrowserOptHandoffContext {
+  return {
+    message,
+    output,
+    sessionId: agent.getSessionId(),
+  };
+}
+
+/** 用于识别确定性动作返回值里是否已经进入 handoff。 */
+function isHandoffActionOutput(actionOutput: string): boolean {
+  return actionOutput.startsWith('handoff ');
+}
+
+/** 尽量从 handoff 动作日志里还原给用户看的提示文案。 */
+function extractHandoffMessage(actionOutput: string): string | null {
+  const firstLine = actionOutput.split('\n')[0] ?? '';
+  const rawMessage = firstLine.replace(/^handoff\s+/, '').trim();
+  if (!rawMessage) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(rawMessage) as string;
+  } catch {
+    return rawMessage;
+  }
+}
+
+/**
+ * 只有目标并非登录流程、但页面明显停在登录页时，才自动转入 handoff，避免误伤本来就要测登录的场景。
+ */
+function shouldTriggerLoginHandoff(flowOrInstruction: string, targetUrl: string | undefined, snapshot: SnapshotEvidence): boolean {
+  return isLoginLikeSnapshot(snapshot) && !isExpectedLoginFlow(flowOrInstruction, targetUrl);
+}
+
+/** 统一生成登录态失效时的 handoff 文案，并把提示写入日志。 */
+function triggerLoginHandoff(agent: BrowserAgent, logs: string[], reason: string): BrowserOptHandoffContext {
+  const message = `${reason}，疑似登录态已失效。请在浏览器中完成登录，然后重新执行当前 browser-opt 流程。`;
+  const output = buildLoginHandoffActionOutput(agent, message);
+  logs.push(`handoff: ${message}`);
+  logs.push(`handoff-output: ${output}`);
+  return buildHandoffContext(agent, message, output);
+}
+
+/** 登录页拦截统一走 handoff，而不是把它当成普通动作异常直接抛出。 */
+function buildLoginHandoffActionOutput(agent: BrowserAgent, message: string): string {
+  const output = agent.handoff(message);
+  return `handoff ${JSON.stringify(message)}\n${output}`.trim();
+}
+
+/** 粗略识别“本次流程本来就是要去登录页”的场景，避免错误触发 handoff。 */
+function isExpectedLoginFlow(flowOrInstruction: string, targetUrl?: string): boolean {
+  if (targetUrl && /login|signin|sign-in|auth|oauth|sso/i.test(normalizeUrlForCompare(targetUrl))) {
+    return true;
+  }
+
+  return /登录页|登录|登陆|sign\s*in|log\s*in|输入密码|验证码|短信码|二次验证/i.test(flowOrInstruction);
+}
+
+/** 当调用方提供等待逻辑时，进入 handoff 后暂停等待用户恢复，再继续当前会话。 */
+async function resumeFromHandoff(
+  agent: BrowserAgent,
+  logs: string[],
+  handoff: BrowserOptHandoffContext,
+  options?: BrowserOptHandoffOptions,
+  authStateSavePath?: string,
+): Promise<boolean> {
+  if (!options?.waitForUserResume) {
+    return false;
+  }
+
+  await options.onHandoffRequired?.(handoff);
+  await options.waitForUserResume(handoff);
+  const resumeOutput = agent.resume();
+  logs.push(`resume: ${resumeOutput}`);
+  if (authStateSavePath) {
+    fs.mkdirSync(path.dirname(authStateSavePath), { recursive: true });
+    const saveOutput = agent.stateSave(authStateSavePath);
+    logs.push(`auth-state-save: ${authStateSavePath}`);
+    if (saveOutput.trim()) {
+      logs.push(`auth-state-save-output: ${saveOutput.trim()}`);
+    }
+  }
+  await options.onHandoffCompleted?.(handoff);
+  return true;
 }
 
 function isLoginLikeSnapshot(snapshot: SnapshotEvidence): boolean {
