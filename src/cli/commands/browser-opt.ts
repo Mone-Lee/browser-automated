@@ -9,11 +9,11 @@ import {
   parseCliArgs,
   resolveLiveViewport,
   resolveProfile,
-  resolveReuseRunningBrowser,
-  resolveStatePath,
 } from '../utils/args.js';
 import { BROWSER_OPT_USAGE } from '../utils/constants.js';
 import { printBrowserOptResult } from '../utils/output.js';
+
+const DEFAULT_BROWSER_PROFILE = 'Default';
 
 export async function cmdBrowserOpt(args: string[]): Promise<void> {
   const parsed = parseCliArgs(args);
@@ -30,11 +30,14 @@ export async function cmdBrowserOpt(args: string[]): Promise<void> {
     process.exit(1);
   }
 
+  const liveViewport = resolveLiveViewport(parsed.flags);
+  const profile = resolveProfile(parsed.flags) ?? DEFAULT_BROWSER_PROFILE;
+  const outputDir = getStringFlag(parsed.flags, 'output-dir');
+  const useAgentChat = getBooleanFlag(parsed.flags, 'agent-chat');
+
   const runner = new BrowserOptRunner();
   const result = await runner.run(text, {
     profile,
-    statePath,
-    reuseRunningBrowser,
     liveViewport,
     outputDir,
     useAgentChat,

@@ -76,15 +76,13 @@ browser-opt "<full natural language flow>"
 Optional runtime flags:
 
 ```bash
-browser-opt "<flow>" --state ./auth-state.json
 browser-opt "<flow>" --profile Default
-browser-opt "<flow>" --clean-browser
 browser-opt "<flow>" --no-live-viewport
 browser-opt "<flow>" --output-dir ./artifacts/browser-opt
 browser-opt "<flow>" --agent-chat
 ```
 
-`--state <path>` is the preferred way to reuse login state without inheriting Chrome tabs or restore prompts. Without an explicit state file, `browser-opt` opens the requested URL once in a clean headed window. Pass `--reuse-focused-browser` only when the running Chrome is already CDP-accessible, or `--profile <name>` only when full profile behavior is desired. It shows and keeps the real headed browser by default so the user can watch the operation and inspect the final page state, but it must not open the agent-browser dashboard at `http://localhost:4848`. Use `--no-live-viewport` only when the user explicitly wants headless execution. `--agent-chat` is a legacy compatibility mode. It may require `AI_GATEWAY_API_KEY`; avoid it when the caller can inspect snapshots and produce deterministic actions.
+By default, `browser-opt` starts the requested URL with `--profile Default` so it can reuse the user's existing Chrome login state. Pass `--profile <name>` only to choose a different Chrome profile. It shows and keeps the real headed browser by default so the user can watch the operation and inspect the final page state, but it must not open the agent-browser dashboard at `http://localhost:4848`. Use `--no-live-viewport` only when the user explicitly wants headless execution. `--agent-chat` is a legacy compatibility mode. It may require `AI_GATEWAY_API_KEY`; avoid it when the caller can inspect snapshots and produce deterministic actions.
 
 ## Output
 

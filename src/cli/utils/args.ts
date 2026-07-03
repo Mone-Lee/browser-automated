@@ -49,7 +49,11 @@ export function resolveStatePath(flags: Record<string, string | boolean>): strin
   return getStringFlag(flags, 'state') ?? process.env.AGENT_BROWSER_STATE;
 }
 
-export function resolveReuseRunningBrowser(flags: Record<string, string | boolean>, statePath?: string): boolean {
+export function resolveReuseRunningBrowser(
+  flags: Record<string, string | boolean>,
+  statePath?: string,
+  defaultValue = false,
+): boolean {
   if (statePath) {
     return false;
   }
@@ -59,7 +63,7 @@ export function resolveReuseRunningBrowser(flags: Record<string, string | boolea
   if (getBooleanFlag(flags, 'reuse-focused-browser')) {
     return true;
   }
-  return false;
+  return defaultValue;
 }
 
 export function resolveLiveViewport(flags: Record<string, string | boolean>): boolean {
