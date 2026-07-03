@@ -38,35 +38,6 @@ For production environments, describe upload steps as manual handoff so the oper
 5. 验证页面显示封面预览或上传成功状态。
 ```
 
-## First-use reminder
-
-For the first `browser-opt` invocation in each conversation, remind the user of the universal test template and the natural-language example before running the CLI:
-
-```text
-通用测试模板：
-你是一个专业的自动化测试 Agent 执行以下测试用例：
-
-网站：{URL}
-测试用例：{描述，如 "用户注册流程"}
-
-预期结果：
-1. {步骤1}
-2. {步骤2}
-...
-
-自然语言流程示例：
-测试 https://example.com 的搜索功能。
-
-目标：
-1. 打开首页。
-2. 在搜索框输入 "agent-browser"。
-3. 点击搜索按钮。
-4. 验证搜索结果页面是否包含至少 3 个结果项。
-5. 点击第一个结果，验证跳转正确。
-```
-
-After the reminder, execute the user's supplied flow without asking for confirmation when the flow includes a URL.
-
 ## Required agent-browser practice
 
 Every execution must follow these rules:
@@ -105,13 +76,15 @@ browser-opt "<full natural language flow>"
 Optional runtime flags:
 
 ```bash
+browser-opt "<flow>" --state ./auth-state.json
 browser-opt "<flow>" --profile Default
+browser-opt "<flow>" --clean-browser
 browser-opt "<flow>" --no-live-viewport
 browser-opt "<flow>" --output-dir ./artifacts/browser-opt
 browser-opt "<flow>" --agent-chat
 ```
 
-`browser-opt` shows and keeps the real headed browser by default so the user can watch the operation and inspect the final page state, but it must not open the agent-browser dashboard at `http://localhost:4848`. Use `--no-live-viewport` only when the user explicitly wants headless execution. `--agent-chat` is a legacy compatibility mode. It may require `AI_GATEWAY_API_KEY`; avoid it when the caller can inspect snapshots and produce deterministic actions.
+`--state <path>` is the preferred way to reuse login state without inheriting Chrome tabs or restore prompts. Without an explicit state file, `browser-opt` opens the requested URL once in a clean headed window. Pass `--reuse-focused-browser` only when the running Chrome is already CDP-accessible, or `--profile <name>` only when full profile behavior is desired. It shows and keeps the real headed browser by default so the user can watch the operation and inspect the final page state, but it must not open the agent-browser dashboard at `http://localhost:4848`. Use `--no-live-viewport` only when the user explicitly wants headless execution. `--agent-chat` is a legacy compatibility mode. It may require `AI_GATEWAY_API_KEY`; avoid it when the caller can inspect snapshots and produce deterministic actions.
 
 ## Output
 

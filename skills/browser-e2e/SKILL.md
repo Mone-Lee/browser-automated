@@ -22,7 +22,7 @@ One-shot execution is deterministic by default:
 
 Default runtime behavior for one-shot execution:
 
-- Reuses Chrome login state with profile `Default` unless `--profile <name>` overrides it.
+- Prefer `--state <path>` when only login state should be reused without Chrome tabs or restore prompts. Without a state file, open the requested URL once in a clean headed window. Use `--reuse-focused-browser` only when the running Chrome is already CDP-accessible, or `--profile <name>` only when full profile behavior is desired.
 - Live viewport is enabled by default; use `--no-live-viewport` to disable.
 - The dashboard page (`http://localhost:4848`) is auto-opened when live viewport is active.
 

@@ -20,7 +20,11 @@
       },
       "profile": {
         "type": "string",
-        "description": "Chrome profile name or path, default Default"
+        "description": "Chrome profile name or path. Use state for login-only reuse; profile keeps full Chrome profile behavior."
+      },
+      "state": {
+        "type": "string",
+        "description": "Path to an agent-browser state file. Preferred for reusing login state without restoring tabs or Chrome recovery UI."
       },
       "liveViewport": {
         "type": "boolean",
