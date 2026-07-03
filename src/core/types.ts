@@ -89,6 +89,12 @@ export interface AgentOptions {
   openLiveDashboard?: boolean;
   /** agent-browser 复用的 Chrome profile 名称或路径。 */
   profile?: string;
+  /** 直接加载的登录态 state 文件路径，优先于 profile 和 auto-connect。 */
+  statePath?: string;
+  /** 是否优先连接到当前正在运行的 Chrome，而不是新起一个独立窗口。 */
+  reuseRunningBrowser?: boolean;
+  /** 仅在首次拉起浏览器时附加的启动参数，用于控制窗口与恢复行为。 */
+  browserArgs?: string[];
 }
 
 /**

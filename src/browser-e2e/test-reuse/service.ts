@@ -20,6 +20,8 @@ async function runOneShot(input: BrowserE2ETriggerInput): Promise<{ execution: T
   const agent = new BrowserAgent({
     liveViewport: input.liveViewport ?? true,
     profile: input.profile,
+    statePath: input.statePath,
+    reuseRunningBrowser: input.reuseRunningBrowser ?? false,
   });
   const start = Date.now();
 

@@ -39,6 +39,8 @@ export interface BrowserE2ETriggerInput {
   url: string;
   instruction: string;
   profile?: string;
+  statePath?: string;
+  reuseRunningBrowser?: boolean;
   assertion?: string;
   autoGenerate?: boolean;
   generatedName?: string;

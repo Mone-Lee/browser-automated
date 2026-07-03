@@ -194,11 +194,17 @@ async function waitForHandoffDone(): Promise<void> {
   }
 }
 
-function createHandoffInput(url: string, instruction: string, options: { liveViewport?: boolean; profile?: string } = {}) {
+function createHandoffInput(
+  url: string,
+  instruction: string,
+  options: { liveViewport?: boolean; profile?: string; statePath?: string; reuseRunningBrowser?: boolean } = {},
+) {
   return {
     url,
     instruction,
-    profile: options.profile ?? 'Default',
+    profile: options.profile,
+    statePath: options.statePath,
+    reuseRunningBrowser: options.reuseRunningBrowser ?? false,
     liveViewport: options.liveViewport ?? true,
     handoff: {
       maxConsecutiveFailuresBeforeHandoff: 3,
@@ -237,6 +243,8 @@ async function cmdBrowserE2E(args: string[]): Promise<void> {
   const text = parsed.positionals.join(' ').trim();
   const liveViewport = resolveLiveViewport(parsed.flags);
   const profile = resolveProfile(parsed.flags);
+  const statePath = resolveStatePath(parsed.flags);
+  const reuseRunningBrowser = resolveReuseRunningBrowser(parsed.flags, statePath);
 
   if (!text) {
     console.log(`使用方式：
@@ -257,7 +265,7 @@ async function cmdBrowserE2E(args: string[]): Promise<void> {
   if (liveViewport) {
     console.log(`\nLive viewport: ${LIVE_VIEWPORT_DASHBOARD_URL}\n`);
   }
-  console.log(`Profile: ${profile}`);
+  console.log(`Browser mode: ${statePath ? `state:${statePath}` : reuseRunningBrowser ? 'reuse-running-browser' : profile ? `profile:${profile}` : 'clean-window'}`);
   const existing = service.checkForExistingTests(text);
 
   // ---------- 命中已有用例：告知用户并让其决策 ----------
@@ -297,7 +305,7 @@ async function cmdBrowserE2E(args: string[]): Promise<void> {
 
   // ---------- 无匹配或用户选 [2]：执行一次性 NL 测试 ----------
   const result = await service.runOneShotInstruction({
-    ...createHandoffInput(url!, text, { liveViewport, profile }),
+    ...createHandoffInput(url!, text, { liveViewport, profile, statePath, reuseRunningBrowser }),
     autoGenerate: false,
   });
 
@@ -322,13 +330,15 @@ async function cmdBrowserOpt(args: string[]): Promise<void> {
   const parsed = parseCliArgs(args);
   const text = parsed.positionals.join(' ').trim();
   const liveViewport = resolveBrowserOptLiveViewport(parsed.flags);
+  const statePath = resolveStatePath(parsed.flags);
+  const reuseRunningBrowser = resolveReuseRunningBrowser(parsed.flags, statePath);
   const profile = resolveProfile(parsed.flags);
   const outputDir = getStringFlag(parsed.flags, 'output-dir');
   const useAgentChat = getBooleanFlag(parsed.flags, 'agent-chat');
 
   if (!text) {
     console.log(`使用方式：
-  browser-opt <自然语言流程> [--profile <name>] [--no-live-viewport] [--output-dir <dir>] [--agent-chat]
+  browser-opt <自然语言流程> [--state <path>] [--profile <name>] [--reuse-focused-browser] [--clean-browser] [--no-live-viewport] [--output-dir <dir>] [--agent-chat]
 
 ${browserOptTemplate()}`);
     process.exit(1);
@@ -337,6 +347,8 @@ ${browserOptTemplate()}`);
   const runner = new BrowserOptRunner();
   const result = await runner.run(text, {
     profile,
+    statePath,
+    reuseRunningBrowser,
     liveViewport,
     outputDir,
     useAgentChat,
@@ -362,6 +374,8 @@ async function cmdE2E(args: string[]): Promise<void> {
   const autoGenerate = getBooleanFlag(parsed.flags, 'auto-generate');
   const liveViewport = resolveLiveViewport(parsed.flags);
   const profile = resolveProfile(parsed.flags);
+  const statePath = resolveStatePath(parsed.flags);
+  const reuseRunningBrowser = resolveReuseRunningBrowser(parsed.flags, statePath);
   const generatedName = getStringFlag(parsed.flags, 'name');
   const tags = parseCsv(getStringFlag(parsed.flags, 'tags'));
 
@@ -369,9 +383,9 @@ async function cmdE2E(args: string[]): Promise<void> {
   if (liveViewport) {
     console.log(`Live viewport: ${LIVE_VIEWPORT_DASHBOARD_URL}`);
   }
-  console.log(`Profile: ${profile}`);
+  console.log(`Browser mode: ${statePath ? `state:${statePath}` : reuseRunningBrowser ? 'reuse-running-browser' : profile ? `profile:${profile}` : 'clean-window'}`);
   const result = await service.trigger({
-    ...createHandoffInput(url, instruction, { liveViewport, profile }),
+    ...createHandoffInput(url, instruction, { liveViewport, profile, statePath, reuseRunningBrowser }),
     assertion,
     autoGenerate,
     generatedName,
@@ -531,8 +545,25 @@ function getBooleanFlag(flags: Record<string, string | boolean>, key: string): b
   return flags[key] === true;
 }
 
-function resolveProfile(flags: Record<string, string | boolean>): string {
-  return getStringFlag(flags, 'profile') ?? 'Default';
+function resolveProfile(flags: Record<string, string | boolean>): string | undefined {
+  return getStringFlag(flags, 'profile');
+}
+
+function resolveStatePath(flags: Record<string, string | boolean>): string | undefined {
+  return getStringFlag(flags, 'state') ?? process.env.AGENT_BROWSER_STATE;
+}
+
+function resolveReuseRunningBrowser(flags: Record<string, string | boolean>, statePath?: string): boolean {
+  if (statePath) {
+    return false;
+  }
+  if (getBooleanFlag(flags, 'clean-browser')) {
+    return false;
+  }
+  if (getBooleanFlag(flags, 'reuse-focused-browser')) {
+    return true;
+  }
+  return false;
 }
 
 function resolveLiveViewport(flags: Record<string, string | boolean>): boolean {

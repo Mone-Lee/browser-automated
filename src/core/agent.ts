@@ -2,11 +2,17 @@
  * 封装 agent-browser CLI，提供两个对外产物共享的浏览器 session、截图和 handoff 能力。
  */
 import { spawnSync, SpawnSyncReturns } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { AgentOptions } from './types.js';
 
 const DEFAULT_TIMEOUT = 30_000;
 const DEFAULT_DASHBOARD_PORT = 4848;
 const DEFAULT_STREAM_PORT = 9223;
+const DEFAULT_CLEAN_BROWSER_ARGS = [
+  '--disable-session-crashed-bubble',
+  '--no-first-run',
+  '--no-default-browser-check',
+];
 
 export interface AgentBrowserJsonResult {
   raw: string;
@@ -43,14 +49,22 @@ export class BrowserAgent {
   private readonly headed: boolean;
   private readonly openLiveDashboard: boolean;
   private readonly profile: string | null;
+  private readonly statePath: string | null;
+  private readonly reuseRunningBrowser: boolean;
+  private readonly browserArgs: string[];
   private liveViewportReady: boolean;
 
   constructor(options: AgentOptions = {}) {
-    this.sessionId = options.sessionId ?? `session-${Date.now()}`;
+    this.sessionId = options.sessionId ?? `browser-agent-${Date.now()}-${randomUUID().slice(0, 8)}`;
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT;
     this.headed = options.headed ?? options.liveViewport ?? false;
     this.openLiveDashboard = options.openLiveDashboard ?? true;
     this.profile = options.profile ?? null;
+    this.statePath = options.statePath ?? null;
+    this.reuseRunningBrowser = options.reuseRunningBrowser ?? false;
+    this.browserArgs =
+      options.browserArgs ??
+      (!this.profile && (!this.reuseRunningBrowser || this.statePath) ? DEFAULT_CLEAN_BROWSER_ARGS : []);
     this.liveViewportReady = false;
   }
 
@@ -63,18 +77,43 @@ export class BrowserAgent {
     return this.headed ? `http://localhost:${DEFAULT_DASHBOARD_PORT}` : null;
   }
 
+  /** 统一拼接 agent-browser 的全局参数，保证不同命令共享同一套会话与启动策略。 */
+  private buildGlobalArgs(
+    args: string[],
+    useHeaded: boolean,
+    options: { profile?: string | null; reuseRunningBrowser?: boolean; browserArgs?: string[]; statePath?: string | null } = {},
+  ): string[] {
+    const profile = Object.hasOwn(options, 'profile') ? options.profile ?? null : this.profile;
+    const statePath = Object.hasOwn(options, 'statePath') ? options.statePath ?? null : this.statePath;
+    const reuseRunningBrowser = options.reuseRunningBrowser ?? (this.reuseRunningBrowser && !profile && !statePath);
+    const browserArgs = options.browserArgs ?? this.browserArgs;
+
+    return [
+      ...(profile ? ['--profile', profile] : []),
+      ...(statePath ? ['--state', statePath] : []),
+      ...(reuseRunningBrowser ? ['--auto-connect'] : []),
+      '--session',
+      this.sessionId,
+      ...(useHeaded ? ['--headed'] : []),
+      ...(args[0] === 'open' && browserArgs.length > 0
+        ? ['--args', browserArgs.join(',')]
+        : []),
+      ...args,
+    ];
+  }
+
+  private resultErrorMessage(result: SpawnSyncReturns<string>, fallback: string): string {
+    const stderr = result.stderr?.trim() || '';
+    const stdout = result.stdout?.trim() || '';
+    return stderr || stdout || fallback;
+  }
+
   /** 底层命令执行入口，负责调用单条 agent-browser 命令并返回 stdout。 */
   private run(args: string[], options: { headed?: boolean } = {}): string {
-    const useHeaded = options.headed ?? this.headed;
+    const useHeaded = options.headed ?? (args[0] === 'open' ? this.headed && !this.profile : false);
     const result: SpawnSyncReturns<string> = spawnSync(
       'agent-browser',
-      [
-        ...(this.profile ? ['--profile', this.profile] : []),
-        '--session',
-        this.sessionId,
-        ...(useHeaded ? ['--headed'] : []),
-        ...args,
-      ],
+      this.buildGlobalArgs(args, useHeaded),
       { encoding: 'utf-8', timeout: this.timeout },
     );
 
@@ -82,11 +121,7 @@ export class BrowserAgent {
       throw result.error;
     }
     if (result.status !== 0) {
-      const stderr = result.stderr?.trim() || '';
-      const stdout = result.stdout?.trim() || '';
-      throw new Error(
-        stderr || stdout || `agent-browser exited with code ${result.status}`,
-      );
+      throw new Error(this.resultErrorMessage(result, `agent-browser exited with code ${result.status}`));
     }
 
     if (useHeaded && this.openLiveDashboard && args[0] === 'open') {
@@ -292,11 +327,15 @@ export class BrowserAgent {
    * `commands` 中的每一项都是参数数组，例如 `['open', 'https://example.com']`。
    */
   batch(commands: string[][]): string {
-    const result = spawnSync('agent-browser', ['--session', this.sessionId, 'batch', '--json'], {
-      input: JSON.stringify(commands),
-      encoding: 'utf-8',
-      timeout: this.timeout * commands.length,
-    });
+    const result = spawnSync(
+      'agent-browser',
+      this.buildGlobalArgs(['batch', '--json'], this.headed),
+      {
+        input: JSON.stringify(commands),
+        encoding: 'utf-8',
+        timeout: this.timeout * commands.length,
+      },
+    );
 
     if (result.error) {
       throw result.error;

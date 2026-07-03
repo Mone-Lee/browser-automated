@@ -32,7 +32,14 @@ describe('BrowserAgent', () => {
 
       expect(mockSpawnSync).toHaveBeenCalledWith(
         'agent-browser',
-        ['--session', 'test-session', 'open', 'https://example.com'],
+        [
+          '--session',
+          'test-session',
+          '--args',
+          '--disable-session-crashed-bubble,--no-first-run,--no-default-browser-check',
+          'open',
+          'https://example.com',
+        ],
         expect.objectContaining({ encoding: 'utf-8' }),
       );
     });
@@ -52,7 +59,15 @@ describe('BrowserAgent', () => {
 
       expect(mockSpawnSync).toHaveBeenCalledWith(
         'agent-browser',
-        ['--session', 'test-session', '--headed', 'open', 'https://example.com'],
+        [
+          '--session',
+          'test-session',
+          '--headed',
+          '--args',
+          '--disable-session-crashed-bubble,--no-first-run,--no-default-browser-check',
+          'open',
+          'https://example.com',
+        ],
         expect.objectContaining({ encoding: 'utf-8' }),
       );
     });
@@ -66,6 +81,60 @@ describe('BrowserAgent', () => {
       expect(mockSpawnSync).toHaveBeenCalledWith(
         'agent-browser',
         ['--profile', 'Default', '--session', 'test-session', 'open', 'https://example.com'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+    });
+
+    it('does not combine --profile with headed launch mode', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult(''));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session', profile: 'Default', liveViewport: true });
+      agent.open('https://example.com');
+
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'agent-browser',
+        ['--profile', 'Default', '--session', 'test-session', 'open', 'https://example.com'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+    });
+
+
+    it('passes --auto-connect when reusing the running browser', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult(''));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session', reuseRunningBrowser: true });
+      agent.open('https://example.com');
+
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'agent-browser',
+        ['--auto-connect', '--session', 'test-session', 'open', 'https://example.com'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+    });
+
+    it('uses a state file directly without auto-connect or profile import', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult(''));
+
+      const agent = new BrowserAgent({
+        sessionId: 'test-session',
+        statePath: '/tmp/auth-state.json',
+        reuseRunningBrowser: true,
+      });
+      agent.open('https://example.com');
+
+      expect(mockSpawnSync).toHaveBeenCalledTimes(1);
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'agent-browser',
+        [
+          '--state',
+          '/tmp/auth-state.json',
+          '--session',
+          'test-session',
+          '--args',
+          '--disable-session-crashed-bubble,--no-first-run,--no-default-browser-check',
+          'open',
+          'https://example.com',
+        ],
         expect.objectContaining({ encoding: 'utf-8' }),
       );
     });
@@ -109,7 +178,15 @@ describe('BrowserAgent', () => {
 
       expect(mockSpawnSync).toHaveBeenCalledWith(
         'agent-browser',
-        ['--session', 'test-session', '--headed', 'open', 'https://example.com'],
+        [
+          '--session',
+          'test-session',
+          '--headed',
+          '--args',
+          '--disable-session-crashed-bubble,--no-first-run,--no-default-browser-check',
+          'open',
+          'https://example.com',
+        ],
         expect.objectContaining({ encoding: 'utf-8' }),
       );
       expect(mockSpawnSync).not.toHaveBeenCalledWith(
@@ -202,6 +279,19 @@ describe('BrowserAgent', () => {
           },
         },
       });
+    });
+
+    it('does not pass headed launch flags to follow-up snapshots', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult('{"success":true,"data":{"snapshot":"button","refs":{}}}'));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session', liveViewport: true });
+      agent.snapshotJson();
+
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'agent-browser',
+        ['--session', 'test-session', 'snapshot', '-i', '--json'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
     });
   });
 
@@ -325,7 +415,15 @@ describe('BrowserAgent', () => {
       expect(mockSpawnSync).toHaveBeenNthCalledWith(
         3,
         'agent-browser',
-        ['--session', 'test-session', '--headed', 'open', 'https://example.com/login'],
+        [
+          '--session',
+          'test-session',
+          '--headed',
+          '--args',
+          '--disable-session-crashed-bubble,--no-first-run,--no-default-browser-check',
+          'open',
+          'https://example.com/login',
+        ],
         expect.objectContaining({ encoding: 'utf-8' }),
       );
       expect(mockSpawnSync).toHaveBeenNthCalledWith(

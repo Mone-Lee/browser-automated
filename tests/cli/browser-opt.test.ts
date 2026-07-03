@@ -27,6 +27,7 @@ function runCli(args: string[], env: Record<string, string> = {}) {
     encoding: 'utf-8',
     env: {
       ...process.env,
+      AGENT_BROWSER_STATE: '',
       PATH: `${makeTempAgentBrowserBin()}${path.delimiter}${process.env.PATH ?? ''}`,
       ...env,
     },
@@ -42,7 +43,19 @@ function makeTempAgentBrowserBin(): string {
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 if (process.env.AGENT_BROWSER_LOG) fs.appendFileSync(process.env.AGENT_BROWSER_LOG, args.join(' ') + '\\n');
-const commandIndex = args.findIndex((arg) => !arg.startsWith('--') && arg !== 'Default' && arg !== 'session-' && !/^session-/.test(arg));
+const optionsWithValues = new Set(['--profile', '--state', '--session', '--args', '--output-dir']);
+let commandIndex = -1;
+for (let i = 0; i < args.length; i++) {
+  const arg = args[i];
+  if (optionsWithValues.has(arg)) {
+    i += 1;
+    continue;
+  }
+  if (!arg.startsWith('--')) {
+    commandIndex = i;
+    break;
+  }
+}
 const command = args[commandIndex];
 if (command === 'open') {
   process.stdout.write('opened');
@@ -95,10 +108,38 @@ describe('browser-opt CLI', () => {
     expect(result.stdout).not.toContain('Status: PASS');
     expect(result.stdout).not.toContain(outputDir);
     const commands = fs.readFileSync(commandLog, 'utf-8');
-    expect(commands).toContain('--headed open https://example.com');
+    expect(commands).not.toContain('--profile Default');
+    expect(commands).toContain('open https://example.com');
+    expect(commands).toContain('--headed --args --disable-session-crashed-bubble,--no-first-run,--no-default-browser-check open https://example.com');
+    expect(commands).not.toContain('--auto-connect');
+    expect(commands).not.toContain('auth-import');
     expect(commands).not.toContain('dashboard start');
     expect(commands).not.toContain('close');
     expect(fs.readdirSync(outputDir).some((entry) => fs.existsSync(path.join(outputDir, entry, 'report.json')))).toBe(true);
+  });
+
+  it('uses --state directly without auto-connect or profile import', () => {
+    const outputDir = makeTempDir();
+    const commandLog = path.join(makeTempDir(), 'agent-browser.log');
+    const statePath = path.join(makeTempDir(), 'auth-state.json');
+    fs.writeFileSync(statePath, '{}');
+
+    const result = runCli([
+      'browser-opt',
+      '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。',
+      '--state',
+      statePath,
+      '--output-dir',
+      outputDir,
+    ], { AGENT_BROWSER_LOG: commandLog });
+
+    expect(result.status).toBe(0);
+    const commands = fs.readFileSync(commandLog, 'utf-8');
+    expect(commands).toContain(`--state ${statePath}`);
+    expect(commands).toContain('--headed --args --disable-session-crashed-bubble,--no-first-run,--no-default-browser-check open https://example.com');
+    expect(commands).not.toContain('--profile Default');
+    expect(commands).not.toContain('--auto-connect');
+    expect(commands).not.toContain('auth-import');
   });
 
   it('prints report details when a flow fails', () => {
