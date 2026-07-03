@@ -66,6 +66,7 @@ function buildAgent(options: {
     upload: vi.fn(() => 'uploaded'),
     handoff: vi.fn(() => 'HANDOFF: waiting'),
     chatJson: vi.fn(options.chat ?? (() => ({ raw: '{"success":true}', data: { success: true } }))),
+    waitMs: vi.fn(() => 'waited'),
     close: vi.fn(() => {}),
   } as unknown as BrowserAgent;
 }
@@ -120,6 +121,7 @@ describe('BrowserOptRunner', () => {
     expect(result.passed).toBe(true);
     expect(capturedOptions[0]).toEqual(expect.objectContaining({
       profile: 'Work',
+      reuseRunningBrowser: false,
       liveViewport: true,
       openLiveDashboard: false,
     }));
@@ -169,15 +171,68 @@ describe('BrowserOptRunner', () => {
         snapshotJson('after 安选公开直播自动化', { e2: { role: 'textbox', name: '直播间名称' } }),
       ],
     });
-    const runner = new BrowserOptRunner(makeFactory(agent));
+    const capturedOptions: AgentOptions[] = [];
+    const runner = new BrowserOptRunner(makeFactory(agent, capturedOptions));
 
     const result = await runner.run('执行创建安选公开直播流程：\n1. 访问https://test-live.ifengqun.com/live/create?time=2\n2. 直播间名称输入“安选公开直播自动化”', { outputDir });
 
     expect(result.passed).toBe(true);
+    expect(capturedOptions[0]).toEqual(expect.objectContaining({
+      reuseRunningBrowser: false,
+    }));
+    expect((agent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
     expect((agent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('https://test-live.ifengqun.com/live/create?time=2');
     expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e2', '安选公开直播自动化');
     expect((agent.chatJson as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(result.report.steps[0].actionOutput).toContain('open skipped');
     expect(result.report.steps[1].logs.join('\n')).toContain('deterministic agent-browser command');
+  });
+
+  it('waits and retries when the initial open snapshot is still about:blank', async () => {
+    const outputDir = makeTempDir();
+    const blankSnapshot = {
+      raw: JSON.stringify({ success: true, data: { origin: 'about:blank', refs: {}, snapshot: '(no interactive elements)' } }),
+      data: { success: true, data: { origin: 'about:blank', refs: {}, snapshot: '(no interactive elements)' } },
+    };
+    const agent = buildAgent({
+      snapshots: [
+        blankSnapshot,
+        snapshotJson('open snapshot', { e1: { role: 'heading', name: 'Example' } }),
+        snapshotJson('before snapshot', { e1: { role: 'heading', name: 'Example' } }),
+        snapshotJson('after snapshot with Example', { e1: { role: 'heading', name: 'Example' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。', {
+      outputDir,
+    });
+
+    expect(result.passed).toBe(true);
+    expect((agent.waitMs as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(500);
+    expect(result.report.logs.join('\n')).toContain('open-wait 1');
+  });
+
+  it('does not fill an unrelated textbox when the requested field is missing on a login page', async () => {
+    const outputDir = makeTempDir();
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('登录远方的梦想直播平台', { e1: { role: 'textbox', name: '请输入手机号' } }),
+        snapshotJson('登录远方的梦想直播平台', { e1: { role: 'textbox', name: '请输入手机号' } }),
+        snapshotJson('登录远方的梦想直播平台', { e1: { role: 'textbox', name: '请输入手机号' } }),
+        snapshotJson('登录远方的梦想直播平台', { e1: { role: 'textbox', name: '请输入手机号' } }),
+        snapshotJson('登录远方的梦想直播平台', { e1: { role: 'textbox', name: '请输入手机号' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('执行创建安选公开直播流程：\n1. 访问 https://test-live.ifengqun.com/live/create?time=2\n2. 直播间名称输入“安选公开直播自动化”', {
+      outputDir,
+    });
+
+    expect(result.passed).toBe(false);
+    expect((agent.fill as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(result.report.steps[1].error).toContain('当前页面仍在登录页');
   });
 
   it('downloads URL images and uploads them with deterministic upload commands', async () => {

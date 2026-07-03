@@ -44,6 +44,8 @@ export interface BrowserOptRunResult {
 
 export interface BrowserOptRunnerOptions {
   profile?: string;
+  statePath?: string;
+  reuseRunningBrowser?: boolean;
   liveViewport?: boolean;
   closeOnComplete?: boolean;
   outputDir?: string;
@@ -53,6 +55,7 @@ export interface BrowserOptRunnerOptions {
 
 export interface BrowserOptStepExecutionOptions {
   useAgentChat: boolean;
+  alreadyOpenedUrl?: string;
 }
 
 export interface SnapshotEvidence {

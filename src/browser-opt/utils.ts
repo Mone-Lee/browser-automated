@@ -123,7 +123,12 @@ function parseFieldName(instruction: string): string | null {
 /** 在当前快照中优先查找文本框，再按字段名做最佳匹配。 */
 export function findTextboxRef(snapshot: SnapshotEvidence, field: string): string | null {
   const nodes = getSnapshotNodes(snapshot).filter((node) => isTextboxRole(node.role));
-  return findBestNodeRef(nodes, field) ?? nodes[0]?.ref ?? null;
+  const matchedRef = findBestNodeRef(nodes, field);
+  if (matchedRef || isGenericTextboxField(field)) {
+    return matchedRef ?? nodes[0]?.ref ?? null;
+  }
+
+  return null;
 }
 
 /** 在当前快照中查找可点击元素，并按目标文案做最佳匹配。 */
@@ -221,6 +226,11 @@ function mergeSnapshotNodes(nodes: SnapshotNode[]): SnapshotNode[] {
 /** 判断某个角色是否可以视为文本输入控件。 */
 function isTextboxRole(role: string): boolean {
   return /textbox|input|searchbox|combobox|textarea/i.test(role);
+}
+
+/** 只有用户没有给出具体字段名时，才允许回退到页面上的第一个输入框。 */
+function isGenericTextboxField(field: string): boolean {
+  return /^(文本|内容|输入框|搜索框|textbox|input|search)$/i.test(field.trim());
 }
 
 /** 识别 snapshot 中可能代表文件上传的输入控件。 */

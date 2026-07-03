@@ -68,7 +68,9 @@ export class BrowserOptRunner {
     const stepResults: BrowserOptStepResult[] = [];
     let fatalError: string | undefined;
     const agent = this.agentFactory({
-      profile: options.profile ?? 'Default',
+      profile: options.profile,
+      statePath: options.statePath,
+      reuseRunningBrowser: options.reuseRunningBrowser ?? false,
       liveViewport: options.liveViewport ?? true,
       openLiveDashboard: false,
       timeout: options.timeout,
@@ -80,7 +82,7 @@ export class BrowserOptRunner {
 
       const openSnapshotPath = path.join(outputDir, '00-open.snapshot.json');
       const openScreenshotPath = path.join(outputDir, '00-open.png');
-      const openSnapshot = captureSnapshot(agent, openSnapshotPath);
+      const openSnapshot = captureSettledSnapshot(agent, openSnapshotPath, logs);
       agent.screenshot(openScreenshotPath);
       screenshots.push(openScreenshotPath);
       logs.push(`snapshot: ${openSnapshotPath}`);
@@ -90,6 +92,7 @@ export class BrowserOptRunner {
       for (let index = 0; index < steps.length; index++) {
         const result = await executeStep(agent, outputDir, index + 1, steps[index], {
           useAgentChat: options.useAgentChat ?? false,
+          alreadyOpenedUrl: index === 0 ? url : undefined,
         });
         stepResults.push(result);
         screenshots.push(result.beforeScreenshotPath, result.afterScreenshotPath);
@@ -181,7 +184,9 @@ async function executeStep(
             logs.push(`attempt ${attempts}: chat JSON parse fallback: ${chat.parseError}`);
           }
         } else {
-          const deterministic = await executeDeterministicInstruction(agent, instruction, actionSnapshot, outputDir);
+          const deterministic = await executeDeterministicInstruction(agent, instruction, actionSnapshot, outputDir, {
+            alreadyOpenedUrl: options.alreadyOpenedUrl,
+          });
           if (!deterministic) {
             throw new Error('无法将步骤解析为确定性命令。请把步骤写成访问 URL、字段输入“值”、点击“按钮文案”或验证页面包含“文本”；如需旧模式可加 --agent-chat。');
           }
@@ -273,6 +278,7 @@ async function executeDeterministicInstruction(
   instruction: string,
   snapshot: SnapshotEvidence,
   outputDir: string,
+  options: { alreadyOpenedUrl?: string } = {},
 ): Promise<string | null> {
   const action = parseDeterministicAction(instruction);
   if (!action) {
@@ -280,12 +286,18 @@ async function executeDeterministicInstruction(
   }
 
   if (action.type === 'open') {
+    if (options.alreadyOpenedUrl && normalizeUrlForCompare(action.url) === normalizeUrlForCompare(options.alreadyOpenedUrl)) {
+      return `open skipped: ${action.url} 已由 runner 初始化打开`;
+    }
     return agent.open(action.url);
   }
 
   if (action.type === 'fill') {
     const ref = findTextboxRef(snapshot, action.field);
     if (!ref) {
+      if (isLoginLikeSnapshot(snapshot)) {
+        throw new Error(`当前页面仍在登录页，无法找到输入框：${action.field}。请使用 --state <auth-state.json> 复用登录态，或先完成登录后保存 state。`);
+      }
       throw new Error(`无法找到输入框：${action.field}`);
     }
     const output = agent.fill(ref, action.value);
@@ -350,4 +362,54 @@ function captureSnapshot(agent: BrowserAgent, filePath: string): SnapshotEvidenc
     text: snapshotText(output),
     nodeCount: countSnapshotNodes(output.data),
   };
+}
+
+/** 打开页面后等待空白初始页退场，避免把 about:blank 误判成目标页面状态。 */
+function captureSettledSnapshot(agent: BrowserAgent, filePath: string, logs: string[]): SnapshotEvidence {
+  let snapshot = captureSnapshot(agent, filePath);
+  for (let attempt = 1; attempt <= 5 && isBlankInitialSnapshot(snapshot); attempt += 1) {
+    logs.push(`open-wait ${attempt}: snapshot 仍为空白页，等待页面接管后重试。`);
+    agent.waitMs(500);
+    snapshot = captureSnapshot(agent, filePath);
+  }
+  return snapshot;
+}
+
+function isBlankInitialSnapshot(snapshot: SnapshotEvidence): boolean {
+  const origin = findStringProperty(snapshot.output.data, 'origin');
+  return snapshot.nodeCount === 0 && snapshot.text.trim() === '(no interactive elements)' && origin === 'about:blank';
+}
+
+function findStringProperty(value: unknown, key: string): string | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (typeof record[key] === 'string') {
+    return record[key] as string;
+  }
+
+  for (const entry of Object.values(record)) {
+    const found = findStringProperty(entry, key);
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+}
+
+function normalizeUrlForCompare(value: string): string {
+  try {
+    const url = new URL(value);
+    url.hash = '';
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    return value.trim().replace(/\/$/, '');
+  }
+}
+
+function isLoginLikeSnapshot(snapshot: SnapshotEvidence): boolean {
+  return /登录|登\s*录|login|请输入手机号|请输入密码/i.test(snapshot.text);
 }
