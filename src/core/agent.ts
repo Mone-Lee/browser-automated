@@ -45,6 +45,7 @@ export class BrowserAgent {
   private static autoOpenedDashboardUrls: Set<string> = new Set();
 
   private readonly sessionId: string;
+  private readonly sessionName: string | null;
   private readonly timeout: number;
   private readonly headed: boolean;
   private readonly openLiveDashboard: boolean;
@@ -56,6 +57,7 @@ export class BrowserAgent {
 
   constructor(options: AgentOptions = {}) {
     this.sessionId = options.sessionId ?? `browser-agent-${Date.now()}-${randomUUID().slice(0, 8)}`;
+    this.sessionName = options.sessionName ?? null;
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT;
     this.headed = options.headed ?? options.liveViewport ?? false;
     this.openLiveDashboard = options.openLiveDashboard ?? true;
@@ -87,13 +89,15 @@ export class BrowserAgent {
     const statePath = Object.hasOwn(options, 'statePath') ? options.statePath ?? null : this.statePath;
     const reuseRunningBrowser = options.reuseRunningBrowser ?? (this.reuseRunningBrowser && !profile && !statePath);
     const browserArgs = options.browserArgs ?? this.browserArgs;
+    const useNamedSession = !profile;
+    const launchProfile = profile && args[0] === 'open' ? profile : null;
 
     return [
-      ...(profile ? ['--profile', profile] : []),
+      ...(launchProfile ? ['--profile', launchProfile] : []),
+      ...(this.sessionName ? ['--session-name', this.sessionName] : []),
       ...(statePath ? ['--state', statePath] : []),
       ...(reuseRunningBrowser ? ['--auto-connect'] : []),
-      '--session',
-      this.sessionId,
+      ...(useNamedSession ? ['--session', this.sessionId] : []),
       ...(useHeaded ? ['--headed'] : []),
       ...(args[0] === 'open' && browserArgs.length > 0
         ? ['--args', browserArgs.join(',')]
@@ -110,7 +114,7 @@ export class BrowserAgent {
 
   /** 底层命令执行入口，负责调用单条 agent-browser 命令并返回 stdout。 */
   private run(args: string[], options: { headed?: boolean } = {}): string {
-    const useHeaded = options.headed ?? (args[0] === 'open' ? this.headed && !this.profile : false);
+    const useHeaded = options.headed ?? (args[0] === 'open' ? this.headed : false);
     const result: SpawnSyncReturns<string> = spawnSync(
       'agent-browser',
       this.buildGlobalArgs(args, useHeaded),
@@ -305,6 +309,11 @@ export class BrowserAgent {
   /** 获取机器可读的可交互无障碍树快照。 */
   snapshotJson(): AgentBrowserJsonResult {
     return parseJsonOutput(this.run(['snapshot', '-i', '--json']));
+  }
+
+  /** 保存当前会话的 cookies 与 storage，用于后续以干净窗口复用登录态。 */
+  stateSave(path: string): string {
+    return this.run(['state', 'save', path]);
   }
 
   /** 截图。 */

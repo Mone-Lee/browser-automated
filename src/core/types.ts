@@ -77,6 +77,8 @@ export interface TestRunSummary {
 export interface AgentOptions {
   /** 用于隔离浏览器会话的 session id。 */
   sessionId?: string;
+  /** 按名称自动保存和恢复 cookies 与 localStorage。 */
+  sessionName?: string;
   /** 每条命令的超时时间。 */
   timeout?: number;
   /** 是否以无头模式运行。 */

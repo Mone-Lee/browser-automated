@@ -80,12 +80,34 @@ describe('BrowserAgent', () => {
 
       expect(mockSpawnSync).toHaveBeenCalledWith(
         'agent-browser',
-        ['--profile', 'Default', '--session', 'test-session', 'open', 'https://example.com'],
+        ['--profile', 'Default', 'open', 'https://example.com'],
         expect.objectContaining({ encoding: 'utf-8' }),
       );
     });
 
-    it('does not combine --profile with headed launch mode', () => {
+    it('passes --session-name when configured', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult(''));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session', sessionName: 'browser-opt-example-com' });
+      agent.open('https://example.com');
+
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'agent-browser',
+        [
+          '--session-name',
+          'browser-opt-example-com',
+          '--session',
+          'test-session',
+          '--args',
+          '--disable-session-crashed-bubble,--no-first-run,--no-default-browser-check',
+          'open',
+          'https://example.com',
+        ],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+    });
+
+    it('combines --profile with headed launch mode', () => {
       mockSpawnSync.mockReturnValue(makeOkResult(''));
 
       const agent = new BrowserAgent({ sessionId: 'test-session', profile: 'Default', liveViewport: true });
@@ -93,8 +115,44 @@ describe('BrowserAgent', () => {
 
       expect(mockSpawnSync).toHaveBeenCalledWith(
         'agent-browser',
-        ['--profile', 'Default', '--session', 'test-session', 'open', 'https://example.com'],
+        ['--profile', 'Default', '--headed', 'open', 'https://example.com'],
         expect.objectContaining({ encoding: 'utf-8' }),
+      );
+    });
+
+    it('omits profile and session for follow-up commands after a profile launch', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult('https://example.com/'));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session', profile: 'Default' });
+      agent.getUrl();
+
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'agent-browser',
+        ['get', 'url'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+    });
+
+    it('does not close or restart when profile launch returns a warning', () => {
+      mockSpawnSync.mockReturnValue({
+        status: 0,
+        stdout: 'opened',
+        stderr: '--profile ignored: daemon already running',
+        error: undefined,
+      } as ReturnType<typeof spawnSync>);
+
+      const agent = new BrowserAgent({ sessionId: 'test-session', profile: 'Default', liveViewport: true });
+      agent.open('https://example.com');
+
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'agent-browser',
+        ['--profile', 'Default', '--headed', 'open', 'https://example.com'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+      expect(mockSpawnSync).not.toHaveBeenCalledWith(
+        'agent-browser',
+        ['close', '--all'],
+        expect.anything(),
       );
     });
 
