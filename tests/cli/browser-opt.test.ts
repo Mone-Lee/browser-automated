@@ -22,12 +22,14 @@ function makeTempDir(): string {
 }
 
 function runCli(args: string[], env: Record<string, string> = {}) {
+  const authStateDir = makeTempDir();
   return spawnSync('node', ['--import', 'tsx', 'src/cli/index.ts', ...args], {
     cwd: path.resolve(import.meta.dirname, '../..'),
     encoding: 'utf-8',
     env: {
       ...process.env,
       AGENT_BROWSER_STATE: '',
+      BROWSER_OPT_AUTH_STATE_DIR: authStateDir,
       PATH: `${makeTempAgentBrowserBin()}${path.delimiter}${process.env.PATH ?? ''}`,
       ...env,
     },
@@ -43,7 +45,7 @@ function makeTempAgentBrowserBin(): string {
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 if (process.env.AGENT_BROWSER_LOG) fs.appendFileSync(process.env.AGENT_BROWSER_LOG, args.join(' ') + '\\n');
-const optionsWithValues = new Set(['--profile', '--session', '--args', '--output-dir']);
+const optionsWithValues = new Set(['--profile', '--session', '--state', '--args', '--output-dir']);
 let commandIndex = -1;
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
@@ -77,6 +79,10 @@ if (command === 'open') {
   process.stdout.write('handoff requested');
 } else if (command === 'chat') {
   process.stdout.write(JSON.stringify({ success: true, text: 'Done' }));
+} else if (command === 'state' && args[commandIndex + 1] === 'save') {
+  const target = args[commandIndex + 2];
+  if (target) fs.writeFileSync(target, JSON.stringify({ cookies: [], origins: [] }));
+  process.stdout.write('state saved');
 } else if (command === 'close') {
   process.stdout.write('closed');
 } else if (command === 'dashboard' || command === 'stream') {
@@ -117,12 +123,13 @@ describe('browser-opt CLI', () => {
     expect(commands).not.toContain('--session-name');
     expect(commands).toContain('--profile Default');
     expect(commands).not.toContain('close --all');
-    expect(commands).not.toContain('state save');
+    expect(commands).toContain('state save');
     expect(commands).not.toContain('--auto-connect');
     expect(commands).not.toContain('--state ');
     expect(commands).toContain('open https://example.com');
     expect(commands).toContain('--profile Default');
     expect(commands).toContain('--headed open https://example.com');
+    expect(commands).toContain('browser-opt-default.json');
     expect(commands).not.toContain('auth-import');
     expect(commands).not.toContain('dashboard start');
     expect(fs.readdirSync(outputDir).some((entry) => fs.existsSync(path.join(outputDir, entry, 'report.json')))).toBe(true);
@@ -144,7 +151,54 @@ describe('browser-opt CLI', () => {
     const commands = fs.readFileSync(commandLog, 'utf-8');
     expect(commands).toContain('--profile Work');
     expect(commands).not.toContain('--profile Default');
-    expect(commands).not.toContain('state save');
+    expect(commands).toContain('state save');
+    expect(commands).toContain('browser-opt-work.json');
+  });
+
+  it('loads an existing state file instead of using a profile', () => {
+    const outputDir = makeTempDir();
+    const commandLog = path.join(makeTempDir(), 'agent-browser.log');
+    const stateDir = makeTempDir();
+    const statePath = path.join(stateDir, 'browser-opt-default.json');
+    fs.writeFileSync(statePath, JSON.stringify({ cookies: [], origins: [] }));
+    const result = runCli([
+      'browser-opt',
+      '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。',
+      '--output-dir',
+      outputDir,
+    ], { AGENT_BROWSER_LOG: commandLog, BROWSER_OPT_AUTH_STATE_DIR: stateDir });
+
+    expect(result.status).toBe(0);
+    const commands = fs.readFileSync(commandLog, 'utf-8');
+    expect(commands).not.toContain(`state load ${statePath}`);
+    expect(commands.match(new RegExp(`--state ${statePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g')) ?? []).toHaveLength(1);
+    expect(commands).toContain(`--state ${statePath} --session`);
+    expect(commands).not.toContain('--profile Default');
+    expect(commands).not.toContain('--auto-connect');
+    expect(commands).toContain('state save');
+  });
+
+  it('uses an explicit state path when it exists', () => {
+    const outputDir = makeTempDir();
+    const commandLog = path.join(makeTempDir(), 'agent-browser.log');
+    const statePath = path.join(makeTempDir(), 'custom-state.json');
+    fs.writeFileSync(statePath, JSON.stringify({ cookies: [], origins: [] }));
+    const result = runCli([
+      'browser-opt',
+      '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。',
+      '--state',
+      statePath,
+      '--output-dir',
+      outputDir,
+    ], { AGENT_BROWSER_LOG: commandLog });
+
+    expect(result.status).toBe(0);
+    const commands = fs.readFileSync(commandLog, 'utf-8');
+    expect(commands).not.toContain(`state load ${statePath}`);
+    expect(commands.match(new RegExp(`--state ${statePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g')) ?? []).toHaveLength(1);
+    expect(commands).toContain(`--state ${statePath} --session`);
+    expect(commands).not.toContain('--profile Default');
+    expect(commands).toContain(`state save ${statePath}`);
   });
 
   it('prints report details when a flow fails', () => {
@@ -197,6 +251,8 @@ describe('browser-opt CLI', () => {
     expect(result.status).toBe(2);
     expect(result.stdout).toContain('Handoff: 已触发，请先在浏览器中完成登录后再重试。');
     expect(result.stdout).toContain('初始化打开目标页面后检测到登录页跳转');
-    expect(fs.readFileSync(commandLog, 'utf-8')).toContain('handoff');
+    const commands = fs.readFileSync(commandLog, 'utf-8');
+    expect(commands).toContain('handoff');
+    expect(commands).not.toContain('state save');
   });
 });

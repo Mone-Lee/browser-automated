@@ -197,6 +197,46 @@ describe('BrowserAgent', () => {
       );
     });
 
+    it('omits the state flag on follow-up commands after a state launch', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult('https://example.com/'));
+
+      const agent = new BrowserAgent({
+        sessionId: 'test-session',
+        statePath: '/tmp/auth-state.json',
+      });
+      agent.getUrl();
+
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'agent-browser',
+        ['--session', 'test-session', 'get', 'url'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+    });
+
+    it('keeps state save and load commands free of the configured state flag', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult('state ok'));
+
+      const agent = new BrowserAgent({
+        sessionId: 'test-session',
+        statePath: '/tmp/auth-state.json',
+      });
+      agent.stateLoad('/tmp/auth-state.json');
+      agent.stateSave('/tmp/auth-state.json');
+
+      expect(mockSpawnSync).toHaveBeenNthCalledWith(
+        1,
+        'agent-browser',
+        ['--session', 'test-session', 'state', 'load', '/tmp/auth-state.json'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+      expect(mockSpawnSync).toHaveBeenNthCalledWith(
+        2,
+        'agent-browser',
+        ['--session', 'test-session', 'state', 'save', '/tmp/auth-state.json'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+    });
+
     it('auto-opens dashboard once when live viewport initializes', () => {
       (BrowserAgent as unknown as { autoOpenedDashboardUrls: Set<string> }).autoOpenedDashboardUrls.clear();
 

@@ -68,6 +68,7 @@ function buildAgent(options: {
     handoff: vi.fn(() => 'HANDOFF: waiting'),
     resume: vi.fn(() => 'RESUME_FALLBACK: continuing session browser-opt-test-session without an explicit resume command.'),
     stateSave: vi.fn(() => 'state saved'),
+    stateLoad: vi.fn(() => 'state loaded'),
     chatJson: vi.fn(options.chat ?? (() => ({ raw: '{"success":true}', data: { success: true } }))),
     waitMs: vi.fn(() => 'waited'),
     close: vi.fn(() => {}),
@@ -231,12 +232,14 @@ describe('BrowserOptRunner', () => {
 
     const result = await runner.run('执行创建安选公开直播流程：\n1. 访问 https://test-live.ifengqun.com/live/create?time=2\n2. 直播间名称输入“安选公开直播自动化”', {
       outputDir,
+      authStateSavePath: path.join(makeTempDir(), 'auth-state.json'),
     });
 
     expect(result.passed).toBe(false);
     expect((agent.fill as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect(result.report.handoffTriggered).toBe(true);
     expect((agent.handoff as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((agent.stateSave as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect(result.report.logs.join('\n')).toContain('初始化打开目标页面后检测到登录页跳转');
   });
 
@@ -273,6 +276,52 @@ describe('BrowserOptRunner', () => {
     expect(onHandoffRequired).toHaveBeenCalledTimes(1);
     expect(onHandoffCompleted).toHaveBeenCalledTimes(1);
     expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e2', '安选公开直播自动化');
+  });
+
+  it('saves auth state at the end when a save path is provided', async () => {
+    const outputDir = makeTempDir();
+    const authStateSavePath = path.join(makeTempDir(), 'auth-state.json');
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open snapshot', { e1: { role: 'heading', name: 'Example' } }),
+        snapshotJson('before snapshot', { e1: { role: 'heading', name: 'Example' } }),
+        snapshotJson('after snapshot with Example', { e1: { role: 'heading', name: 'Example' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。', {
+      outputDir,
+      authStateSavePath,
+    });
+
+    expect(result.passed).toBe(true);
+    expect((agent.stateSave as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(authStateSavePath);
+    expect(result.report.logs.join('\n')).toContain(`auth-state-save: ${authStateSavePath}`);
+  });
+
+  it('passes the auth state path into the agent when a state path is provided', async () => {
+    const outputDir = makeTempDir();
+    const authStatePath = path.join(makeTempDir(), 'auth-state.json');
+    const capturedOptions: AgentOptions[] = [];
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open snapshot', { e1: { role: 'heading', name: 'Example' } }),
+        snapshotJson('before snapshot', { e1: { role: 'heading', name: 'Example' } }),
+        snapshotJson('after snapshot with Example', { e1: { role: 'heading', name: 'Example' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent, capturedOptions));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。', {
+      outputDir,
+      statePath: authStatePath,
+    });
+
+    expect(result.passed).toBe(true);
+    expect(capturedOptions[0]).toEqual(expect.objectContaining({ statePath: authStatePath }));
+    expect((agent.stateLoad as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect((agent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('https://example.com');
   });
 
   it('keeps ordinary action failures as normal errors instead of handoff', async () => {
