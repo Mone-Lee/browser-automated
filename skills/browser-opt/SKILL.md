@@ -77,12 +77,13 @@ Optional runtime flags:
 
 ```bash
 browser-opt "<flow>" --profile Default
+browser-opt "<flow>" --state ./.browser-automated/states/browser-opt-default.json
 browser-opt "<flow>" --no-live-viewport
 browser-opt "<flow>" --output-dir ./artifacts/browser-opt
 browser-opt "<flow>" --agent-chat
 ```
 
-By default, `browser-opt` starts the requested URL with `--profile Default` so it can reuse the user's existing Chrome login state. Pass `--profile <name>` only to choose a different Chrome profile. It shows and keeps the real headed browser by default so the user can watch the operation and inspect the final page state, but it must not open the agent-browser dashboard at `http://localhost:4848`. Use `--no-live-viewport` only when the user explicitly wants headless execution. `--agent-chat` is a legacy compatibility mode. It may require `AI_GATEWAY_API_KEY`; avoid it when the caller can inspect snapshots and produce deterministic actions.
+By default, `browser-opt` first checks its saved auth state under `.browser-automated/states/`. If a state file exists, it loads that state and does not pass `--profile`, so only cookies/storage are reused and prior Chrome tabs are not restored. If no state file exists, it starts once with `--profile Default` and saves cookies/storage for later runs. Pass `--profile <name>` only to choose a different Chrome profile for first import, and pass `--state <path>` to use a custom state file. It shows and keeps the real headed browser by default so the user can watch the operation and inspect the final page state, but it must not open the agent-browser dashboard at `http://localhost:4848`. Use `--no-live-viewport` only when the user explicitly wants headless execution. `--agent-chat` is a legacy compatibility mode. It may require `AI_GATEWAY_API_KEY`; avoid it when the caller can inspect snapshots and produce deterministic actions.
 
 ## Output
 

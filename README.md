@@ -37,7 +37,7 @@ npx browser-opt "测试 https://example.com 的搜索功能。
 2. 验证页面包含 \"Example\"。"
 ```
 
-执行成功时只输出 `执行成功`；执行失败时才输出报告路径、日志路径、截图路径和失败步骤。默认模式会把常见访问、输入、点击和验证步骤转成确定性 `agent-browser` 命令；只有显式传 `--agent-chat` 时才使用旧的 `agent-browser chat` 兼容模式。`browser-opt` 默认显示并保留真实浏览器，便于观察操作流程和执行后的页面状态，但不会打开 agent-browser 的 `http://localhost:4848` 截图面板。
+执行成功时只输出 `执行成功`；执行失败时才输出报告路径、日志路径、截图路径和失败步骤。默认模式会把常见访问、输入、点击和验证步骤转成确定性 `agent-browser` 命令；只有显式传 `--agent-chat` 时才使用旧的 `agent-browser chat` 兼容模式。`browser-opt` 会优先加载 `.browser-automated/states/` 下已有登录态 state，避免恢复浏览器标签；没有 state 时才使用 `--profile Default` 首次导入登录态，并在结束时保存 cookies/storage 供下次复用。`browser-opt` 默认显示并保留真实浏览器，便于观察操作流程和执行后的页面状态，但不会打开 agent-browser 的 `http://localhost:4848` 截图面板。
 
 E2E skill 流程：
 
@@ -76,7 +76,7 @@ npx browser-e2e gen https://example.com "打开 pricing 页面并进入 contact 
 2. 提示用户完成验证码、授权或 MFA。
 3. 用户输入 `done`、`ok`、`继续` 或 `完成` 后恢复自动化。
 
-`--profile <name>` 可复用指定 Chrome profile，`--no-live-viewport` 可关闭可见浏览器。
+`--profile <name>` 可指定首次导入登录态使用的 Chrome profile，`--state <path>` 可指定登录态 state 文件，`--no-live-viewport` 可关闭可见浏览器。
 
 ## Skill 入口
 

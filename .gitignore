@@ -2,6 +2,7 @@ node_modules/
 dist/
 *.tsbuildinfo
 .agent-browser/
+.browser-automated/
 *.png
 *.jpg
 *.jpeg
