@@ -87,12 +87,15 @@ export interface SnapshotNode {
   ref: string;
   role: string;
   label: string;
+  checked?: boolean;
+  disabled?: boolean;
 }
 
 export type DeterministicAction =
   | { type: 'open'; url: string }
   | { type: 'fill'; field: string; value: string }
   | { type: 'click'; target: string }
+  | { type: 'select-option'; field: string | null; option: string }
   | { type: 'upload'; field: string; source: string }
   | { type: 'handoff'; message: string }
   | { type: 'assert-text'; text: string };

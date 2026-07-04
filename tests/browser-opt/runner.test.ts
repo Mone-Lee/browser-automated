@@ -192,6 +192,322 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps[1].logs.join('\n')).toContain('deterministic agent-browser command');
   });
 
+  it('treats an already selected radio option as a completed deterministic action', async () => {
+    const outputDir = makeTempDir();
+    const radioSnapshot = [
+      '- LabelText "开启" [ref=e21] clickable [onclick]',
+      '  - radio "开启 " [checked=false, disabled, ref=e31]',
+      '- LabelText "关闭" [ref=e22] clickable [onclick]',
+      '  - radio "关闭 " [checked=true, disabled, ref=e32]',
+    ].join('\n');
+    const refs = {
+      e21: { role: 'LabelText', name: '开启' },
+      e22: { role: 'LabelText', name: '关闭' },
+      e31: { role: 'radio', name: '开启  ' },
+      e32: { role: 'radio', name: '关闭  ' },
+    };
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before visit'),
+        snapshotJson('after visit'),
+        snapshotJson(radioSnapshot, refs),
+        snapshotJson(radioSnapshot, refs),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('执行创建安选公开直播流程：\n1. 访问https://test-live.ifengqun.com/live/create?time=2\n2. 是否开启回放选择“关闭”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(result.report.steps[1].actionOutput).toContain('selection skipped');
+  });
+
+  it('selects the enabled repeated radio group without hard-coded field names', async () => {
+    const outputDir = makeTempDir();
+    const radioSnapshot = [
+      '- LabelText "开启" [ref=e21] clickable [onclick]',
+      '  - radio "开启 " [checked=false, disabled, ref=e31]',
+      '- LabelText "关闭" [ref=e22] clickable [onclick]',
+      '  - radio "关闭 " [checked=true, disabled, ref=e32]',
+      '- LabelText "开启" [ref=e23] clickable [cursor:pointer, onclick]',
+      '  - radio "开启 " [checked=false, ref=e33]',
+      '- LabelText "关闭" [ref=e24] clickable [cursor:pointer, onclick]',
+      '  - radio "关闭 " [checked=true, ref=e34]',
+    ].join('\n');
+    const refs = {
+      e21: { role: 'LabelText', name: '开启' },
+      e22: { role: 'LabelText', name: '关闭' },
+      e23: { role: 'LabelText', name: '开启' },
+      e24: { role: 'LabelText', name: '关闭' },
+      e31: { role: 'radio', name: '开启  ' },
+      e32: { role: 'radio', name: '关闭  ' },
+      e33: { role: 'radio', name: '开启  ' },
+      e34: { role: 'radio', name: '关闭  ' },
+    };
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(radioSnapshot, refs),
+        snapshotJson(radioSnapshot, refs),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 是否显示录播提示文案选择“开启”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e23');
+  });
+
+  it('parses quoted field and quoted option separately for select steps', async () => {
+    const outputDir = makeTempDir();
+    const radioSnapshot = [
+      '- StaticText "分账节点" [ref=f1]',
+      '- LabelText "正常结算" [ref=e21] clickable [onclick]',
+      '  - radio "正常结算" [checked=true, ref=e31]',
+      '- LabelText "已发货结算" [ref=e22] clickable [onclick]',
+      '  - radio "已发货结算" [checked=false, ref=e32]',
+    ].join('\n');
+    const refs = {
+      f1: { role: 'StaticText', name: '分账节点' },
+      e21: { role: 'LabelText', name: '正常结算' },
+      e22: { role: 'LabelText', name: '已发货结算' },
+      e31: { role: 'radio', name: '正常结算' },
+      e32: { role: 'radio', name: '已发货结算' },
+    };
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(radioSnapshot, refs),
+        snapshotJson(radioSnapshot, refs),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 将“分账节点”选择“已发货结算”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e22');
+    expect(result.report.steps[0].actionOutput).toContain('分账节点=已发货结算');
+    expect(result.report.steps[0].actionOutput).toContain('click @e22');
+  });
+
+  it('parses quoted field with an unquoted option for select steps', async () => {
+    const outputDir = makeTempDir();
+    const radioSnapshot = [
+      '- StaticText "分账节点" [ref=f1]',
+      '- LabelText "正常结算" [ref=e21] clickable [onclick]',
+      '  - radio "正常结算" [checked=false, ref=e31]',
+      '- LabelText "已发货结算" [ref=e22] clickable [onclick]',
+      '  - radio "已发货结算" [checked=true, ref=e32]',
+    ].join('\n');
+    const refs = {
+      f1: { role: 'StaticText', name: '分账节点' },
+      e21: { role: 'LabelText', name: '正常结算' },
+      e22: { role: 'LabelText', name: '已发货结算' },
+      e31: { role: 'radio', name: '正常结算' },
+      e32: { role: 'radio', name: '已发货结算' },
+    };
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(radioSnapshot, refs),
+        snapshotJson(radioSnapshot, refs),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 将“分账节点”选择正常结算', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e21');
+  });
+
+  it('parses unquoted field with a quoted option for select steps', async () => {
+    const outputDir = makeTempDir();
+    const radioSnapshot = [
+      '- StaticText "分账节点" [ref=f1]',
+      '- LabelText "正常结算" [ref=e21] clickable [onclick]',
+      '  - radio "正常结算" [checked=true, ref=e31]',
+      '- LabelText "已发货结算" [ref=e22] clickable [onclick]',
+      '  - radio "已发货结算" [checked=false, ref=e32]',
+    ].join('\n');
+    const refs = {
+      f1: { role: 'StaticText', name: '分账节点' },
+      e21: { role: 'LabelText', name: '正常结算' },
+      e22: { role: 'LabelText', name: '已发货结算' },
+      e31: { role: 'radio', name: '正常结算' },
+      e32: { role: 'radio', name: '已发货结算' },
+    };
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(radioSnapshot, refs),
+        snapshotJson(radioSnapshot, refs),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 分账节点选择“已发货结算”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e22');
+  });
+
+  it('parses unquoted field and unquoted option for select steps', async () => {
+    const outputDir = makeTempDir();
+    const radioSnapshot = [
+      '- StaticText "分账节点" [ref=f1]',
+      '- LabelText "正常结算" [ref=e21] clickable [onclick]',
+      '  - radio "正常结算" [checked=false, ref=e31]',
+      '- LabelText "已发货结算" [ref=e22] clickable [onclick]',
+      '  - radio "已发货结算" [checked=true, ref=e32]',
+    ].join('\n');
+    const refs = {
+      f1: { role: 'StaticText', name: '分账节点' },
+      e21: { role: 'LabelText', name: '正常结算' },
+      e22: { role: 'LabelText', name: '已发货结算' },
+      e31: { role: 'radio', name: '正常结算' },
+      e32: { role: 'radio', name: '已发货结算' },
+    };
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(radioSnapshot, refs),
+        snapshotJson(radioSnapshot, refs),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 分账节点选择正常结算', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e21');
+  });
+
+  it('limits repeated option matching to the field scope when labels are duplicated', async () => {
+    const outputDir = makeTempDir();
+    const radioSnapshot = [
+      '- StaticText "分账节点" [ref=f1]',
+      '- LabelText "正常结算" [ref=e21] clickable [onclick]',
+      '  - radio "正常结算" [checked=true, ref=e31]',
+      '- LabelText "已发货结算" [ref=e22] clickable [onclick]',
+      '  - radio "已发货结算" [checked=false, ref=e32]',
+      '- StaticText "配送节点" [ref=f2]',
+      '- LabelText "正常结算" [ref=e23] clickable [onclick]',
+      '  - radio "正常结算" [checked=false, ref=e33]',
+      '- LabelText "已发货结算" [ref=e24] clickable [onclick]',
+      '  - radio "已发货结算" [checked=true, ref=e34]',
+    ].join('\n');
+    const refs = {
+      f1: { role: 'StaticText', name: '分账节点' },
+      f2: { role: 'StaticText', name: '配送节点' },
+      e21: { role: 'LabelText', name: '正常结算' },
+      e22: { role: 'LabelText', name: '已发货结算' },
+      e23: { role: 'LabelText', name: '正常结算' },
+      e24: { role: 'LabelText', name: '已发货结算' },
+      e31: { role: 'radio', name: '正常结算' },
+      e32: { role: 'radio', name: '已发货结算' },
+      e33: { role: 'radio', name: '正常结算' },
+      e34: { role: 'radio', name: '已发货结算' },
+    };
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(radioSnapshot, refs),
+        snapshotJson(radioSnapshot, refs),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 将“配送节点”选择“正常结算”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e23');
+  });
+
+  it('skips already checked checkbox options without using select semantics', async () => {
+    const outputDir = makeTempDir();
+    const checkboxSnapshot = [
+      '- LabelText "服务协议" [ref=e41] clickable [onclick]',
+      '  - checkbox "服务协议" [checked=true, ref=e42]',
+    ].join('\n');
+    const refs = {
+      e41: { role: 'LabelText', name: '服务协议' },
+      e42: { role: 'checkbox', name: '服务协议' },
+    };
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(checkboxSnapshot, refs),
+        snapshotJson(checkboxSnapshot, refs),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 勾选“服务协议”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(result.report.steps[0].actionOutput).toContain('selection skipped');
+  });
+
+  it('waits and retries when a dependent select option appears after another field update', async () => {
+    const outputDir = makeTempDir();
+    const beforeDependentRender = [
+      '- StaticText "直播类型" [ref=f1]',
+      '- LabelText "公开直播" [ref=e21] clickable [onclick]',
+      '  - radio "公开直播" [checked=false, ref=e31]',
+      '- LabelText "安选直播" [ref=e22] clickable [onclick]',
+      '  - radio "安选直播" [checked=true, ref=e32]',
+    ].join('\n');
+    const afterDependentRender = [
+      beforeDependentRender,
+      '- StaticText "业务类型" [ref=f2]',
+      '- LabelText "安选私密" [ref=e23] clickable [onclick]',
+      '  - radio "安选私密" [checked=true, ref=e33]',
+      '- LabelText "安选生鲜" [ref=e24] clickable [onclick]',
+      '  - radio "安选生鲜" [checked=false, ref=e34]',
+      '- LabelText "安选公开" [ref=e25] clickable [onclick]',
+      '  - radio "安选公开" [checked=false, ref=e35]',
+    ].join('\n');
+    const beforeRefs = {
+      f1: { role: 'StaticText', name: '直播类型' },
+      e21: { role: 'LabelText', name: '公开直播' },
+      e22: { role: 'LabelText', name: '安选直播' },
+      e31: { role: 'radio', name: '公开直播' },
+      e32: { role: 'radio', name: '安选直播' },
+    };
+    const afterRefs = {
+      ...beforeRefs,
+      f2: { role: 'StaticText', name: '业务类型' },
+      e23: { role: 'LabelText', name: '安选私密' },
+      e24: { role: 'LabelText', name: '安选生鲜' },
+      e25: { role: 'LabelText', name: '安选公开' },
+      e33: { role: 'radio', name: '安选私密' },
+      e34: { role: 'radio', name: '安选生鲜' },
+      e35: { role: 'radio', name: '安选公开' },
+    };
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(beforeDependentRender, beforeRefs),
+        snapshotJson(afterDependentRender, afterRefs),
+        snapshotJson(afterDependentRender, afterRefs),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 业务类型选择“安选公开”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.waitMs as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(500);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e25');
+    expect(result.report.steps[0].logs.join('\n')).toContain('retry-wait');
+  });
+
   it('waits and retries when the initial open snapshot is still about:blank', async () => {
     const outputDir = makeTempDir();
     const blankSnapshot = {

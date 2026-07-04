@@ -73,6 +73,15 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
     };
   }
 
+  const selectableTarget = parseSelectableTarget(normalized);
+  if (selectableTarget) {
+    return {
+      type: 'select-option',
+      field: selectableTarget.field,
+      option: selectableTarget.option,
+    };
+  }
+
   if (/点击|单击|click|tap|press/i.test(normalized)) {
     const target = quoted
       ?? normalized
@@ -120,6 +129,82 @@ function parseFieldName(instruction: string): string | null {
   return afterVerb || null;
 }
 
+interface QuotedSegment {
+  value: string;
+  index: number;
+}
+
+/** 从“字段选择选项”类语句中同时提取字段名和选项，避免把字段误当成选项。 */
+function parseSelectableTarget(instruction: string): { field: string | null; option: string } | null {
+  const verb = instruction.match(/选择|选中|勾选|勾上|设置为|select|check/i);
+  if (!verb) {
+    return null;
+  }
+
+  const quoted = extractQuotedSegments(instruction);
+  if (quoted.length >= 2) {
+    return {
+      field: quoted[0].value,
+      option: quoted[1].value,
+    };
+  }
+
+  const quotedValueIsField = quoted[0] && quoted[0].index < (verb.index ?? 0);
+  const option = quotedValueIsField ? parseUnquotedSelectableOption(instruction) : quoted[0]?.value ?? parseUnquotedSelectableOption(instruction);
+  if (!option) {
+    return null;
+  }
+
+  return {
+    field: quotedValueIsField ? cleanSelectableText(quoted[0].value) : parseSelectableFieldName(instruction, quoted[0]) ?? null,
+    option,
+  };
+}
+
+/** 提取中英文引号里的片段，并保留位置供字段名解析避开选项片段。 */
+function extractQuotedSegments(instruction: string): QuotedSegment[] {
+  const matches = instruction.matchAll(/["“‘']([^"”’']+)["”’']/g);
+  return [...matches]
+    .map((match) => ({ value: match[1]?.trim() ?? '', index: match.index ?? 0 }))
+    .filter((segment) => Boolean(segment.value));
+}
+
+/** 从没有引号的选择语句中提取目标选项，作为口语化步骤的兜底。 */
+function parseUnquotedSelectableOption(instruction: string): string | null {
+  const afterVerb = instruction.match(/(?:选择|选中|勾选|勾上|设置为|select|check)\s*([^，,。；\n]+)/i)?.[1]?.trim();
+  if (!afterVerb) {
+    return null;
+  }
+
+  return cleanSelectableText(afterVerb.replace(/^(为|成|到)\s*/, ''));
+}
+
+/** 从“字段选择选项”类语句中提取字段名，支持单选、多选和开关式配置。 */
+function parseSelectableFieldName(instruction: string, quotedOption?: QuotedSegment): string | null {
+  const beforeVerb = instruction.match(/^(.+?)(?:选择|选中|勾选|勾上|设置为|select|check)/i)?.[1]?.trim();
+  if (beforeVerb) {
+    const cleaned = cleanSelectableText(beforeVerb.replace(/^(将|把|在|为|给)\s*/, ''));
+    if (cleaned) {
+      return cleaned;
+    }
+  }
+
+  const beforeQuotedOption = quotedOption ? instruction.slice(0, quotedOption.index) : instruction;
+  const afterVerb = beforeQuotedOption.match(/(?:在|为|给)\s*([^，,。；\n]+?)(?:中|里|内)?(?:选择|选中|勾选|勾上|设置为)/i)?.[1]?.trim();
+  return cleanSelectableText(afterVerb ?? '');
+}
+
+/** 清理字段名和选项值外围的语气词、引号和标点，保留真实业务文案。 */
+function cleanSelectableText(value: string): string | null {
+  const cleaned = value
+    .replace(/^["“‘']|["”’']$/g, '')
+    .replace(/^(为|成|到)\s*/, '')
+    .replace(/[：:，,。；]$/g, '')
+    .trim();
+
+  return cleaned || null;
+}
+
 /** 在当前快照中优先查找文本框，再按字段名做最佳匹配。 */
 export function findTextboxRef(snapshot: SnapshotEvidence, field: string): string | null {
   const nodes = getSnapshotNodes(snapshot).filter((node) => isTextboxRole(node.role));
@@ -137,6 +222,35 @@ export function findClickableRef(snapshot: SnapshotEvidence, target: string): st
   return findBestNodeRef(nodes, target) ?? nodes[0]?.ref ?? null;
 }
 
+/** 查找单选或多选选项，优先点击 label，并在已选中时短路为完成。 */
+export function findSelectableOption(
+  snapshot: SnapshotEvidence,
+  field: string | null,
+  option: string,
+): { ref: string | null; alreadySelected: boolean; role: string | null } {
+  const scoped = findScopedOptionLabel(snapshot.text, field, option);
+  if (scoped) {
+    return scoped;
+  }
+
+  const nodes = getSnapshotNodes(snapshot);
+  const selectable = findBestNode(nodes.filter((node) => isSelectableRole(node.role)), option);
+  if (selectable?.checked) {
+    return { ref: selectable.ref, alreadySelected: true, role: selectable.role };
+  }
+
+  const label = findBestNode(nodes.filter((node) => isClickableLabelRole(node.role)), option);
+  if (label) {
+    return { ref: label.ref, alreadySelected: false, role: label.role };
+  }
+
+  if (selectable && !selectable.disabled) {
+    return { ref: selectable.ref, alreadySelected: false, role: selectable.role };
+  }
+
+  return { ref: null, alreadySelected: false, role: null };
+}
+
 /** 查找上传控件，先匹配文件输入，再回退到同名上传按钮。 */
 export function findUploadRef(snapshot: SnapshotEvidence, field: string): string | null {
   const nodes = getSnapshotNodes(snapshot);
@@ -151,6 +265,11 @@ export function findUploadRef(snapshot: SnapshotEvidence, field: string): string
 
 /** 在候选节点集合里做一次精确优先、字符兜底的模糊匹配。 */
 function findBestNodeRef(nodes: SnapshotNode[], target: string): string | null {
+  return findBestNode(nodes, target)?.ref ?? null;
+}
+
+/** 在候选节点集合里返回最佳匹配节点，供需要读取选中状态的场景复用。 */
+function findBestNode(nodes: SnapshotNode[], target: string): SnapshotNode | null {
   const normalizedTarget = normalizeMatchText(target);
   if (!normalizedTarget) {
     return null;
@@ -161,7 +280,7 @@ function findBestNodeRef(nodes: SnapshotNode[], target: string): string | null {
     return label.includes(normalizedTarget) || normalizedTarget.includes(label);
   });
   if (exact) {
-    return exact.ref;
+    return exact;
   }
 
   const targetChars = [...normalizedTarget];
@@ -170,7 +289,7 @@ function findBestNodeRef(nodes: SnapshotNode[], target: string): string | null {
     return targetChars.length > 1 && targetChars.every((char) => label.includes(char));
   });
 
-  return partial?.ref ?? null;
+  return partial ?? null;
 }
 
 /** 把 JSON refs 和 snapshot 文本中的节点信息统一归并成可匹配的节点列表。 */
@@ -199,33 +318,56 @@ function getSnapshotNodes(snapshot: SnapshotEvidence): SnapshotNode[] {
 
 /** 从 snapshot 的单行文本中解析出一个节点定义，作为 refs 缺失时的兜底来源。 */
 function parseSnapshotLine(line: string): SnapshotNode | null {
-  const match = line.match(/(textbox|button|link|generic|input)[^\n"]*"([^"]*)"[^\n]*\[ref=([^\]]+)\]/i);
-  if (match?.[1] && match[3]) {
+  const match = line.match(/-\s*([A-Za-z]+)\s+"([^"]*)"\s+\[([^\]]+)\]/);
+  const ref = match?.[3]?.match(/(?:^|,\s*)ref=([^,\]\s]+)/)?.[1];
+  if (match?.[1] && ref) {
     return {
       role: match[1],
       label: match[2] ?? '',
-      ref: match[3],
+      ref,
+      checked: /(?:^|,\s*)checked=true(?:,|$)/.test(match[3]),
+      disabled: /(?:^|,\s*)disabled(?:,|$)/.test(match[3]),
     };
   }
 
   return null;
 }
 
-/** 以 ref 去重节点，避免 JSON refs 与文本回退结果重复。 */
+/** 以 ref 合并节点，保留 JSON refs 的基础信息和文本快照里的状态属性。 */
 function mergeSnapshotNodes(nodes: SnapshotNode[]): SnapshotNode[] {
-  const seen = new Set<string>();
-  return nodes.filter((node) => {
-    if (seen.has(node.ref)) {
-      return false;
+  const merged = new Map<string, SnapshotNode>();
+  for (const node of nodes) {
+    const current = merged.get(node.ref);
+    if (!current) {
+      merged.set(node.ref, node);
+      continue;
     }
-    seen.add(node.ref);
-    return true;
-  });
+
+    merged.set(node.ref, {
+      ref: node.ref,
+      role: current.role || node.role,
+      label: current.label || node.label,
+      checked: current.checked ?? node.checked,
+      disabled: current.disabled ?? node.disabled,
+    });
+  }
+
+  return [...merged.values()];
 }
 
 /** 判断某个角色是否可以视为文本输入控件。 */
 function isTextboxRole(role: string): boolean {
   return /textbox|input|searchbox|combobox|textarea/i.test(role);
+}
+
+/** 识别 radio、checkbox 等可选择控件。 */
+function isSelectableRole(role: string): boolean {
+  return /radio|checkbox|switch/i.test(role);
+}
+
+/** 识别常见 UI 库中包裹 radio/checkbox 的可点击 label。 */
+function isClickableLabelRole(role: string): boolean {
+  return /labeltext|label/i.test(role);
 }
 
 /** 只有用户没有给出具体字段名时，才允许回退到页面上的第一个输入框。 */
@@ -241,6 +383,77 @@ function isFileInputRole(role: string, label: string): boolean {
 /** 归一化待匹配文本，减少空格和中英文标点对匹配结果的干扰。 */
 function normalizeMatchText(value: string): string {
   return value.toLowerCase().replace(/\s+/g, '').replace(/[：:，,。；"'“”]/g, '').trim();
+}
+
+/** 基于文本快照顺序，在同一组选项附近寻找目标选项，弥补 refs 缺少字段名的问题。 */
+function findScopedOptionLabel(
+  text: string,
+  field: string | null,
+  option: string,
+): { ref: string | null; alreadySelected: boolean; role: string | null } | null {
+  const lines = text.split('\n');
+  const normalizedField = normalizeMatchText(field ?? '');
+  const normalizedOption = normalizeMatchText(option);
+  const fieldIndex = normalizedField
+    ? lines.findIndex((line) => normalizeMatchText(line).includes(normalizedField))
+    : -1;
+  const startIndex = fieldIndex >= 0 ? fieldIndex + 1 : 0;
+  const endIndex = fieldIndex >= 0 ? findSelectableScopeEnd(lines, startIndex) : lines.length;
+
+  for (let index = startIndex; index < endIndex; index += 1) {
+    const parsed = parseSnapshotLine(lines[index]);
+    if (!parsed) {
+      continue;
+    }
+
+    if (isClickableLabelRole(parsed.role) && normalizeMatchText(parsed.label).includes(normalizedOption)) {
+      const child = parseSnapshotLine(lines[index + 1] ?? '');
+      if (child?.disabled && !child.checked) {
+        index += 1;
+        continue;
+      }
+      return {
+        ref: parsed.ref,
+        alreadySelected: child?.checked ?? false,
+        role: child?.role ?? parsed.role,
+      };
+    }
+
+    if (isSelectableRole(parsed.role) && normalizeMatchText(parsed.label).includes(normalizedOption)) {
+      if (parsed.disabled && !parsed.checked) {
+        continue;
+      }
+      return {
+        ref: parsed.ref,
+        alreadySelected: parsed.checked ?? false,
+        role: parsed.role,
+      };
+    }
+  }
+
+  return null;
+}
+
+/** 字段命中后只在紧邻的可选择控件区域内查找，遇到下一个非选项节点即停止。 */
+function findSelectableScopeEnd(lines: string[], startIndex: number): number {
+  let hasSeenOption = false;
+  for (let index = startIndex; index < lines.length; index += 1) {
+    const parsed = parseSnapshotLine(lines[index]);
+    if (!parsed) {
+      continue;
+    }
+
+    if (isClickableLabelRole(parsed.role) || isSelectableRole(parsed.role)) {
+      hasSeenOption = true;
+      continue;
+    }
+
+    if (hasSeenOption) {
+      return index;
+    }
+  }
+
+  return lines.length;
 }
 
 /** 在未知深度的对象里递归查找首个可用字符串字段。 */

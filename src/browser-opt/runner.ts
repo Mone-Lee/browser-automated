@@ -21,6 +21,7 @@ import {
   countSnapshotNodes,
   extractBrowserOptUrl,
   findClickableRef,
+  findSelectableOption,
   findTextboxRef,
   findUploadRef,
   isVerificationStep,
@@ -230,6 +231,8 @@ async function executeStep(
       actionError = err instanceof Error ? err.message : String(err);
       logs.push(`attempt ${attempts}: action failed: ${actionError}`);
       if (attempts < 2) {
+        agent.waitMs(500);
+        logs.push(`retry-wait: 等待联动渲染或异步状态更新后重新获取页面。`);
         const retrySnapshot = captureSnapshot(agent, retrySnapshotPath);
         actionSnapshot = retrySnapshot;
         logs.push(`retry-snapshot: ${retrySnapshotPath}`);
@@ -395,6 +398,19 @@ async function executeDeterministicInstruction(
     return `click @${ref}\n${output}`.trim();
   }
 
+  if (action.type === 'select-option') {
+    const option = findSelectableOption(snapshot, action.field, action.option);
+    const fieldLabel = action.field ?? '选项';
+    if (option.alreadySelected) {
+      return `selection skipped: ${fieldLabel} 已是 ${action.option}`;
+    }
+    if (!option.ref) {
+      throw new Error(`无法找到选项：${fieldLabel} -> ${action.option}`);
+    }
+    const output = agent.click(option.ref);
+    return `${formatSelectableActionName(option.role)} @${option.ref} ${fieldLabel}=${action.option}\n${output}`.trim();
+  }
+
   if (action.type === 'upload') {
     const ref = findUploadRef(snapshot, action.field);
     if (!ref) {
@@ -411,6 +427,15 @@ async function executeDeterministicInstruction(
   }
 
   return null;
+}
+
+/** 根据控件角色生成 agent-browser 已支持的动作名称，报告文本需与实际命令集一致。 */
+function formatSelectableActionName(role: string | null): string {
+  if (role && /checkbox|switch/i.test(role)) {
+    return 'check';
+  }
+
+  return 'click';
 }
 
 /** 将远程上传素材下载到本次证据目录，让 agent-browser upload 使用稳定的本地路径。 */
