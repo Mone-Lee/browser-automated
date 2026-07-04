@@ -91,11 +91,12 @@ export class BrowserAgent {
     const browserArgs = options.browserArgs ?? this.browserArgs;
     const useNamedSession = !profile;
     const launchProfile = profile && args[0] === 'open' ? profile : null;
+    const launchStatePath = statePath && args[0] === 'open' ? statePath : null;
 
     return [
       ...(launchProfile ? ['--profile', launchProfile] : []),
       ...(this.sessionName ? ['--session-name', this.sessionName] : []),
-      ...(statePath ? ['--state', statePath] : []),
+      ...(launchStatePath ? ['--state', launchStatePath] : []),
       ...(reuseRunningBrowser ? ['--auto-connect'] : []),
       ...(useNamedSession ? ['--session', this.sessionId] : []),
       ...(useHeaded ? ['--headed'] : []),
@@ -113,11 +114,11 @@ export class BrowserAgent {
   }
 
   /** 底层命令执行入口，负责调用单条 agent-browser 命令并返回 stdout。 */
-  private run(args: string[], options: { headed?: boolean } = {}): string {
+  private run(args: string[], options: { headed?: boolean; statePath?: string | null } = {}): string {
     const useHeaded = options.headed ?? (args[0] === 'open' ? this.headed : false);
     const result: SpawnSyncReturns<string> = spawnSync(
       'agent-browser',
-      this.buildGlobalArgs(args, useHeaded),
+      this.buildGlobalArgs(args, useHeaded, Object.hasOwn(options, 'statePath') ? { statePath: options.statePath } : {}),
       { encoding: 'utf-8', timeout: this.timeout },
     );
 
@@ -313,7 +314,12 @@ export class BrowserAgent {
 
   /** 保存当前会话的 cookies 与 storage，用于后续以干净窗口复用登录态。 */
   stateSave(path: string): string {
-    return this.run(['state', 'save', path]);
+    return this.run(['state', 'save', path], { statePath: null });
+  }
+
+  /** 加载已保存的 cookies 与 storage，用于干净窗口复用登录态。 */
+  stateLoad(path: string): string {
+    return this.run(['state', 'load', path], { statePath: null });
   }
 
   /** 截图。 */

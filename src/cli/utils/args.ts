@@ -46,7 +46,13 @@ export function resolveProfile(flags: Record<string, string | boolean>): string 
 }
 
 export function resolveStatePath(flags: Record<string, string | boolean>): string | undefined {
-  return getStringFlag(flags, 'state') ?? process.env.AGENT_BROWSER_STATE;
+  const flagState = getStringFlag(flags, 'state')?.trim();
+  if (flagState) {
+    return flagState;
+  }
+
+  const envState = process.env.AGENT_BROWSER_STATE?.trim();
+  return envState || undefined;
 }
 
 export function resolveReuseRunningBrowser(

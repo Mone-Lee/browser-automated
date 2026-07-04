@@ -107,6 +107,8 @@ export class BrowserOptRunner {
         } else {
           fatalError = handoff.message;
         }
+      } else if (options.authStateSavePath) {
+        saveAuthState(agent, options.authStateSavePath, logs);
       }
 
       for (let index = 0; index < steps.length && !handoffTriggered; index++) {
@@ -567,15 +569,25 @@ async function resumeFromHandoff(
   const resumeOutput = agent.resume();
   logs.push(`resume: ${resumeOutput}`);
   if (authStateSavePath) {
+    saveAuthState(agent, authStateSavePath, logs);
+  }
+  await options.onHandoffCompleted?.(handoff);
+  return true;
+}
+
+/** 保存 cookies 与 storage，失败只记录日志，避免覆盖原本流程的 PASS/FAIL 结论。 */
+function saveAuthState(agent: BrowserAgent, authStateSavePath: string, logs: string[]): void {
+  try {
     fs.mkdirSync(path.dirname(authStateSavePath), { recursive: true });
     const saveOutput = agent.stateSave(authStateSavePath);
     logs.push(`auth-state-save: ${authStateSavePath}`);
     if (saveOutput.trim()) {
       logs.push(`auth-state-save-output: ${saveOutput.trim()}`);
     }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logs.push(`auth-state-save-failed: ${message}`);
   }
-  await options.onHandoffCompleted?.(handoff);
-  return true;
 }
 
 function isLoginLikeSnapshot(snapshot: SnapshotEvidence): boolean {

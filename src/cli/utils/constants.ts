@@ -14,7 +14,7 @@ export const BROWSER_E2E_SKILL_USAGE = `使用方式：
   browser-e2e 测试网站 https://example.com/login 的登录功能。\n\n目标：\n1. 打开登录页面。\n2. 输入用户名 "testuser" 和密码 "password123"。\n3. 点击登录按钮。\n4. 验证是否跳转到仪表盘页面（URL 包含 /dashboard 或看到欢迎文字）。`;
 
 export const BROWSER_OPT_USAGE = `使用方式：
-  browser-opt <自然语言流程> [--profile <name>] [--no-live-viewport] [--output-dir <dir>] [--agent-chat]`;
+  browser-opt <自然语言流程> [--profile <name>] [--state <path>] [--no-live-viewport] [--output-dir <dir>] [--agent-chat]`;
 
 export const BROWSER_E2E_BIN_USAGE = `
 Usage: browser-e2e <natural-language-case> [options]
@@ -54,7 +54,7 @@ Commands:
     e2e-gen <url> <instruction> [--name <name>] [--tags <a,b>]
       Generate a reusable Playwright test from natural language flow.
 
-    browser-opt <natural-language-flow> [--profile <name>] [--no-live-viewport] [--output-dir <dir>]
+    browser-opt <natural-language-flow> [--profile <name>] [--state <path>] [--no-live-viewport] [--output-dir <dir>]
       Execute an M1 natural-language browser flow with screenshots, JSON snapshots, and a PASS/FAIL report.
 
 Examples:
