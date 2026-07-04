@@ -10,7 +10,7 @@ import {
   BrowserOptRunner,
   extractBrowserOptUrl,
   splitBrowserOptSteps,
-} from '../../src/browser-opt/runner.js';
+} from '../../src/browser-opt/runner/index.js';
 import type { BrowserAgent } from '../../src/core/agent.js';
 import type { AgentOptions } from '../../src/core/types.js';
 
@@ -45,6 +45,7 @@ function snapshotJson(text: string, refs: Record<string, unknown> = { e1: { role
 function buildAgent(options: {
   snapshots?: ReturnType<typeof snapshotJson>[];
   chat?: () => { raw: string; data: unknown | null; parseError?: string };
+  evaluate?: () => string;
 } = {}): BrowserAgent {
   const snapshots = options.snapshots ?? [
     snapshotJson('home page', { e1: { role: 'textbox', name: 'Search' } }),
@@ -69,6 +70,8 @@ function buildAgent(options: {
     resume: vi.fn(() => 'RESUME_FALLBACK: continuing session browser-opt-test-session without an explicit resume command.'),
     stateSave: vi.fn(() => 'state saved'),
     stateLoad: vi.fn(() => 'state loaded'),
+    scroll: vi.fn(() => 'scrolled'),
+    evaluate: vi.fn(options.evaluate ?? (() => JSON.stringify({ found: true, checked: true, desired: true }))),
     chatJson: vi.fn(options.chat ?? (() => ({ raw: '{"success":true}', data: { success: true } }))),
     waitMs: vi.fn(() => 'waited'),
     close: vi.fn(() => {}),
@@ -100,6 +103,21 @@ describe('browser-opt parsing', () => {
   it('uses the whole text as one step when no numbered steps exist', () => {
     expect(splitBrowserOptSteps('测试 https://example.com 并验证首页')).toEqual([
       '测试 https://example.com 并验证首页',
+    ]);
+  });
+
+  it('splits unnumbered multiline operation flows into executable steps', () => {
+    const steps = splitBrowserOptSteps(`我要求打开页面https://example.com/add?type=2。
+三品一械选择“是”。
+商品标签选择“商品重构”。
+售后服务选择“支持7天无理由退换”和“上门安装”`);
+
+    expect(steps).toEqual([
+      '我要求打开页面https://example.com/add?type=2',
+      '三品一械选择“是”',
+      '商品标签选择“商品重构”',
+      '售后服务选择“支持7天无理由退换”',
+      '售后服务选择“上门安装”',
     ]);
   });
 });
@@ -236,6 +254,16 @@ describe('BrowserOptRunner', () => {
       '- LabelText "关闭" [ref=e24] clickable [cursor:pointer, onclick]',
       '  - radio "关闭 " [checked=true, ref=e34]',
     ].join('\n');
+    const selectedSnapshot = [
+      '- LabelText "开启" [ref=e21] clickable [onclick]',
+      '  - radio "开启 " [checked=false, disabled, ref=e31]',
+      '- LabelText "关闭" [ref=e22] clickable [onclick]',
+      '  - radio "关闭 " [checked=true, disabled, ref=e32]',
+      '- LabelText "开启" [ref=e23] clickable [cursor:pointer, onclick]',
+      '  - radio "开启 " [checked=true, ref=e33]',
+      '- LabelText "关闭" [ref=e24] clickable [cursor:pointer, onclick]',
+      '  - radio "关闭 " [checked=false, ref=e34]',
+    ].join('\n');
     const refs = {
       e21: { role: 'LabelText', name: '开启' },
       e22: { role: 'LabelText', name: '关闭' },
@@ -250,7 +278,7 @@ describe('BrowserOptRunner', () => {
       snapshots: [
         snapshotJson('open'),
         snapshotJson(radioSnapshot, refs),
-        snapshotJson(radioSnapshot, refs),
+        snapshotJson(selectedSnapshot, refs),
       ],
     });
     const runner = new BrowserOptRunner(makeFactory(agent));
@@ -387,6 +415,68 @@ describe('BrowserOptRunner', () => {
     expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e21');
   });
 
+  it('parses generic selectable verbs like 改为 for select steps', async () => {
+    const outputDir = makeTempDir();
+    const radioSnapshot = [
+      '- StaticText "分账节点" [ref=f1]',
+      '- LabelText "正常结算" [ref=e21] clickable [onclick]',
+      '  - radio "正常结算" [checked=true, ref=e31]',
+      '- LabelText "已发货结算" [ref=e22] clickable [onclick]',
+      '  - radio "已发货结算" [checked=false, ref=e32]',
+    ].join('\n');
+    const refs = {
+      f1: { role: 'StaticText', name: '分账节点' },
+      e21: { role: 'LabelText', name: '正常结算' },
+      e22: { role: 'LabelText', name: '已发货结算' },
+      e31: { role: 'radio', name: '正常结算' },
+      e32: { role: 'radio', name: '已发货结算' },
+    };
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(radioSnapshot, refs),
+        snapshotJson(radioSnapshot, refs),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 分账节点改为已发货结算', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e22');
+  });
+
+  it('parses generic selectable verbs like 调整成 for select steps', async () => {
+    const outputDir = makeTempDir();
+    const radioSnapshot = [
+      '- StaticText "业务类型" [ref=f1]',
+      '- LabelText "安选私密" [ref=e21] clickable [onclick]',
+      '  - radio "安选私密" [checked=true, ref=e31]',
+      '- LabelText "安选公开" [ref=e22] clickable [onclick]',
+      '  - radio "安选公开" [checked=false, ref=e32]',
+    ].join('\n');
+    const refs = {
+      f1: { role: 'StaticText', name: '业务类型' },
+      e21: { role: 'LabelText', name: '安选私密' },
+      e22: { role: 'LabelText', name: '安选公开' },
+      e31: { role: 'radio', name: '安选私密' },
+      e32: { role: 'radio', name: '安选公开' },
+    };
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(radioSnapshot, refs),
+        snapshotJson(radioSnapshot, refs),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 将业务类型调整成“安选公开”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e22');
+  });
+
   it('limits repeated option matching to the field scope when labels are duplicated', async () => {
     const outputDir = makeTempDir();
     const radioSnapshot = [
@@ -448,6 +538,243 @@ describe('BrowserOptRunner', () => {
     const runner = new BrowserOptRunner(makeFactory(agent));
 
     const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 勾选“服务协议”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(result.report.steps[0].actionOutput).toContain('selection skipped');
+  });
+
+  it('toggles a switch field to the requested yes-no state', async () => {
+    const outputDir = makeTempDir();
+    const switchSnapshot = [
+      '- StaticText "三品一械" [ref=f1]',
+      '- switch "否" [checked=false, ref=e51]',
+    ].join('\n');
+    const selectedSnapshot = [
+      '- StaticText "三品一械" [ref=f1]',
+      '- switch "是" [checked=true, ref=e51]',
+    ].join('\n');
+    const refs = {
+      f1: { role: 'StaticText', name: '三品一械' },
+      e51: { role: 'switch', name: '否' },
+    };
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(switchSnapshot, refs),
+        snapshotJson(selectedSnapshot, refs),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 三品一械切换为“是”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e51');
+    expect(result.report.steps[0].actionOutput).toContain('check @e51');
+  });
+
+  it('fails a select action when the post-action snapshot does not confirm the target state', async () => {
+    const outputDir = makeTempDir();
+    const switchSnapshot = [
+      '- StaticText "三品一械" [ref=f1]',
+      '- switch "否" [checked=false, ref=e51]',
+    ].join('\n');
+    const refs = {
+      f1: { role: 'StaticText', name: '三品一械' },
+      e51: { role: 'switch', name: '否' },
+    };
+    const agent = buildAgent({
+      evaluate: () => JSON.stringify({ found: true, checked: false, desired: true }),
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(switchSnapshot, refs),
+        snapshotJson(switchSnapshot, refs),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 三品一械切换为“是”', { outputDir });
+
+    expect(result.passed).toBe(false);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e51');
+    expect(result.report.steps[0].error).toContain('DOM 确认开关未达到目标状态：三品一械=是');
+  });
+
+  it('does not pass a switch selection when DOM state contradicts snapshot checked state', async () => {
+    const outputDir = makeTempDir();
+    const misleadingSnapshot = [
+      '- StaticText "三品一械" [ref=f1]',
+      '- switch "三品一械 :" [checked=true, ref=e51]',
+    ].join('\n');
+    const refs = {
+      f1: { role: 'StaticText', name: '三品一械' },
+      e51: { role: 'switch', name: '三品一械 :' },
+    };
+    const agent = buildAgent({
+      evaluate: () => JSON.stringify({ found: true, checked: false, desired: true }),
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(misleadingSnapshot, refs),
+        snapshotJson(misleadingSnapshot, refs),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 三品一械选择“是”', { outputDir });
+
+    expect(result.passed).toBe(false);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e51');
+    expect(result.report.steps[0].error).toContain('DOM 确认开关未达到目标状态：三品一械=是');
+  });
+
+  it('clicks the switch on the same line as the requested field instead of the next switch', async () => {
+    const outputDir = makeTempDir();
+    const switchSnapshot = [
+      '- switch "三品一械 :" [checked=false, ref=e33]',
+      '- switch "贵重物品 :" [checked=false, ref=e34]',
+      '- switch "荤素配置 :" [checked=false, ref=e35]',
+    ].join('\n');
+    const selectedSnapshot = [
+      '- switch "三品一械 :" [checked=true, ref=e33]',
+      '- switch "贵重物品 :" [checked=false, ref=e34]',
+      '- switch "荤素配置 :" [checked=false, ref=e35]',
+    ].join('\n');
+    const refs = {
+      e33: { role: 'switch', name: '三品一械 :' },
+      e34: { role: 'switch', name: '贵重物品 :' },
+      e35: { role: 'switch', name: '荤素配置 :' },
+    };
+    const agent = buildAgent({
+      evaluate: () => JSON.stringify(JSON.stringify({ found: true, checked: true, desired: true })),
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(switchSnapshot, refs),
+        snapshotJson(selectedSnapshot, refs),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 三品一械选择“是”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e33');
+    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalledWith('e34');
+  });
+
+  it('scrolls long forms to find a requested switch instead of clicking an unlabeled switch', async () => {
+    const outputDir = makeTempDir();
+    const currentViewport = [
+      '- switch [checked=false, ref=e14]',
+      '- switch [checked=false, ref=e15]',
+      '- generic "商品标签" [ref=f2]',
+    ].join('\n');
+    const switchVisible = [
+      '- StaticText "三品一械" [ref=f1]',
+      '- switch "否" [checked=false, ref=e51]',
+      '- switch [checked=false, ref=e14]',
+    ].join('\n');
+    const switchSelected = [
+      '- StaticText "三品一械" [ref=f1]',
+      '- switch "是" [checked=true, ref=e51]',
+      '- switch [checked=false, ref=e14]',
+    ].join('\n');
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(currentViewport, {
+          e14: { role: 'switch', name: '' },
+          e15: { role: 'switch', name: '' },
+          f2: { role: 'generic', name: '商品标签' },
+        }),
+        snapshotJson(currentViewport, {
+          e14: { role: 'switch', name: '' },
+          e15: { role: 'switch', name: '' },
+          f2: { role: 'generic', name: '商品标签' },
+        }),
+        snapshotJson(switchVisible, {
+          f1: { role: 'StaticText', name: '三品一械' },
+          e51: { role: 'switch', name: '否' },
+          e14: { role: 'switch', name: '' },
+        }),
+        snapshotJson(switchSelected, {
+          f1: { role: 'StaticText', name: '三品一械' },
+          e51: { role: 'switch', name: '是' },
+          e14: { role: 'switch', name: '' },
+        }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 三品一械选择“是”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.scroll as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('up', 900);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e51');
+    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalledWith('e14');
+  });
+
+  it('opens a select field before choosing an option that is not initially rendered', async () => {
+    const outputDir = makeTempDir();
+    const closedSnapshot = [
+      '- StaticText "商品标签" [ref=f1]',
+      '- combobox "请选择" [ref=e61]',
+    ].join('\n');
+    const openedSnapshot = [
+      '- option "商品重构" [ref=e62]',
+      '- option "新品" [ref=e63]',
+    ].join('\n');
+    const selectedSnapshot = [
+      '- StaticText "商品标签" [ref=f1]',
+      '- combobox "商品重构" [ref=e61]',
+    ].join('\n');
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(closedSnapshot, {
+          f1: { role: 'StaticText', name: '商品标签' },
+          e61: { role: 'combobox', name: '请选择' },
+        }),
+        snapshotJson(openedSnapshot, {
+          e62: { role: 'option', name: '商品重构' },
+          e63: { role: 'option', name: '新品' },
+        }),
+        snapshotJson(selectedSnapshot, {
+          f1: { role: 'StaticText', name: '商品标签' },
+          e61: { role: 'combobox', name: '商品重构' },
+        }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 商品标签选择“商品重构”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(1, 'e61');
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(2, 'e62');
+    expect(result.report.steps[0].actionOutput).toContain('open select @e61');
+  });
+
+  it('skips a switch field when it is already in the requested state', async () => {
+    const outputDir = makeTempDir();
+    const switchSnapshot = [
+      '- StaticText "三品一械" [ref=f1]',
+      '- switch "是" [checked=true, ref=e51]',
+    ].join('\n');
+    const refs = {
+      f1: { role: 'StaticText', name: '三品一械' },
+      e51: { role: 'switch', name: '是' },
+    };
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(switchSnapshot, refs),
+        snapshotJson(switchSnapshot, refs),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 三品一械切换为“是”', { outputDir });
 
     expect(result.passed).toBe(true);
     expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
