@@ -2,7 +2,7 @@
  * 承载 browser-opt 命令的参数解析与执行编排，让一次性自然语言流程入口保持单一职责。
  * 文件只关心 browser-opt 相关流程，公共参数解析与输出能力则交由共享模块处理。
  */
-import { BrowserOptRunner, browserOptTemplate } from '../../browser-opt/runner.js';
+import { BrowserOptRunner, browserOptTemplate } from '../../browser-opt/runner/index.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {

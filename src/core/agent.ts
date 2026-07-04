@@ -289,6 +289,11 @@ export class BrowserAgent {
     return this.run(['wait', String(ms)]);
   }
 
+  /** 滚动页面，让当前可交互快照覆盖更大范围的长表单。 */
+  scroll(direction: 'up' | 'down' | 'left' | 'right', amount = 600): string {
+    return this.run(['scroll', direction, String(amount)]);
+  }
+
   /**
    * 通过 `agent-browser chat` 执行自然语言指令。
    * CLI 会解释这段指令，并完成对应的浏览器动作。
@@ -325,6 +330,11 @@ export class BrowserAgent {
   /** 截图。 */
   screenshot(path?: string): string {
     return this.run(path ? ['screenshot', path] : ['screenshot']);
+  }
+
+  /** 在页面上下文中执行 JavaScript，用于读取快照无法可靠表达的控件状态。 */
+  evaluate(script: string): string {
+    return this.run(['eval', script]);
   }
 
   /** 获取当前页面标题。 */

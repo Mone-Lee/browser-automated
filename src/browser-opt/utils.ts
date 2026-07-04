@@ -14,6 +14,7 @@ import type {
 const DEFAULT_OUTPUT_ROOT = path.join(process.cwd(), 'artifacts', 'browser-opt');
 const URL_RE = /https?:\/\/[^\s。，、，)）"'“”]+/i;
 const QUOTED_VALUE_RE = /["“‘']([^"”’']+)["”’']/;
+const SELECTABLE_VERB_RE = /选择|选中|勾选|勾上|设置为|设置成|切换为|切换成|切到|改为|改成|调整为|调整成|设为|设成|置为|置成|变更为|变更成|变为|变成|select|check|toggle/i;
 
 /** 从自然语言描述中提取第一个 URL，作为 browser-opt 的起始页面。 */
 export function extractBrowserOptUrl(text: string): string | null {
@@ -37,11 +38,44 @@ export function splitBrowserOptSteps(text: string): string[] {
     return numbered;
   }
 
-  const compact = lines
+  const compactLines = lines.filter((line) => !/^目标[:：]?$/.test(line));
+  const looseSteps = compactLines
+    .flatMap((line) => line.split(/(?<=[。；;])\s*/))
+    .map((line) => line.replace(/[。；;]$/g, '').trim())
+    .filter(Boolean)
+    .flatMap((line) => splitCompoundSelectableStep(line));
+
+  if (looseSteps.length > 1) {
+    const actionable = looseSteps.filter((step) => parseDeterministicAction(step) || isVerificationStep(step));
+    return actionable.length > 0 ? actionable : looseSteps;
+  }
+
+  const compact = compactLines
     .filter((line) => !/^目标[:：]?$/.test(line))
     .join('\n')
     .trim();
   return compact ? [compact] : [];
+}
+
+/** 将“字段选择 A 和 B”拆成两条独立选择步骤，避免只执行最后一个选项。 */
+function splitCompoundSelectableStep(instruction: string): string[] {
+  const verb = instruction.match(SELECTABLE_VERB_RE);
+  const quoted = extractQuotedSegments(instruction);
+  if (!verb || quoted.length < 2) {
+    return [instruction];
+  }
+
+  const field = parseSelectableFieldName(instruction, quoted[0]);
+  if (!field) {
+    return [instruction];
+  }
+
+  const betweenOptions = instruction.slice(quoted[0].index + quoted[0].value.length, quoted[1].index);
+  if (!/[和及、,，]/.test(betweenOptions)) {
+    return [instruction];
+  }
+
+  return quoted.map((segment) => `${field}选择“${segment.value}”`);
 }
 
 /** 从自然语言步骤中提炼结构化动作，供确定性执行层消费。 */
@@ -136,9 +170,9 @@ interface QuotedSegment {
 
 /** 从“字段选择选项”类语句中同时提取字段名和选项，避免把字段误当成选项。 */
 function parseSelectableTarget(instruction: string): { field: string | null; option: string } | null {
-  const verb = instruction.match(/选择|选中|勾选|勾上|设置为|select|check/i);
+  const verb = instruction.match(SELECTABLE_VERB_RE);
   if (!verb) {
-    return null;
+    return parseLooseSelectableTarget(instruction);
   }
 
   const quoted = extractQuotedSegments(instruction);
@@ -171,7 +205,7 @@ function extractQuotedSegments(instruction: string): QuotedSegment[] {
 
 /** 从没有引号的选择语句中提取目标选项，作为口语化步骤的兜底。 */
 function parseUnquotedSelectableOption(instruction: string): string | null {
-  const afterVerb = instruction.match(/(?:选择|选中|勾选|勾上|设置为|select|check)\s*([^，,。；\n]+)/i)?.[1]?.trim();
+  const afterVerb = instruction.match(new RegExp(`(?:${SELECTABLE_VERB_RE.source})\\s*([^，,。；\\n]+)`, 'i'))?.[1]?.trim();
   if (!afterVerb) {
     return null;
   }
@@ -181,7 +215,7 @@ function parseUnquotedSelectableOption(instruction: string): string | null {
 
 /** 从“字段选择选项”类语句中提取字段名，支持单选、多选和开关式配置。 */
 function parseSelectableFieldName(instruction: string, quotedOption?: QuotedSegment): string | null {
-  const beforeVerb = instruction.match(/^(.+?)(?:选择|选中|勾选|勾上|设置为|select|check)/i)?.[1]?.trim();
+  const beforeVerb = instruction.match(new RegExp(`^(.+?)(?:${SELECTABLE_VERB_RE.source})`, 'i'))?.[1]?.trim();
   if (beforeVerb) {
     const cleaned = cleanSelectableText(beforeVerb.replace(/^(将|把|在|为|给)\s*/, ''));
     if (cleaned) {
@@ -190,8 +224,20 @@ function parseSelectableFieldName(instruction: string, quotedOption?: QuotedSegm
   }
 
   const beforeQuotedOption = quotedOption ? instruction.slice(0, quotedOption.index) : instruction;
-  const afterVerb = beforeQuotedOption.match(/(?:在|为|给)\s*([^，,。；\n]+?)(?:中|里|内)?(?:选择|选中|勾选|勾上|设置为)/i)?.[1]?.trim();
+  const afterVerb = beforeQuotedOption.match(new RegExp(`(?:在|为|给)\\s*([^，,。；\\n]+?)(?:中|里|内)?(?:${SELECTABLE_VERB_RE.source})`, 'i'))?.[1]?.trim();
   return cleanSelectableText(afterVerb ?? '');
+}
+
+/** 为不完全命中标准动词的选择语句提供保守兜底，尽量提炼出“字段 -> 值”。 */
+function parseLooseSelectableTarget(instruction: string): { field: string | null; option: string } | null {
+  const looseVerb = instruction.match(/(.+?)(?:改为|改成|调整为|调整成|设为|设成|置为|置成|变更为|变更成|变为|变成|切到)\s*([^，,。；\n]+)/i);
+  if (!looseVerb?.[1] || !looseVerb[2]) {
+    return null;
+  }
+
+  const field = cleanSelectableText(looseVerb[1].replace(/^(将|把|在|为|给)\s*/, ''));
+  const option = cleanSelectableText(looseVerb[2]);
+  return field && option ? { field, option } : null;
 }
 
 /** 清理字段名和选项值外围的语气词、引号和标点，保留真实业务文案。 */
@@ -234,6 +280,11 @@ export function findSelectableOption(
   }
 
   const nodes = getSnapshotNodes(snapshot);
+  const switchControl = findScopedSwitchControl(snapshot.text, field, nodes, option);
+  if (switchControl) {
+    return switchControl;
+  }
+
   const selectable = findBestNode(nodes.filter((node) => isSelectableRole(node.role)), option);
   if (selectable?.checked) {
     return { ref: selectable.ref, alreadySelected: true, role: selectable.role };
@@ -249,6 +300,21 @@ export function findSelectableOption(
   }
 
   return { ref: null, alreadySelected: false, role: null };
+}
+
+/** 查找可展开选择项的字段控件，供下拉选项尚未渲染时先打开选项面板。 */
+export function findSelectableFieldRef(snapshot: SnapshotEvidence, field: string | null): string | null {
+  if (!field) {
+    return null;
+  }
+
+  const scoped = findScopedSelectableFieldRef(snapshot.text, field);
+  if (scoped) {
+    return scoped;
+  }
+
+  const nodes = getSnapshotNodes(snapshot).filter((node) => isExpandableSelectRole(node.role));
+  return findBestNodeRef(nodes, field);
 }
 
 /** 查找上传控件，先匹配文件输入，再回退到同名上传按钮。 */
@@ -277,6 +343,9 @@ function findBestNode(nodes: SnapshotNode[], target: string): SnapshotNode | nul
 
   const exact = nodes.find((node) => {
     const label = normalizeMatchText(node.label);
+    if (!label) {
+      return false;
+    }
     return label.includes(normalizedTarget) || normalizedTarget.includes(label);
   });
   if (exact) {
@@ -286,6 +355,9 @@ function findBestNode(nodes: SnapshotNode[], target: string): SnapshotNode | nul
   const targetChars = [...normalizedTarget];
   const partial = nodes.find((node) => {
     const label = normalizeMatchText(node.label);
+    if (!label) {
+      return false;
+    }
     return targetChars.length > 1 && targetChars.every((char) => label.includes(char));
   });
 
@@ -362,7 +434,17 @@ function isTextboxRole(role: string): boolean {
 
 /** 识别 radio、checkbox 等可选择控件。 */
 function isSelectableRole(role: string): boolean {
-  return /radio|checkbox|switch/i.test(role);
+  return /radio|checkbox|switch|option/i.test(role);
+}
+
+/** 识别可展开的选择字段，如 select、combobox 以及常见伪下拉按钮。 */
+function isExpandableSelectRole(role: string): boolean {
+  return /combobox|select|listbox|button/i.test(role);
+}
+
+/** 单独识别 switch，便于按布尔目标状态切换。 */
+function isSwitchRole(role: string): boolean {
+  return /switch/i.test(role);
 }
 
 /** 识别常见 UI 库中包裹 radio/checkbox 的可点击 label。 */
@@ -383,6 +465,16 @@ function isFileInputRole(role: string, label: string): boolean {
 /** 归一化待匹配文本，减少空格和中英文标点对匹配结果的干扰。 */
 function normalizeMatchText(value: string): string {
   return value.toLowerCase().replace(/\s+/g, '').replace(/[：:，,。；"'“”]/g, '').trim();
+}
+
+/** 识别“是/否、开/关”这类布尔型目标值，供 switch 切换场景复用。 */
+function isBooleanLikeOption(option: string): boolean {
+  return /^(是|否|开|关|开启|关闭|打开|启用|停用|true|false|yes|no|on|off)$/i.test(option.trim());
+}
+
+/** 将自然语言里的开关目标状态归一化为 checked 布尔值。 */
+function inferDesiredChecked(option: string): boolean {
+  return /^(是|开|开启|打开|启用|true|yes|on)$/i.test(option.trim());
 }
 
 /** 基于文本快照顺序，在同一组选项附近寻找目标选项，弥补 refs 缺少字段名的问题。 */
@@ -428,6 +520,64 @@ function findScopedOptionLabel(
         alreadySelected: parsed.checked ?? false,
         role: parsed.role,
       };
+    }
+  }
+
+  return null;
+}
+
+/** 针对单个 switch 控件，按目标状态判断是否需要点击，而不是要求页面出现同名选项文案。 */
+function findScopedSwitchControl(
+  text: string,
+  field: string | null,
+  nodes: SnapshotNode[],
+  option: string,
+): { ref: string | null; alreadySelected: boolean; role: string | null } | null {
+  if (!field || !isBooleanLikeOption(option)) {
+    return null;
+  }
+
+  const lines = text.split('\n');
+  const normalizedField = normalizeMatchText(field);
+  const fieldIndex = normalizedField
+    ? lines.findIndex((line) => normalizeMatchText(line).includes(normalizedField))
+    : -1;
+  if (fieldIndex < 0) {
+    return null;
+  }
+
+  const desiredChecked = inferDesiredChecked(option);
+  const endIndex = findSelectableScopeEnd(lines, fieldIndex + 1);
+  for (let index = fieldIndex; index < endIndex; index += 1) {
+    const parsed = parseSnapshotLine(lines[index]);
+    if (!parsed || !isSwitchRole(parsed.role)) {
+      continue;
+    }
+
+    const merged = nodes.find((node) => node.ref === parsed.ref) ?? parsed;
+    return {
+      ref: merged.ref,
+      alreadySelected: merged.checked === desiredChecked,
+      role: merged.role,
+    };
+  }
+
+  return null;
+}
+
+/** 在字段文案后面的短范围内寻找下拉控件，适配字段名和控件值分离的表单布局。 */
+function findScopedSelectableFieldRef(text: string, field: string): string | null {
+  const lines = text.split('\n');
+  const normalizedField = normalizeMatchText(field);
+  const fieldIndex = lines.findIndex((line) => normalizeMatchText(line).includes(normalizedField));
+  if (fieldIndex < 0) {
+    return null;
+  }
+
+  for (let index = fieldIndex + 1; index < Math.min(lines.length, fieldIndex + 6); index += 1) {
+    const parsed = parseSnapshotLine(lines[index]);
+    if (parsed && isExpandableSelectRole(parsed.role) && !parsed.disabled) {
+      return parsed.ref;
     }
   }
 

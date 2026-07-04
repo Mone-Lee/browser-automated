@@ -7,7 +7,7 @@ export {
   browserOptTemplate,
   extractBrowserOptUrl,
   splitBrowserOptSteps,
-} from './runner.js';
+} from './runner/index.js';
 
 export type {
   BrowserOptStatus,
