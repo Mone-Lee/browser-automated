@@ -242,6 +242,42 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps[1].actionOutput).toContain('selection skipped');
   });
 
+  it('clicks the enabled radio control instead of its accessibility label', async () => {
+    const outputDir = makeTempDir();
+    const beforeSnapshot = [
+      '- LabelText "公开直播" [ref=e31] clickable [cursor:pointer, onclick]',
+      '  - radio "公开直播 " [checked=false, ref=e44]',
+      '- LabelText "安选直播" [ref=e32] clickable [cursor:pointer, onclick]',
+      '  - radio "安选直播 " [checked=false, ref=e45]',
+    ].join('\n');
+    const afterSnapshot = beforeSnapshot.replace(
+      'radio "安选直播 " [checked=false, ref=e45]',
+      'radio "安选直播 " [checked=true, ref=e45]',
+    );
+    const refs = {
+      e31: { role: 'LabelText', name: '公开直播' },
+      e32: { role: 'LabelText', name: '安选直播' },
+      e44: { role: 'radio', name: '公开直播 ' },
+      e45: { role: 'radio', name: '安选直播 ' },
+    };
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(beforeSnapshot, refs),
+        snapshotJson(afterSnapshot, refs),
+      ],
+      evaluate: () => JSON.stringify({ matchedCount: 1, clicked: true, checked: true }),
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 直播类型选择“安选直播”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect(agent.evaluate).toHaveBeenCalled();
+    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalledWith('e45');
+    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalledWith('e32');
+  });
+
   it('selects the enabled repeated radio group without hard-coded field names', async () => {
     const outputDir = makeTempDir();
     const radioSnapshot = [
@@ -286,7 +322,7 @@ describe('BrowserOptRunner', () => {
     const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 是否显示录播提示文案选择“开启”', { outputDir });
 
     expect(result.passed).toBe(true);
-    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e23');
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e33');
   });
 
   it('parses quoted field and quoted option separately for select steps', async () => {
@@ -317,9 +353,9 @@ describe('BrowserOptRunner', () => {
     const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 将“分账节点”选择“已发货结算”', { outputDir });
 
     expect(result.passed).toBe(true);
-    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e22');
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e32');
     expect(result.report.steps[0].actionOutput).toContain('分账节点=已发货结算');
-    expect(result.report.steps[0].actionOutput).toContain('click @e22');
+    expect(result.report.steps[0].actionOutput).toContain('click @e32');
   });
 
   it('parses quoted field with an unquoted option for select steps', async () => {
@@ -350,7 +386,7 @@ describe('BrowserOptRunner', () => {
     const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 将“分账节点”选择正常结算', { outputDir });
 
     expect(result.passed).toBe(true);
-    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e21');
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e31');
   });
 
   it('parses unquoted field with a quoted option for select steps', async () => {
@@ -381,7 +417,7 @@ describe('BrowserOptRunner', () => {
     const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 分账节点选择“已发货结算”', { outputDir });
 
     expect(result.passed).toBe(true);
-    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e22');
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e32');
   });
 
   it('parses unquoted field and unquoted option for select steps', async () => {
@@ -412,7 +448,7 @@ describe('BrowserOptRunner', () => {
     const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 分账节点选择正常结算', { outputDir });
 
     expect(result.passed).toBe(true);
-    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e21');
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e31');
   });
 
   it('parses generic selectable verbs like 改为 for select steps', async () => {
@@ -443,7 +479,7 @@ describe('BrowserOptRunner', () => {
     const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 分账节点改为已发货结算', { outputDir });
 
     expect(result.passed).toBe(true);
-    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e22');
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e32');
   });
 
   it('parses generic selectable verbs like 调整成 for select steps', async () => {
@@ -474,7 +510,7 @@ describe('BrowserOptRunner', () => {
     const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 将业务类型调整成“安选公开”', { outputDir });
 
     expect(result.passed).toBe(true);
-    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e22');
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e32');
   });
 
   it('limits repeated option matching to the field scope when labels are duplicated', async () => {
@@ -515,7 +551,7 @@ describe('BrowserOptRunner', () => {
     const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 将“配送节点”选择“正常结算”', { outputDir });
 
     expect(result.passed).toBe(true);
-    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e23');
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e33');
   });
 
   it('skips already checked checkbox options without using select semantics', async () => {
@@ -831,7 +867,7 @@ describe('BrowserOptRunner', () => {
 
     expect(result.passed).toBe(true);
     expect((agent.waitMs as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(500);
-    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e25');
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e35');
     expect(result.report.steps[0].logs.join('\n')).toContain('retry-wait');
   });
 
@@ -879,11 +915,35 @@ describe('BrowserOptRunner', () => {
     });
 
     expect(result.passed).toBe(false);
+    expect(result.report.status).toBe('HANDOFF');
     expect((agent.fill as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect(result.report.handoffTriggered).toBe(true);
     expect((agent.handoff as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
     expect((agent.stateSave as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect(result.report.logs.join('\n')).toContain('初始化打开目标页面后检测到登录页跳转');
+  });
+
+  it('renders step-level login handoff as HANDOFF in markdown report', async () => {
+    const outputDir = makeTempDir();
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('创建直播页', { e1: { role: 'heading', name: '创建直播' } }),
+        snapshotJson('创建直播页', { e1: { role: 'heading', name: '创建直播' } }),
+        snapshotJson('登录远方的梦想直播平台', { e2: { role: 'textbox', name: '请输入手机号' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com/live/create。\n\n目标：\n1. 验证页面包含 "Dashboard"。', {
+      outputDir,
+    });
+    const markdown = fs.readFileSync(result.report.reportMarkdownPath, 'utf-8');
+
+    expect(result.passed).toBe(false);
+    expect(result.report.status).toBe('HANDOFF');
+    expect(result.report.steps[0].handoffTriggered).toBe(true);
+    expect(markdown).toContain('### HANDOFF 1. 验证页面包含 "Dashboard"。');
+    expect(markdown).not.toContain('### FAIL 1. 验证页面包含 "Dashboard"。');
   });
 
   it('resumes after login handoff when the caller provides a resume hook', async () => {
@@ -913,11 +973,13 @@ describe('BrowserOptRunner', () => {
     });
 
     expect(result.passed).toBe(true);
+    expect(result.report.status).toBe('PASS');
     expect((agent.handoff as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
     expect((agent.resume as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
     expect(waitForUserResume).toHaveBeenCalledTimes(1);
     expect(onHandoffRequired).toHaveBeenCalledTimes(1);
     expect(onHandoffCompleted).toHaveBeenCalledTimes(1);
+    expect((agent.open as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(2, 'https://test-live.ifengqun.com/live/create?time=2');
     expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e2', '安选公开直播自动化');
   });
 

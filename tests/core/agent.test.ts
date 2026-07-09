@@ -551,6 +551,19 @@ describe('BrowserAgent', () => {
       expect(output).toContain('HANDOFF_FALLBACK');
     });
 
+    it('reuses the current headed browser when handoff is unsupported', () => {
+      mockSpawnSync
+        .mockReturnValueOnce(makeErrorResult('Unknown command: handoff'))
+        .mockReturnValueOnce(makeOkResult('https://example.com/login\n'));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session', headed: true });
+      const output = agent.handoff('Need manual captcha');
+
+      expect(mockSpawnSync).toHaveBeenCalledTimes(2);
+      expect(output).toContain('HANDOFF_FALLBACK: reusing the current visible browser');
+      expect(output).toContain('Session: test-session');
+    });
+
     it('falls back to a no-op resume when resume is unsupported', () => {
       mockSpawnSync.mockReturnValue(makeErrorResult('Unknown command: resume'));
 

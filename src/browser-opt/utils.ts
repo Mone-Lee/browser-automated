@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import type { AgentBrowserJsonResult } from '../core/agent.js';
 import type {
   BrowserOptReport,
+  BrowserOptStepResult,
   DeterministicAction,
   SnapshotEvidence,
   SnapshotNode,
@@ -505,7 +506,7 @@ function findScopedOptionLabel(
         continue;
       }
       return {
-        ref: parsed.ref,
+        ref: child && !child.disabled ? child.ref : parsed.ref,
         alreadySelected: child?.checked ?? false,
         role: child?.role ?? parsed.role,
       };
@@ -810,6 +811,15 @@ function slugify(value: string): string {
   return ascii || 'browser-opt-flow';
 }
 
+/** 统一步骤级展示状态，避免人工接管在报告明细里继续显示成普通失败。 */
+export function formatBrowserOptStepStatus(step: BrowserOptStepResult): 'PASS' | 'FAIL' | 'HANDOFF' {
+  if (step.handoffTriggered) {
+    return 'HANDOFF';
+  }
+
+  return step.passed ? 'PASS' : 'FAIL';
+}
+
 /** 把执行报告渲染成 Markdown，方便直接在本地阅读和附带截图证据。 */
 export function renderMarkdownReport(report: BrowserOptReport): string {
   const lines = [
@@ -830,7 +840,7 @@ export function renderMarkdownReport(report: BrowserOptReport): string {
   for (const step of report.steps) {
     lines.push(
       '',
-      `### ${step.passed ? 'PASS' : 'FAIL'} ${step.index}. ${step.instruction}`,
+      `### ${formatBrowserOptStepStatus(step)} ${step.index}. ${step.instruction}`,
       `- Attempts: ${step.attempts}`,
       `- Before screenshot: ${step.beforeScreenshotPath}`,
       `- After screenshot: ${step.afterScreenshotPath}`,

@@ -46,7 +46,7 @@ export function shouldTriggerLoginHandoff(flowOrInstruction: string, targetUrl: 
 
 /** 统一生成登录态失效时的 handoff 文案，并把提示写入日志。 */
 export function triggerLoginHandoff(agent: BrowserAgent, logs: string[], reason: string): BrowserOptHandoffContext {
-  const message = `${reason}，疑似登录态已失效。请在浏览器中完成登录，然后重新执行当前 browser-opt 流程。`;
+  const message = `${reason}，疑似登录态已失效。请在浏览器中完成登录，然后继续当前 browser-opt 流程。`;
   const output = buildLoginHandoffActionOutput(agent, message);
   logs.push(`handoff: ${message}`);
   logs.push(`handoff-output: ${output}`);

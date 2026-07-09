@@ -5,11 +5,14 @@ import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { printBrowserOptResult } from '../../src/cli/utils/output.js';
+import type { BrowserOptRunResult } from '../../src/browser-opt/type.js';
 
 const tempDirs: string[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -21,11 +24,12 @@ function makeTempDir(): string {
   return dir;
 }
 
-function runCli(args: string[], env: Record<string, string> = {}) {
+function runCli(args: string[], env: Record<string, string> = {}, input?: string) {
   const authStateDir = makeTempDir();
   return spawnSync('node', ['--import', 'tsx', 'src/cli/index.ts', ...args], {
     cwd: path.resolve(import.meta.dirname, '../..'),
     encoding: 'utf-8',
+    input,
     env: {
       ...process.env,
       AGENT_BROWSER_STATE: '',
@@ -62,9 +66,15 @@ const command = args[commandIndex];
 if (command === 'open') {
   process.stdout.write('opened');
 } else if (command === 'snapshot') {
-  const snapshotText = process.env.AGENT_BROWSER_SNAPSHOT_TEXT || 'Example page';
-  const snapshotRefs = process.env.AGENT_BROWSER_LOGIN_SNAPSHOT
+  const resumed = process.env.AGENT_BROWSER_RESUME_MARKER && fs.existsSync(process.env.AGENT_BROWSER_RESUME_MARKER);
+  const loginSnapshot = process.env.AGENT_BROWSER_LOGIN_SNAPSHOT && !resumed;
+  const snapshotText = loginSnapshot
+    ? (process.env.AGENT_BROWSER_LOGIN_SNAPSHOT_TEXT || process.env.AGENT_BROWSER_SNAPSHOT_TEXT || '登录远方的梦想直播平台')
+    : (process.env.AGENT_BROWSER_AFTER_RESUME_SNAPSHOT_TEXT || process.env.AGENT_BROWSER_SNAPSHOT_TEXT || 'Example page');
+  const snapshotRefs = loginSnapshot
     ? { e1: { role: 'textbox', name: '请输入手机号' } }
+    : process.env.AGENT_BROWSER_LIVE_CREATE_SNAPSHOT
+      ? { e2: { role: 'textbox', name: '直播间名称' } }
     : { e1: { role: 'heading', name: 'Example' } };
   process.stdout.write(JSON.stringify({ success: true, data: { snapshot: snapshotText, refs: snapshotRefs } }));
 } else if (command === 'screenshot') {
@@ -77,6 +87,9 @@ if (command === 'open') {
   process.stdout.write('clicked');
 } else if (command === 'handoff') {
   process.stdout.write('handoff requested');
+} else if (command === 'resume') {
+  if (process.env.AGENT_BROWSER_RESUME_MARKER) fs.writeFileSync(process.env.AGENT_BROWSER_RESUME_MARKER, 'resumed');
+  process.stdout.write('resumed');
 } else if (command === 'chat') {
   process.stdout.write(JSON.stringify({ success: true, text: 'Done' }));
 } else if (command === 'state' && args[commandIndex + 1] === 'save') {
@@ -234,9 +247,10 @@ describe('browser-opt CLI', () => {
     expect(result.stdout).not.toContain('Handoff: 已触发');
   });
 
-  it('exits with handoff code when the target page redirects to login', () => {
+  it('waits for handoff completion and resumes the target flow after login', () => {
     const outputDir = makeTempDir();
     const commandLog = path.join(makeTempDir(), 'agent-browser.log');
+    const resumeMarker = path.join(makeTempDir(), 'resume-marker');
     const result = runCli([
       'browser-opt',
       '执行创建安选公开直播流程：\n1. 访问 https://example.com/live/create\n2. 直播间名称输入“安选公开直播自动化”',
@@ -245,14 +259,66 @@ describe('browser-opt CLI', () => {
     ], {
       AGENT_BROWSER_LOG: commandLog,
       AGENT_BROWSER_LOGIN_SNAPSHOT: '1',
-      AGENT_BROWSER_SNAPSHOT_TEXT: '登录远方的梦想直播平台',
-    });
+      AGENT_BROWSER_LOGIN_SNAPSHOT_TEXT: '登录远方的梦想直播平台',
+      AGENT_BROWSER_AFTER_RESUME_SNAPSHOT_TEXT: '创建直播页',
+      AGENT_BROWSER_LIVE_CREATE_SNAPSHOT: '1',
+      AGENT_BROWSER_RESUME_MARKER: resumeMarker,
+    }, 'done\n');
 
-    expect(result.status).toBe(2);
-    expect(result.stdout).toContain('Handoff: 已触发，请先在浏览器中完成登录后再重试。');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('=== Browser Opt Handoff ===');
+    expect(result.stdout).toContain('人工操作完成，恢复 browser-opt 自动化执行。');
+    expect(result.stdout.trim()).toContain('执行成功');
+    expect(result.stdout).not.toContain('Status: HANDOFF');
+    expect(result.stdout).not.toContain('Status: FAIL');
     expect(result.stdout).toContain('初始化打开目标页面后检测到登录页跳转');
     const commands = fs.readFileSync(commandLog, 'utf-8');
     expect(commands).toContain('handoff');
-    expect(commands).not.toContain('state save');
+    expect(commands).toContain('resume');
+    expect(commands).toContain('fill @e2 安选公开直播自动化');
+    expect(commands).toContain('state save');
+  });
+
+  it('prints handoff steps as HANDOFF instead of FAIL', () => {
+    const outputDir = makeTempDir();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const result: BrowserOptRunResult = {
+      passed: false,
+      report: {
+        status: 'HANDOFF',
+        handoffTriggered: true,
+        url: 'https://example.com/live/create',
+        flow: '测试 https://example.com/live/create',
+        startedAt: '2026-07-08T00:00:00.000Z',
+        endedAt: '2026-07-08T00:00:01.000Z',
+        durationMs: 1000,
+        outputDir,
+        reportJsonPath: path.join(outputDir, 'report.json'),
+        reportMarkdownPath: path.join(outputDir, 'report.md'),
+        logPath: path.join(outputDir, 'run.log'),
+        screenshots: [],
+        logs: [],
+        steps: [{
+          index: 1,
+          instruction: '验证页面包含 "Dashboard"。',
+          passed: false,
+          handoffTriggered: true,
+          attempts: 1,
+          beforeSnapshotPath: path.join(outputDir, '01-before.snapshot.json'),
+          afterSnapshotPath: path.join(outputDir, '01-after.snapshot.json'),
+          beforeScreenshotPath: path.join(outputDir, '01-before.png'),
+          afterScreenshotPath: path.join(outputDir, '01-after.png'),
+          verification: '步骤 1 验证时检测到登录页跳转，疑似登录态已失效。',
+          logs: [],
+        }],
+      },
+    };
+
+    printBrowserOptResult(result);
+    const output = log.mock.calls.map((call) => String(call[0])).join('\n');
+
+    expect(output).toContain('Status: HANDOFF');
+    expect(output).toContain('HANDOFF 1. 验证页面包含 "Dashboard"。');
+    expect(output).not.toContain('FAIL 1. 验证页面包含 "Dashboard"。');
   });
 });

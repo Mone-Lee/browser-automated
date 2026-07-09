@@ -82,6 +82,10 @@ export async function executeDeterministicInstruction(
     if (switchDomTarget) {
       return switchDomTarget;
     }
+    const nativeSelectableDomTarget = clickNativeSelectableDomTarget(agent, option.role, action.option);
+    if (nativeSelectableDomTarget) {
+      return nativeSelectableDomTarget;
+    }
     const searchOutput: string[] = [];
     if (!option.ref) {
       const fieldRef = findSelectableFieldRef(searchSnapshot, action.field);
@@ -136,6 +140,37 @@ export async function executeDeterministicInstruction(
   }
 
   return null;
+}
+
+/** radio/checkbox 的无障碍 ref 可能指向隐藏 input，文案唯一时改点真实 label 以触发组件事件。 */
+function clickNativeSelectableDomTarget(agent: BrowserAgent, role: string | null, option: string): string | null {
+  if (!/radio|checkbox/i.test(role ?? '')) {
+    return null;
+  }
+
+  const script = `(() => {
+  const normalize = (value) => (value || '').replace(/\\s+/g, '').trim();
+  const target = normalize(${JSON.stringify(option)});
+  const labels = [...document.querySelectorAll('label')].filter((label) => normalize(label.textContent) === target);
+  if (labels.length !== 1) {
+    return JSON.stringify({ matchedCount: labels.length, clicked: false });
+  }
+  const input = labels[0].querySelector('input[type="radio"], input[type="checkbox"]');
+  if (!input || input.disabled) {
+    return JSON.stringify({ matchedCount: 1, clicked: false, disabled: Boolean(input?.disabled) });
+  }
+  labels[0].click();
+  return JSON.stringify({ matchedCount: 1, clicked: true, checked: input.checked });
+})()`;
+
+  try {
+    const parsed = parseEvalJson(agent.evaluate(script));
+    return parsed.matchedCount === 1 && parsed.clicked === true
+      ? `selectable dom click ${option}`
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /** 长表单中字段可能不在当前可交互快照里，按视口上下搜索字段和目标选项。 */
@@ -263,11 +298,19 @@ function verifySwitchDomState(agent: BrowserAgent, field: string, option: string
   }
 }
 
-function parseEvalJson(raw: string): { found?: boolean; checked?: boolean | null; desired?: boolean; clicked?: boolean; switchId?: string } {
+function parseEvalJson(raw: string): {
+  found?: boolean;
+  checked?: boolean | null;
+  desired?: boolean;
+  clicked?: boolean;
+  switchId?: string;
+  matchedCount?: number;
+  disabled?: boolean;
+} {
   const decoded = JSON.parse(raw.trim()) as unknown;
   return typeof decoded === 'string'
-    ? JSON.parse(decoded) as { found?: boolean; checked?: boolean | null; desired?: boolean; clicked?: boolean; switchId?: string }
-    : decoded as { found?: boolean; checked?: boolean | null; desired?: boolean; clicked?: boolean; switchId?: string };
+    ? JSON.parse(decoded) as ReturnType<typeof parseEvalJson>
+    : decoded as ReturnType<typeof parseEvalJson>;
 }
 
 /** 返回在页面上下文执行的 switch 定位工具源码，按字段同一行最近 switch 选择目标。 */

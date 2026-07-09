@@ -4,7 +4,7 @@
  */
 import type { AgentBrowserJsonResult } from '../core/agent.js';
 
-export type BrowserOptStatus = 'PASS' | 'FAIL';
+export type BrowserOptStatus = 'PASS' | 'FAIL' | 'HANDOFF';
 
 export interface BrowserOptStepResult {
   index: number;

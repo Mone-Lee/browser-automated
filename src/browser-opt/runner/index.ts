@@ -43,7 +43,7 @@ export class BrowserOptRunner {
     this.agentFactory = agentFactory;
   }
 
-  /** 执行完整的 browser-opt 流程，产出报告、截图、日志与 PASS/FAIL 结论。 */
+  /** 执行完整的 browser-opt 流程，产出报告、截图、日志与 PASS/FAIL/HANDOFF 结论。 */
   async run(flow: string, options: BrowserOptRunnerOptions = {}): Promise<BrowserOptRunResult> {
     const url = extractBrowserOptUrl(flow);
     if (!url) {
@@ -63,6 +63,7 @@ export class BrowserOptRunner {
     const screenshots: string[] = [];
     const stepResults: BrowserOptStepResult[] = [];
     let handoffTriggered = false;
+    let initialOpenCanBeReused = true;
     let fatalError: string | undefined;
     const agent = this.agentFactory({
       profile: options.profile,
@@ -93,13 +94,12 @@ export class BrowserOptRunner {
         const resumed = await resumeFromHandoff(agent, logs, handoff, options.handoff, options.authStateSavePath);
         if (resumed) {
           handoffTriggered = false;
+          initialOpenCanBeReused = false;
           const resumedSnapshot = captureSettledSnapshot(agent, openSnapshotPath, logs);
           agent.screenshot(openScreenshotPath);
           logs.push(`resume-snapshot: ${openSnapshotPath}`);
           logs.push(`resume-screenshot: ${openScreenshotPath}`);
           logs.push(`resume-state: ${summarizeSnapshot(resumedSnapshot)}`);
-        } else {
-          fatalError = handoff.message;
         }
       } else if (options.authStateSavePath) {
         saveAuthState(agent, options.authStateSavePath, logs);
@@ -108,7 +108,7 @@ export class BrowserOptRunner {
       for (let index = 0; index < steps.length && !handoffTriggered; index++) {
         const result = await executeStep(agent, outputDir, index + 1, steps[index], {
           useAgentChat: options.useAgentChat ?? false,
-          alreadyOpenedUrl: index === 0 ? url : undefined,
+          alreadyOpenedUrl: index === 0 && initialOpenCanBeReused ? url : undefined,
           authStateSavePath: options.authStateSavePath,
           handoff: options.handoff,
         });
@@ -134,11 +134,12 @@ export class BrowserOptRunner {
 
     const endedAt = new Date();
     const passed = !fatalError && stepResults.length === steps.length && stepResults.every((step) => step.passed);
+    const status = passed ? 'PASS' : handoffTriggered ? 'HANDOFF' : 'FAIL';
     const reportJsonPath = path.join(outputDir, 'report.json');
     const reportMarkdownPath = path.join(outputDir, 'report.md');
     const logPath = path.join(outputDir, 'run.log');
     const report: BrowserOptReport = {
-      status: passed ? 'PASS' : 'FAIL',
+      status,
       handoffTriggered,
       url,
       flow,

@@ -3,6 +3,7 @@
  * 这样既能保持各命令主流程清晰，也方便未来单独调整控制台输出体验。
  */
 import type { BrowserOptRunResult } from '../../browser-opt/type.js';
+import { formatBrowserOptStepStatus } from '../../browser-opt/utils.js';
 import type { BrowserE2ETriggerResult } from '../../browser-e2e/test-reuse/types.js';
 import type { TestRunSummary } from '../../core/types.js';
 import { BROWSER_E2E_BIN_USAGE, LEGACY_CLI_USAGE } from './constants.js';
@@ -87,7 +88,7 @@ export function printBrowserOptResult(result: BrowserOptRunResult): void {
   const { report } = result;
   console.log(`Status: ${report.status}`);
   if (report.handoffTriggered) {
-    console.log('Handoff: 已触发，请先在浏览器中完成登录后再重试。');
+    console.log('Handoff: 已触发，请在浏览器中完成登录后输入 done 继续。');
   }
   console.log(`Report JSON: ${report.reportJsonPath}`);
   console.log(`Report Markdown: ${report.reportMarkdownPath}`);
@@ -101,7 +102,7 @@ export function printBrowserOptResult(result: BrowserOptRunResult): void {
     console.log(`  ${log}`);
   }
   for (const step of report.steps) {
-    const mark = step.passed ? 'PASS' : 'FAIL';
+    const mark = formatBrowserOptStepStatus(step);
     console.log(`${mark} ${step.index}. ${step.instruction}`);
     if (step.handoffTriggered && step.verification) {
       console.log(`  Handoff: ${step.verification}`);

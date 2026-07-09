@@ -383,6 +383,15 @@ export class BrowserAgent {
       }
 
       const url = this.currentUrlOrBlank();
+      if (this.headed) {
+        return [
+          'HANDOFF_FALLBACK: reusing the current visible browser for manual interaction.',
+          `Session: ${this.sessionId}`,
+          `URL: ${url}`,
+          `Reason: ${message}`,
+        ].join('\n');
+      }
+
       const openOutput = this.run(['open', url], { headed: true }).trim();
       return [
         'HANDOFF_FALLBACK: opened a visible browser window for manual interaction.',
