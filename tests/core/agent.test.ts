@@ -435,6 +435,20 @@ describe('BrowserAgent', () => {
       );
       expect(output).toBe('uploaded');
     });
+
+    it('keeps CSS selectors unchanged when uploading files', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult('uploaded'));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session' });
+      const output = agent.upload('[data-browser-opt-upload-id="browser-opt-upload-0"]', ['/tmp/image.png']);
+
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'agent-browser',
+        ['--session', 'test-session', 'upload', '[data-browser-opt-upload-id="browser-opt-upload-0"]', '/tmp/image.png'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+      expect(output).toBe('uploaded');
+    });
   });
 
   describe('batch()', () => {

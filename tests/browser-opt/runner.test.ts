@@ -1184,6 +1184,67 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps[0].actionOutput).toContain('upload @e3');
   });
 
+  it('uploads through a hidden file input selector when the accessibility snapshot omits it', async () => {
+    const outputDir = makeTempDir();
+    const fetchMock = vi.fn(async () => new Response('image-bytes', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before upload with visible Ant Upload but no file ref', { e1: { role: 'heading', name: '基础信息' } }),
+        snapshotJson('after upload with 封面预览', { e1: { role: 'heading', name: '基础信息' } }),
+      ],
+      evaluate: () => JSON.stringify({
+        found: true,
+        selector: '[data-browser-opt-upload-id="browser-opt-upload-0"]',
+      }),
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/live/create。\n\n目标：\n1. 自动上传“直播间分享封面”，图片来源 URL 为“https://stantic.ifengqun.com/front/fq-ecmiddle-sys/upload/82243689cae75e27b3867a5cbdd4292b.png”。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(true);
+    expect(agent.evaluate).toHaveBeenCalled();
+    expect((agent.upload as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
+      '[data-browser-opt-upload-id="browser-opt-upload-0"]',
+      [expect.stringContaining(path.join('uploads', '82243689cae75e27b3867a5cbdd4292b.png'))],
+    );
+    expect(result.report.steps[0].actionOutput).toContain('upload dom selector [data-browser-opt-upload-id="browser-opt-upload-0"]');
+  });
+
+  it('scrolls long forms to find upload controls outside the current snapshot', async () => {
+    const outputDir = makeTempDir();
+    const fetchMock = vi.fn(async () => new Response('image-bytes', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before upload without control', { e1: { role: 'heading', name: '基础信息' } }),
+        snapshotJson('retry upload without control', { e1: { role: 'heading', name: '直播配置' } }),
+        snapshotJson('scrolled upload control', { e3: { role: 'file', name: '直播间分享封面' } }),
+        snapshotJson('after upload with 封面预览', { e3: { role: 'file', name: '直播间分享封面' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/live/create。\n\n目标：\n1. 自动上传“直播间分享封面”，图片来源 URL 为“https://stantic.ifengqun.com/front/fq-ecmiddle-sys/upload/82243689cae75e27b3867a5cbdd4292b.png”。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(true);
+    expect((agent.scroll as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('up', 900);
+    expect((agent.upload as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
+      'e3',
+      [expect.stringContaining(path.join('uploads', '82243689cae75e27b3867a5cbdd4292b.png'))],
+    );
+    expect(result.report.steps[0].actionOutput).toContain('scroll up 900');
+    expect(result.report.steps[0].attempts).toBe(2);
+  });
+
   it('hands off manual production upload steps to the operator', async () => {
     const outputDir = makeTempDir();
     const agent = buildAgent({
