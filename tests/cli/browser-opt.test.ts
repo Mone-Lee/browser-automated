@@ -64,10 +64,18 @@ for (let i = 0; i < args.length; i++) {
 }
 const command = args[commandIndex];
 if (command === 'open') {
+  if (process.env.AGENT_BROWSER_STATE_OPEN_MARKER) {
+    if (args.includes('--state')) {
+      fs.writeFileSync(process.env.AGENT_BROWSER_STATE_OPEN_MARKER, 'state');
+    } else if (args.includes('--profile')) {
+      fs.rmSync(process.env.AGENT_BROWSER_STATE_OPEN_MARKER, { force: true });
+    }
+  }
   process.stdout.write('opened');
 } else if (command === 'snapshot') {
   const resumed = process.env.AGENT_BROWSER_RESUME_MARKER && fs.existsSync(process.env.AGENT_BROWSER_RESUME_MARKER);
-  const loginSnapshot = process.env.AGENT_BROWSER_LOGIN_SNAPSHOT && !resumed;
+  const stateOpened = process.env.AGENT_BROWSER_STATE_OPEN_MARKER && fs.existsSync(process.env.AGENT_BROWSER_STATE_OPEN_MARKER);
+  const loginSnapshot = process.env.AGENT_BROWSER_LOGIN_SNAPSHOT && !resumed && (!process.env.AGENT_BROWSER_LOGIN_SNAPSHOT_STATE_ONLY || stateOpened);
   const snapshotText = loginSnapshot
     ? (process.env.AGENT_BROWSER_LOGIN_SNAPSHOT_TEXT || process.env.AGENT_BROWSER_SNAPSHOT_TEXT || '登录远方的梦想直播平台')
     : (process.env.AGENT_BROWSER_AFTER_RESUME_SNAPSHOT_TEXT || process.env.AGENT_BROWSER_SNAPSHOT_TEXT || 'Example page');
@@ -189,6 +197,34 @@ describe('browser-opt CLI', () => {
     expect(commands).not.toContain('--profile Default');
     expect(commands).not.toContain('--auto-connect');
     expect(commands).toContain('state save');
+  });
+
+  it('falls back to the default profile when the default state opens on a login page', () => {
+    const outputDir = makeTempDir();
+    const commandLog = path.join(makeTempDir(), 'agent-browser.log');
+    const stateOpenMarker = path.join(makeTempDir(), 'state-opened');
+    const stateDir = makeTempDir();
+    const statePath = path.join(stateDir, 'browser-opt-default.json');
+    fs.writeFileSync(statePath, JSON.stringify({ cookies: [], origins: [] }));
+    const result = runCli([
+      'browser-opt',
+      '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。',
+      '--output-dir',
+      outputDir,
+    ], {
+      AGENT_BROWSER_LOG: commandLog,
+      AGENT_BROWSER_LOGIN_SNAPSHOT: '1',
+      AGENT_BROWSER_LOGIN_SNAPSHOT_STATE_ONLY: '1',
+      AGENT_BROWSER_STATE_OPEN_MARKER: stateOpenMarker,
+      BROWSER_OPT_AUTH_STATE_DIR: stateDir,
+    });
+
+    expect(result.status).toBe(0);
+    const commands = fs.readFileSync(commandLog, 'utf-8');
+    expect(commands.match(new RegExp(`--state ${statePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g')) ?? []).toHaveLength(1);
+    expect(commands).toContain('--profile Default --headed open https://example.com');
+    expect(commands).toContain('close');
+    expect(commands).toContain(`state save ${statePath}`);
   });
 
   it('uses an explicit state path when it exists', () => {
