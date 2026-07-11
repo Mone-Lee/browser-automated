@@ -102,3 +102,8 @@ export type DeterministicAction =
   | { type: 'upload'; field: string; source: string }
   | { type: 'handoff'; message: string }
   | { type: 'assert-text'; text: string };
+
+export type DeterministicExecutionOptions = {
+  alreadyOpenedUrl?: string;
+  allowViewportSearch?: boolean;
+};

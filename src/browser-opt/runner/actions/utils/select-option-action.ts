@@ -1,145 +1,117 @@
 /**
- * browser-opt 确定性动作执行器，负责把结构化动作落到 agent-browser 命令。
- * 这里集中处理控件查找、长表单搜索、开关 DOM 兜底和上传素材准备。
+ * browser-opt 选项选择动作执行器，负责下拉、单选、复选和 switch 的确定性选择流程。
  */
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import type { BrowserAgent } from '../../core/agent.js';
-import type { DeterministicAction, SnapshotEvidence } from '../type.js';
+import type { BrowserAgent } from '../../../../core/agent.js';
+import type { DeterministicAction, SnapshotEvidence, DeterministicExecutionOptions } from '../../../type.js';
 import {
-  findClickableRef,
   findSelectableFieldRef,
   findSelectableOption,
-  findTextboxRef,
-  findUploadRef,
-  parseDeterministicAction,
-} from '../utils.js';
-import { captureTransientSnapshot, normalizeUrlForCompare } from './evidence.js';
-import { buildLoginHandoffActionOutput, isLoginLikeSnapshot } from './handoff.js';
+} from '../../../utils.js';
+import { captureTransientSnapshot } from '../../evidence.js';
 
-/** 将自然语言动作直接映射到确定性命令，避免默认依赖 agent-browser chat。 */
-export async function executeDeterministicInstruction(
+/** 执行选项选择动作，包含 switch、原生单选复选框和长表单滚动搜索兜底。 */
+export function executeSelectOptionAction(
   agent: BrowserAgent,
-  instruction: string,
+  action: Extract<DeterministicAction, { type: 'select-option' }>,
   snapshot: SnapshotEvidence,
-  outputDir: string,
-  options: { alreadyOpenedUrl?: string; allowViewportSearch?: boolean } = {},
-): Promise<string | null> {
-  const action = parseDeterministicAction(instruction);
-  if (!action) {
-    return null;
+  options: DeterministicExecutionOptions,
+): string {
+  let option = findSelectableOption(snapshot, action.field, action.option);
+  let searchSnapshot = snapshot;
+  const fieldLabel = action.field ?? '选项';
+  if (option.alreadySelected) {
+    if (!isSwitchSelectable(option.role)) {
+      return `selection skipped: ${fieldLabel} 已是 ${action.option}`;
+    }
+
+    const domState = action.field ? verifySwitchDomState(agent, action.field, action.option) : null;
+    if (domState === true) {
+      return `selection skipped: ${fieldLabel} 已是 ${action.option}`;
+    }
+    option = { ...option, alreadySelected: false };
   }
 
-  if (action.type === 'open') {
-    if (options.alreadyOpenedUrl && normalizeUrlForCompare(action.url) === normalizeUrlForCompare(options.alreadyOpenedUrl)) {
-      return `open skipped: ${action.url} 已由 runner 初始化打开`;
-    }
-    return agent.open(action.url);
+  const switchDomTarget = isSwitchSelectable(option.role) && action.field
+    ? clickSwitchDomTarget(agent, action.field, action.option)
+    : null;
+  if (switchDomTarget) {
+    return switchDomTarget;
   }
 
-  if (action.type === 'fill') {
-    const ref = findTextboxRef(snapshot, action.field);
-    if (!ref) {
-      if (isLoginLikeSnapshot(snapshot)) {
-        return buildLoginHandoffActionOutput(
-          agent,
-          `当前页面仍在登录页，无法继续填写“${action.field}”，请先完成登录后再继续自动化。`,
-        );
-      }
-      throw new Error(`无法找到输入框：${action.field}`);
-    }
-    const output = agent.fill(ref, action.value);
-    return `fill @${ref} ${JSON.stringify(action.value)}\n${output}`.trim();
+  const nativeSelectableDomTarget = clickNativeSelectableDomTarget(agent, option.role, action.option);
+  if (nativeSelectableDomTarget) {
+    return nativeSelectableDomTarget;
   }
 
-  if (action.type === 'click') {
-    const ref = findClickableRef(snapshot, action.target);
-    if (!ref) {
-      throw new Error(`无法找到可点击元素：${action.target}`);
+  const searchOutput: string[] = [];
+  if (!option.ref) {
+    const fieldRef = findSelectableFieldRef(searchSnapshot, action.field);
+    if (fieldRef) {
+      searchOutput.push(`open select @${fieldRef}\n${agent.click(fieldRef)}`.trim());
+      agent.waitMs(300);
+      const openedSnapshot = captureTransientSnapshot(agent);
+      option = findSelectableOption(openedSnapshot, null, action.option);
     }
-    const output = agent.click(ref);
-    return `click @${ref}\n${output}`.trim();
   }
 
-  if (action.type === 'select-option') {
-    let option = findSelectableOption(snapshot, action.field, action.option);
-    let searchSnapshot = snapshot;
-    const fieldLabel = action.field ?? '选项';
-    if (option.alreadySelected) {
-      if (!isSwitchSelectable(option.role)) {
-        return `selection skipped: ${fieldLabel} 已是 ${action.option}`;
-      }
-
-      const domState = action.field ? verifySwitchDomState(agent, action.field, action.option) : null;
-      if (domState === true) {
-        return `selection skipped: ${fieldLabel} 已是 ${action.option}`;
-      }
-      option = { ...option, alreadySelected: false };
+  if (!option.ref && action.field && options.allowViewportSearch) {
+    const scrolled = searchSelectableInLongForm(agent, action);
+    if (scrolled) {
+      searchSnapshot = scrolled.snapshot;
+      option = scrolled.option;
+      searchOutput.push(...scrolled.logs);
     }
-    const switchDomTarget = isSwitchSelectable(option.role) && action.field
-      ? clickSwitchDomTarget(agent, action.field, action.option)
-      : null;
-    if (switchDomTarget) {
-      return switchDomTarget;
-    }
-    const nativeSelectableDomTarget = clickNativeSelectableDomTarget(agent, option.role, action.option);
-    if (nativeSelectableDomTarget) {
-      return nativeSelectableDomTarget;
-    }
-    const searchOutput: string[] = [];
-    if (!option.ref) {
-      const fieldRef = findSelectableFieldRef(searchSnapshot, action.field);
-      if (fieldRef) {
-        searchOutput.push(`open select @${fieldRef}\n${agent.click(fieldRef)}`.trim());
-        agent.waitMs(300);
-        const openedSnapshot = captureTransientSnapshot(agent);
-        option = findSelectableOption(openedSnapshot, null, action.option);
-      }
-    }
-    if (!option.ref && action.field && options.allowViewportSearch) {
-      const scrolled = searchSelectableInLongForm(agent, action);
-      if (scrolled) {
-        searchSnapshot = scrolled.snapshot;
-        option = scrolled.option;
-        searchOutput.push(...scrolled.logs);
-      }
-    }
-    if (!option.ref) {
-      const fieldRef = findSelectableFieldRef(searchSnapshot, action.field);
-      if (fieldRef) {
-        searchOutput.push(`open select @${fieldRef}\n${agent.click(fieldRef)}`.trim());
-        agent.waitMs(300);
-        const openedSnapshot = captureTransientSnapshot(agent);
-        option = findSelectableOption(openedSnapshot, null, action.option);
-      }
-    }
-    if (!option.ref) {
-      throw new Error(`无法找到选项：${fieldLabel} -> ${action.option}`);
-    }
-    const output = agent.click(option.ref);
-    return [
-      ...searchOutput,
-      `${formatSelectableActionName(option.role)} @${option.ref} ${fieldLabel}=${action.option}`,
-      output,
-    ].filter(Boolean).join('\n').trim();
   }
 
-  if (action.type === 'upload') {
-    const ref = findUploadRef(snapshot, action.field);
-    if (!ref) {
-      throw new Error(`无法找到上传控件：${action.field}`);
+  if (!option.ref) {
+    const fieldRef = findSelectableFieldRef(searchSnapshot, action.field);
+    if (fieldRef) {
+      searchOutput.push(`open select @${fieldRef}\n${agent.click(fieldRef)}`.trim());
+      agent.waitMs(300);
+      const openedSnapshot = captureTransientSnapshot(agent);
+      option = findSelectableOption(openedSnapshot, null, action.option);
     }
-    const filePath = await prepareUploadFile(action.source, outputDir);
-    const output = agent.upload(ref, [filePath]);
-    return `upload @${ref} ${filePath}\n${output}`.trim();
   }
 
-  if (action.type === 'handoff') {
-    const output = agent.handoff(action.message);
-    return `handoff ${JSON.stringify(action.message)}\n${output}`.trim();
+  if (!option.ref) {
+    throw new Error(`无法找到选项：${fieldLabel} -> ${action.option}`);
   }
 
-  return null;
+  const output = agent.click(option.ref);
+  return [
+    ...searchOutput,
+    `${formatSelectableActionName(option.role)} @${option.ref} ${fieldLabel}=${action.option}`,
+    output,
+  ].filter(Boolean).join('\n').trim();
+}
+
+/** 对选择动作做后置状态确认，防止命令发出但页面没有完成目标状态时误报成功。 */
+export function verifySelectOptionActionEffect(
+  agent: BrowserAgent,
+  action: Extract<DeterministicAction, { type: 'select-option' }>,
+  afterSnapshot: SnapshotEvidence,
+): { passed: boolean; message: string } {
+  const selected = findSelectableOption(afterSnapshot, action.field, action.option);
+  if (isSwitchSelectable(selected.role) && action.field) {
+    const domState = verifySwitchDomState(agent, action.field, action.option);
+    if (domState === true) {
+      return { passed: true, message: `已确认开关状态：${action.field}=${action.option}` };
+    }
+    if (domState === false) {
+      return { passed: false, message: `DOM 确认开关未达到目标状态：${action.field}=${action.option}` };
+    }
+    return { passed: false, message: `无法可靠确认开关状态：${action.field}=${action.option}` };
+  }
+
+  if (selected.alreadySelected) {
+    return { passed: true, message: `已确认选择状态：${action.field ?? '选项'}=${action.option}` };
+  }
+
+  if (isSelectedValueVisible(afterSnapshot.text, action.field, action.option)) {
+    return { passed: true, message: `已确认页面显示选择值：${action.field ?? '选项'}=${action.option}` };
+  }
+
+  return { passed: false, message: `动作后未确认目标已选中：${action.field ?? '选项'}=${action.option}` };
 }
 
 /** radio/checkbox 的无障碍 ref 可能指向隐藏 input，文案唯一时改点真实 label 以触发组件事件。 */
@@ -242,39 +214,6 @@ function clickSwitchDomTarget(agent: BrowserAgent, field: string, option: string
   } catch {
     return null;
   }
-}
-
-/** 对确定性动作做后置状态确认，防止命令发出但页面没有完成目标状态时误报成功。 */
-export function verifyDeterministicActionEffect(
-  agent: BrowserAgent,
-  action: DeterministicAction,
-  afterSnapshot: SnapshotEvidence,
-): { passed: boolean; message: string } {
-  if (action.type !== 'select-option') {
-    return { passed: true, message: '动作步骤已完成，已重新 snapshot。' };
-  }
-
-  const selected = findSelectableOption(afterSnapshot, action.field, action.option);
-  if (isSwitchSelectable(selected.role) && action.field) {
-    const domState = verifySwitchDomState(agent, action.field, action.option);
-    if (domState === true) {
-      return { passed: true, message: `已确认开关状态：${action.field}=${action.option}` };
-    }
-    if (domState === false) {
-      return { passed: false, message: `DOM 确认开关未达到目标状态：${action.field}=${action.option}` };
-    }
-    return { passed: false, message: `无法可靠确认开关状态：${action.field}=${action.option}` };
-  }
-
-  if (selected.alreadySelected) {
-    return { passed: true, message: `已确认选择状态：${action.field ?? '选项'}=${action.option}` };
-  }
-
-  if (isSelectedValueVisible(afterSnapshot.text, action.field, action.option)) {
-    return { passed: true, message: `已确认页面显示选择值：${action.field ?? '选项'}=${action.option}` };
-  }
-
-  return { passed: false, message: `动作后未确认目标已选中：${action.field ?? '选项'}=${action.option}` };
 }
 
 /** switch 的 accessibility checked 在部分业务页不可靠，单独走 DOM 近邻状态确认。 */
@@ -402,26 +341,4 @@ function formatSelectableActionName(role: string | null): string {
   }
 
   return 'click';
-}
-
-/** 将远程上传素材下载到本次证据目录，让 agent-browser upload 使用稳定的本地路径。 */
-async function prepareUploadFile(source: string, outputDir: string): Promise<string> {
-  if (!/^https?:\/\//i.test(source)) {
-    return path.resolve(source);
-  }
-
-  const uploadsDir = path.join(outputDir, 'uploads');
-  fs.mkdirSync(uploadsDir, { recursive: true });
-
-  const url = new URL(source);
-  const basename = path.basename(url.pathname) || 'upload-file';
-  const filePath = path.join(uploadsDir, basename);
-  const response = await fetch(source);
-  if (!response.ok) {
-    throw new Error(`下载上传文件失败：${response.status} ${response.statusText}`);
-  }
-
-  const buffer = Buffer.from(await response.arrayBuffer());
-  fs.writeFileSync(filePath, buffer);
-  return filePath;
 }

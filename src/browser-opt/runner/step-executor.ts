@@ -12,7 +12,7 @@ import {
   summarizeSnapshot,
   verifyStep,
 } from '../utils.js';
-import { executeDeterministicInstruction, verifyDeterministicActionEffect } from './deterministic-actions.js';
+import { executeDeterministicInstruction, verifyDeterministicActionEffect } from './actions/index.js';
 import { captureSettledSnapshot, captureSnapshot, captureTransientSnapshot } from './evidence.js';
 import {
   extractHandoffMessage,
