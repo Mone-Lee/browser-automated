@@ -83,7 +83,17 @@ browser-opt "<flow>" --output-dir ./artifacts/browser-opt
 browser-opt "<flow>" --agent-chat
 ```
 
-By default, `browser-opt` first checks its saved auth state under `.browser-automated/states/`. If a state file exists, it loads that state and does not pass `--profile`, so only cookies/storage are reused and prior Chrome tabs are not restored. If no state file exists, it starts once with `--profile Default` and saves cookies/storage for later runs. Pass `--profile <name>` only to choose a different Chrome profile for first import, and pass `--state <path>` to use a custom state file. It shows and keeps the real headed browser by default so the user can watch the operation and inspect the final page state, but it must not open the agent-browser dashboard at `http://localhost:4848`. Use `--no-live-viewport` only when the user explicitly wants headless execution. `--agent-chat` is a legacy compatibility mode. It may require `AI_GATEWAY_API_KEY`; avoid it when the caller can inspect snapshots and produce deterministic actions.
+Auth state reuse policy:
+
+- `browser-opt` first checks its saved auth state under `.browser-automated/states/`.
+- If a default state file exists, it loads that state first, so only cookies/storage are reused and prior Chrome tabs are not restored.
+- If the default state opens on a login screen, or the page asynchronously redirects to login before/during a step, `browser-opt` falls back to the selected Chrome profile once and saves refreshed cookies/storage back to the default state file.
+- If no default state file exists, it starts once with `--profile Default` and saves cookies/storage for later runs.
+- Pass `--profile <name>` to choose a different Chrome profile for first import and default-state fallback.
+- Pass `--state <path>` to use a custom state file without automatic profile fallback.
+- Do not rely on focused-browser reuse for login import: ordinary Chrome is usually not CDP-accessible, and auto-connect can attach to the wrong temporary browser.
+
+It shows and keeps the real headed browser by default so the user can watch the operation and inspect the final page state, but it must not open the agent-browser dashboard at `http://localhost:4848`. Use `--no-live-viewport` only when the user explicitly wants headless execution. `--agent-chat` is a legacy compatibility mode. It may require `AI_GATEWAY_API_KEY`; avoid it when the caller can inspect snapshots and produce deterministic actions.
 
 ## Output
 
