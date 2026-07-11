@@ -1,12 +1,12 @@
 /**
- * browser-opt 人工接管工具，负责登录态失效识别、handoff 上下文和恢复后的状态保存。
+ * browser-opt 人工接管工具，负责登录态失效识别、handoff 上下文、恢复控制和登录态保存。
  * 执行层只消费这里的统一结果，不直接拼接接管日志和提示文案。
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { BrowserAgent } from '../../core/agent.js';
 import type { BrowserOptHandoffContext, BrowserOptHandoffOptions, SnapshotEvidence } from '../type.js';
-import { normalizeUrlForCompare } from './evidence.js';
+import { captureTransientSnapshot, normalizeUrlForCompare } from './evidence.js';
 
 /** 把 handoff 文案与底层输出组装成统一上下文，供恢复逻辑和 CLI 提示复用。 */
 export function buildHandoffContext(agent: BrowserAgent, message: string, output: string): BrowserOptHandoffContext {
@@ -74,7 +74,6 @@ export async function resumeFromHandoff(
   logs: string[],
   handoff: BrowserOptHandoffContext,
   options?: BrowserOptHandoffOptions,
-  authStateSavePath?: string,
 ): Promise<boolean> {
   if (!options?.waitForUserResume) {
     return false;
@@ -84,11 +83,33 @@ export async function resumeFromHandoff(
   await options.waitForUserResume(handoff);
   const resumeOutput = agent.resume();
   logs.push(`resume: ${resumeOutput}`);
-  if (authStateSavePath) {
-    saveAuthState(agent, authStateSavePath, logs);
-  }
   await options.onHandoffCompleted?.(handoff);
   return true;
+}
+
+/** 人工接管后等待页面离开登录态再保存，避免用户刚恢复就把中转态误判成最终登录结果。 */
+export function saveAuthenticatedHandoffState(
+  agent: BrowserAgent,
+  authStateSavePath: string | undefined,
+  logs: string[],
+  snapshot: SnapshotEvidence,
+): void {
+  if (!authStateSavePath) {
+    return;
+  }
+
+  let currentSnapshot = snapshot;
+  for (let attempt = 1; attempt <= 5 && isLoginLikeSnapshot(currentSnapshot); attempt += 1) {
+    logs.push(`auth-state-save-wait ${attempt}: 人工接管恢复后仍停留在登录页，等待跳转完成后重试。`);
+    agent.waitMs(500);
+    currentSnapshot = captureTransientSnapshot(agent);
+  }
+
+  if (isLoginLikeSnapshot(currentSnapshot)) {
+    logs.push('auth-state-save-skipped: 人工接管恢复后仍停留在登录页。');
+    return;
+  }
+  saveAuthState(agent, authStateSavePath, logs);
 }
 
 /** 保存 cookies 与 storage，失败只记录日志，避免覆盖原本流程的 PASS/FAIL 结论。 */

@@ -13,11 +13,12 @@ import {
   verifyStep,
 } from '../utils.js';
 import { executeDeterministicInstruction, verifyDeterministicActionEffect } from './deterministic-actions.js';
-import { captureSettledSnapshot, captureSnapshot } from './evidence.js';
+import { captureSettledSnapshot, captureSnapshot, captureTransientSnapshot } from './evidence.js';
 import {
   extractHandoffMessage,
   isHandoffActionOutput,
   resumeFromHandoff,
+  saveAuthenticatedHandoffState,
   shouldTriggerLoginHandoff,
   triggerLoginHandoff,
   buildHandoffContext,
@@ -46,6 +47,42 @@ export async function executeStep(
   logs.push(`before-state: ${summarizeSnapshot(beforeSnapshot)}`);
   logs.push(`before-screenshot: ${beforeScreenshotPath}`);
   logs.push(`thinking: 当前页面状态已记录，下一步执行确定性动作或验证。`);
+
+  if (shouldTriggerLoginHandoff(instruction, options.alreadyOpenedUrl, beforeSnapshot)) {
+    const fallbackAgent = options.retryAuthStateFallback?.();
+    if (fallbackAgent) {
+      logs.push(`auth-state-fallback-retry: 步骤 ${index} 执行前检测到登录页跳转`);
+      return executeStep(fallbackAgent, outputDir, index, instruction, {
+        ...options,
+        alreadyOpenedUrl: undefined,
+      });
+    }
+
+    const handoff = triggerLoginHandoff(agent, logs, `步骤 ${index} 执行前检测到登录页跳转`);
+    const resumed = await resumeFromHandoff(agent, logs, handoff, options.handoff);
+    if (resumed) {
+      const resumedSnapshot = captureTransientSnapshot(agent);
+      saveAuthenticatedHandoffState(agent, options.authStateSavePath, logs, resumedSnapshot);
+      return executeStep(agent, outputDir, index, instruction, {
+        ...options,
+        alreadyOpenedUrl: undefined,
+      });
+    }
+    return {
+      index,
+      instruction,
+      passed: false,
+      handoffTriggered: true,
+      attempts: 0,
+      beforeSnapshotPath,
+      afterSnapshotPath,
+      beforeScreenshotPath,
+      afterScreenshotPath,
+      actionOutput: handoff.output,
+      verification: handoff.message,
+      logs,
+    };
+  }
 
   let attempts = 0;
   let actionOutput = '';
@@ -102,10 +139,20 @@ export async function executeStep(
 
   if (isHandoffActionOutput(actionOutput) && parsedAction?.type !== 'handoff') {
     const verification = extractHandoffMessage(actionOutput) ?? '已触发人工接管。';
+    const fallbackAgent = options.retryAuthStateFallback?.();
+    if (fallbackAgent) {
+      logs.push(`auth-state-fallback-retry: ${verification}`);
+      return executeStep(fallbackAgent, outputDir, index, instruction, {
+        ...options,
+        alreadyOpenedUrl: undefined,
+      });
+    }
     const handoff = buildHandoffContext(agent, verification, actionOutput);
     logs.push(`verification paused: ${verification}`);
-    const resumed = await resumeFromHandoff(agent, logs, handoff, options.handoff, options.authStateSavePath);
+    const resumed = await resumeFromHandoff(agent, logs, handoff, options.handoff);
     if (resumed) {
+      const resumedSnapshot = captureTransientSnapshot(agent);
+      saveAuthenticatedHandoffState(agent, options.authStateSavePath, logs, resumedSnapshot);
       return executeStep(agent, outputDir, index, instruction, {
         ...options,
         alreadyOpenedUrl: undefined,
@@ -183,9 +230,19 @@ export async function executeStep(
   const verification = verifyStep(instruction, afterSnapshot);
   if (!verification.passed) {
     if (shouldTriggerLoginHandoff(instruction, options.alreadyOpenedUrl, afterSnapshot)) {
+      const fallbackAgent = options.retryAuthStateFallback?.();
+      if (fallbackAgent) {
+        logs.push(`auth-state-fallback-retry: 步骤 ${index} 验证时检测到登录页跳转`);
+        return executeStep(fallbackAgent, outputDir, index, instruction, {
+          ...options,
+          alreadyOpenedUrl: undefined,
+        });
+      }
       const handoff = triggerLoginHandoff(agent, logs, `步骤 ${index} 验证时检测到登录页跳转`);
-      const resumed = await resumeFromHandoff(agent, logs, handoff, options.handoff, options.authStateSavePath);
+      const resumed = await resumeFromHandoff(agent, logs, handoff, options.handoff);
       if (resumed) {
+        const resumedSnapshot = captureTransientSnapshot(agent);
+        saveAuthenticatedHandoffState(agent, options.authStateSavePath, logs, resumedSnapshot);
         return executeStep(agent, outputDir, index, instruction, {
           ...options,
           alreadyOpenedUrl: undefined,

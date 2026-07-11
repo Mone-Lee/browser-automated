@@ -3,6 +3,7 @@
  * 快照、动作和执行选项类型，避免执行逻辑与类型声明交错在同一个文件里。
  */
 import type { AgentBrowserJsonResult } from '../core/agent.js';
+import type { BrowserAgent } from '../core/agent.js';
 
 export type BrowserOptStatus = 'PASS' | 'FAIL' | 'HANDOFF';
 
@@ -55,6 +56,7 @@ export interface BrowserOptRunnerOptions {
   timeout?: number;
   useAgentChat?: boolean;
   authStateSavePath?: string;
+  authStateFallbackProfile?: string;
   handoff?: BrowserOptHandoffOptions;
 }
 
@@ -62,6 +64,7 @@ export interface BrowserOptStepExecutionOptions {
   useAgentChat: boolean;
   alreadyOpenedUrl?: string;
   authStateSavePath?: string;
+  retryAuthStateFallback?: () => BrowserAgent | null;
   handoff?: BrowserOptHandoffOptions;
 }
 

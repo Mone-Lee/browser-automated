@@ -23,6 +23,7 @@ import {
 import { captureSettledSnapshot } from './evidence.js';
 import {
   resumeFromHandoff,
+  saveAuthenticatedHandoffState,
   saveAuthState,
   shouldTriggerLoginHandoff,
   triggerLoginHandoff,
@@ -65,7 +66,8 @@ export class BrowserOptRunner {
     let handoffTriggered = false;
     let initialOpenCanBeReused = true;
     let fatalError: string | undefined;
-    const agent = this.agentFactory({
+    let authStateFallbackUsed = false;
+    let agent = this.agentFactory({
       profile: options.profile,
       sessionName: options.sessionName,
       statePath: options.statePath,
@@ -81,28 +83,65 @@ export class BrowserOptRunner {
 
       const openSnapshotPath = path.join(outputDir, '00-open.snapshot.json');
       const openScreenshotPath = path.join(outputDir, '00-open.png');
-      const openSnapshot = captureSettledSnapshot(agent, openSnapshotPath, logs);
+      let openSnapshot = captureSettledSnapshot(agent, openSnapshotPath, logs);
       agent.screenshot(openScreenshotPath);
       screenshots.push(openScreenshotPath);
       logs.push(`snapshot: ${openSnapshotPath}`);
       logs.push(`screenshot: ${openScreenshotPath}`);
       logs.push(`page-state: ${summarizeSnapshot(openSnapshot)}`);
 
+      /**
+       * state 已存在但运行中被登录页拦截时，最多回退一次到对应 profile 重新导入。
+       * 普通 Chrome 不一定开放 CDP 调试端口，因此这里不走 focused-browser 复用。
+       */
+      const retryAuthStateFallback = (): BrowserAgent | null => {
+        const canFallbackAuthState = options.statePath && options.authStateFallbackProfile;
+        if (!canFallbackAuthState || authStateFallbackUsed) {
+          return null;
+        }
+
+        authStateFallbackUsed = true;
+        logs.push(`auth-state-fallback: state 登录态疑似失效，改用 profile ${options.authStateFallbackProfile} 重新导入。`);
+        agent.close();
+        agent = this.agentFactory({
+          profile: options.authStateFallbackProfile,
+          sessionName: options.sessionName,
+          reuseRunningBrowser: options.reuseRunningBrowser ?? false,
+          liveViewport: options.liveViewport ?? true,
+          openLiveDashboard: false,
+          timeout: options.timeout,
+        });
+        logs.push(`fallback-open: ${url}`);
+        agent.open(url);
+        openSnapshot = captureSettledSnapshot(agent, openSnapshotPath, logs);
+        agent.screenshot(openScreenshotPath);
+        logs.push(`fallback-snapshot: ${openSnapshotPath}`);
+        logs.push(`fallback-screenshot: ${openScreenshotPath}`);
+        logs.push(`fallback-page-state: ${summarizeSnapshot(openSnapshot)}`);
+        if (!shouldTriggerLoginHandoff(flow, url, openSnapshot) && options.authStateSavePath) {
+          saveAuthState(agent, options.authStateSavePath, logs);
+        }
+        return shouldTriggerLoginHandoff(flow, url, openSnapshot) ? null : agent;
+      };
+
+      if (shouldTriggerLoginHandoff(flow, url, openSnapshot)) {
+        retryAuthStateFallback();
+      }
+
       if (shouldTriggerLoginHandoff(flow, url, openSnapshot)) {
         const handoff = triggerLoginHandoff(agent, logs, '初始化打开目标页面后检测到登录页跳转');
         handoffTriggered = true;
-        const resumed = await resumeFromHandoff(agent, logs, handoff, options.handoff, options.authStateSavePath);
+        const resumed = await resumeFromHandoff(agent, logs, handoff, options.handoff);
         if (resumed) {
           handoffTriggered = false;
           initialOpenCanBeReused = false;
           const resumedSnapshot = captureSettledSnapshot(agent, openSnapshotPath, logs);
           agent.screenshot(openScreenshotPath);
+          saveAuthenticatedHandoffState(agent, options.authStateSavePath, logs, resumedSnapshot);
           logs.push(`resume-snapshot: ${openSnapshotPath}`);
           logs.push(`resume-screenshot: ${openScreenshotPath}`);
           logs.push(`resume-state: ${summarizeSnapshot(resumedSnapshot)}`);
         }
-      } else if (options.authStateSavePath) {
-        saveAuthState(agent, options.authStateSavePath, logs);
       }
 
       for (let index = 0; index < steps.length && !handoffTriggered; index++) {
@@ -110,6 +149,7 @@ export class BrowserOptRunner {
           useAgentChat: options.useAgentChat ?? false,
           alreadyOpenedUrl: index === 0 && initialOpenCanBeReused ? url : undefined,
           authStateSavePath: options.authStateSavePath,
+          retryAuthStateFallback,
           handoff: options.handoff,
         });
         stepResults.push(result);
@@ -134,6 +174,9 @@ export class BrowserOptRunner {
 
     const endedAt = new Date();
     const passed = !fatalError && stepResults.length === steps.length && stepResults.every((step) => step.passed);
+    if (passed && options.authStateSavePath) {
+      saveAuthState(agent, options.authStateSavePath, logs);
+    }
     const status = passed ? 'PASS' : handoffTriggered ? 'HANDOFF' : 'FAIL';
     const reportJsonPath = path.join(outputDir, 'report.json');
     const reportMarkdownPath = path.join(outputDir, 'report.md');
