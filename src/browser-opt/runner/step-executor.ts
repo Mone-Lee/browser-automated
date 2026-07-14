@@ -134,27 +134,45 @@ export async function executeStep(
     }
   }
 
-  const afterSnapshot = parsedAction?.type === 'open'
-    ? captureSettledSnapshot(agent, afterSnapshotPath, logs)
-    : captureSnapshot(agent, afterSnapshotPath);
-  agent.screenshot(afterScreenshotPath);
-  logs.push(`after-state: ${summarizeSnapshot(afterSnapshot)}`);
-  logs.push(`after-screenshot: ${afterScreenshotPath}`);
-
-  if (isHandoffActionOutput(actionOutput) && parsedAction?.type !== 'handoff') {
+  if (isHandoffActionOutput(actionOutput)) {
     const verification = extractHandoffMessage(actionOutput) ?? '已触发人工接管。';
-    const fallbackAgent = options.retryAuthStateFallback?.();
-    if (fallbackAgent) {
-      logs.push(`auth-state-fallback-retry: ${verification}`);
-      return executeStep(fallbackAgent, outputDir, index, instruction, {
-        ...options,
-        alreadyOpenedUrl: undefined,
-      });
+    if (parsedAction?.type !== 'handoff') {
+      const fallbackAgent = options.retryAuthStateFallback?.();
+      if (fallbackAgent) {
+        logs.push(`auth-state-fallback-retry: ${verification}`);
+        return executeStep(fallbackAgent, outputDir, index, instruction, {
+          ...options,
+          alreadyOpenedUrl: undefined,
+        });
+      }
     }
+
     const handoff = buildHandoffContext(agent, verification, actionOutput);
     logs.push(`verification paused: ${verification}`);
     const resumed = await resumeFromHandoff(agent, logs, handoff, options.handoff);
-    if (resumed) {
+
+    if (!resumed) {
+      const afterSnapshot = captureSnapshot(agent, afterSnapshotPath);
+      agent.screenshot(afterScreenshotPath);
+      logs.push(`after-state: ${summarizeSnapshot(afterSnapshot)}`);
+      logs.push(`after-screenshot: ${afterScreenshotPath}`);
+      return {
+        index,
+        instruction,
+        passed: false,
+        handoffTriggered: true,
+        attempts,
+        beforeSnapshotPath,
+        afterSnapshotPath,
+        beforeScreenshotPath,
+        afterScreenshotPath,
+        actionOutput,
+        verification,
+        logs,
+      };
+    }
+
+    if (parsedAction?.type !== 'handoff') {
       const resumedSnapshot = captureTransientSnapshot(agent);
       saveAuthenticatedHandoffState(agent, options.authStateSavePath, logs, resumedSnapshot);
       return executeStep(agent, outputDir, index, instruction, {
@@ -162,21 +180,14 @@ export async function executeStep(
         alreadyOpenedUrl: undefined,
       });
     }
-    return {
-      index,
-      instruction,
-      passed: false,
-      handoffTriggered: true,
-      attempts,
-      beforeSnapshotPath,
-      afterSnapshotPath,
-      beforeScreenshotPath,
-      afterScreenshotPath,
-      actionOutput,
-      verification,
-      logs,
-    };
   }
+
+  const afterSnapshot = parsedAction?.type === 'open'
+    ? captureSettledSnapshot(agent, afterSnapshotPath, logs)
+    : captureSnapshot(agent, afterSnapshotPath);
+  agent.screenshot(afterScreenshotPath);
+  logs.push(`after-state: ${summarizeSnapshot(afterSnapshot)}`);
+  logs.push(`after-screenshot: ${afterScreenshotPath}`);
 
   if (actionError) {
     return {

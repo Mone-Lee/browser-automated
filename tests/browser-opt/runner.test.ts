@@ -1474,6 +1474,9 @@ describe('BrowserOptRunner', () => {
 
   it('hands off manual production upload steps to the operator', async () => {
     const outputDir = makeTempDir();
+    const onHandoffRequired = vi.fn();
+    const waitForUserResume = vi.fn();
+    const onHandoffCompleted = vi.fn();
     const agent = buildAgent({
       snapshots: [
         snapshotJson('open'),
@@ -1485,11 +1488,21 @@ describe('BrowserOptRunner', () => {
 
     const result = await runner.run('操作 https://example.com/live/create。\n\n目标：\n1. handoff 给操作人员：请手动选择“直播间分享封面”的本地真实图片，并在裁剪/确认完成后恢复自动化。', {
       outputDir,
+      handoff: {
+        onHandoffRequired,
+        waitForUserResume,
+        onHandoffCompleted,
+      },
     });
 
     expect(result.passed).toBe(true);
     expect((agent.handoff as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('handoff 给操作人员：请手动选择“直播间分享封面”的本地真实图片，并在裁剪/确认完成后恢复自动化。');
+    expect(onHandoffRequired).toHaveBeenCalledTimes(1);
+    expect(waitForUserResume).toHaveBeenCalledTimes(1);
+    expect((agent.resume as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect(onHandoffCompleted).toHaveBeenCalledTimes(1);
     expect(result.report.steps[0].actionOutput).toContain('handoff');
+    expect(result.report.steps[0].logs.join('\n')).toContain('resume: RESUME_FALLBACK');
   });
 
   it('executes natural-language action steps with agent-browser chat JSON when requested', async () => {
