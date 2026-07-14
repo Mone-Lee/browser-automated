@@ -18,6 +18,7 @@ const tempDirs: string[] = [];
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -572,6 +573,194 @@ describe('BrowserOptRunner', () => {
 
     expect(result.passed).toBe(true);
     expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e32');
+  });
+
+  it('fills AntD DatePicker when a date field uses relative natural language', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T10:00:00+08:00'));
+    const outputDir = makeTempDir();
+    const dateSnapshot = '- textbox "直播时间" [ref=e20]';
+    const refs = {
+      e20: { role: 'textbox', name: '直播时间', placeholder: '请选择日期' },
+    };
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(dateSnapshot, refs),
+        snapshotJson('直播时间 2026-07-15', refs),
+      ],
+      evaluate: vi.fn().mockReturnValue(JSON.stringify({ found: true, value: '2026-07-15 00:00:00' })),
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 直播时间选择明天', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect(agent.evaluate).toHaveBeenCalled();
+    expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e20', '2026-07-15 00:00:00');
+    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(result.report.steps[0].actionOutput).toContain('datepicker fill @e20 直播时间=2026-07-15 00:00:00');
+    expect(result.report.steps[0].verification).toContain('已确认日期字段：直播时间=2026-07-15');
+  });
+
+  it('normalizes compact month-day date descriptions for date fields', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T10:00:00+08:00'));
+    const outputDir = makeTempDir();
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('- textbox "直播时间" [ref=e20]', {
+          e20: { role: 'textbox', name: '直播时间', placeholder: '请选择日期' },
+        }),
+        snapshotJson('直播时间 2027-07-01', {
+          e20: { role: 'textbox', name: '直播时间', value: '2027-07-01' },
+        }),
+      ],
+      evaluate: vi.fn().mockReturnValue(JSON.stringify({ found: true, value: '2027-07-01 00:00:00' })),
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 直播时间选择0701', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e20', '2027-07-01 00:00:00');
+    expect(result.report.steps[0].actionOutput).toContain('直播时间=2027-07-01 00:00:00');
+  });
+
+  it('does not shorten a time field after the full datetime candidate fails verification', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T10:00:00+08:00'));
+    const outputDir = makeTempDir();
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('- textbox "直播时间" [ref=e20]', {
+          e20: { role: 'textbox', name: '直播时间', placeholder: '请选择日期' },
+        }),
+        snapshotJson('直播时间', {
+          e20: { role: 'textbox', name: '直播时间', value: '' },
+        }),
+        snapshotJson('直播时间', {
+          e20: { role: 'textbox', name: '直播时间', value: '' },
+        }),
+      ],
+      evaluate: vi.fn().mockReturnValue(JSON.stringify({ found: true, filled: false, value: '' })),
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 直播时间选择明天', { outputDir });
+
+    expect(result.passed).toBe(false);
+    expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e20', '2026-07-15 00:00:00');
+    expect((agent.fill as ReturnType<typeof vi.fn>)).not.toHaveBeenCalledWith('e20', '2026-07-15 00:00');
+    expect((agent.fill as ReturnType<typeof vi.fn>)).not.toHaveBeenCalledWith('e20', '2026-07-15');
+  });
+
+  it('accepts a date field when transient snapshot shows the filled value', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T10:00:00+08:00'));
+    const outputDir = makeTempDir();
+    const refs = {
+      e20: { role: 'textbox', name: '直播时间', placeholder: '请选择日期' },
+    };
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('- textbox "直播时间" [ref=e20]', refs),
+        snapshotJson('- textbox "* 直播时间 :" [required, ref=e20]: 2026-07-15 00:00:00', refs),
+        snapshotJson('- textbox "* 直播时间 :" [required, ref=e20]: 2026-07-15 00:00:00', refs),
+      ],
+      evaluate: vi.fn().mockReturnValue(JSON.stringify({ found: true, value: '' })),
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 直播时间选择明天', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect(result.report.steps[0].actionOutput).toContain('datepicker fill @e20 直播时间=2026-07-15 00:00:00');
+  });
+
+  it('rejects a DatePicker date when the visible date cell is disabled', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T10:00:00+08:00'));
+    const outputDir = makeTempDir();
+    const refs = {
+      e20: { role: 'textbox', name: '直播时间', placeholder: '请选择日期' },
+    };
+    const evaluate = vi.fn((script: string) => {
+      if (script.includes('const result = clickDateCell')) {
+        return JSON.stringify({ clicked: false, disabled: true, reason: 'date cell disabled' });
+      }
+      if (script.includes('JSON.stringify(inspectDateCell')) {
+        return JSON.stringify({ found: true, disabled: true });
+      }
+      if (script.includes('setNativeInputValue')) {
+        return JSON.stringify({ found: true, filled: true, value: '2026-09-29 00:00:00' });
+      }
+      return JSON.stringify({ found: true, value: '2026-09-29 00:00:00' });
+    });
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('- textbox "直播时间" [ref=e20]', refs),
+        snapshotJson('- textbox "* 直播时间 :" [required, ref=e20]: 2026-09-29 00:00:00', refs),
+        snapshotJson('- textbox "* 直播时间 :" [required, ref=e20]: 2026-09-29 00:00:00', refs),
+      ],
+      evaluate,
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 直播时间选择9月29日', { outputDir });
+
+    expect(result.passed).toBe(false);
+    expect(result.report.steps[0].attempts).toBe(1);
+    expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e20', '2026-09-29 00:00:00');
+    expect(result.report.steps[0].error).toContain('日期不可选：直播时间=2026-09-29');
+    expect(result.report.steps[0].logs.join('\n')).not.toContain('retry-wait');
+  });
+
+  it('rejects a DatePicker value when the confirm button stays disabled', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T10:00:00+08:00'));
+    const outputDir = makeTempDir();
+    const refs = {
+      e20: { role: 'textbox', name: '直播时间', placeholder: '请选择日期' },
+    };
+    const afterSnapshot = [
+      '- textbox "* 直播时间 :" [required, ref=e20]: 2026-09-29 00:00:00',
+      '- generic "2026年9月一二三四五六日"',
+      '  - cell "29" [ref=e196] clickable [onclick]',
+      '- button "确 定" [disabled, ref=e166]',
+    ].join('\n');
+    const evaluate = vi.fn((script: string) => {
+      if (script.includes('inspectDatePickerCommitButton')) {
+        return JSON.stringify({ found: true, disabled: true });
+      }
+      if (script.includes('JSON.stringify(inspectDateCell')) {
+        return JSON.stringify({ found: false, disabled: false });
+      }
+      return JSON.stringify({ found: true, value: '2026-09-29 00:00:00' });
+    });
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('- textbox "直播时间" [ref=e20]', refs),
+        snapshotJson(afterSnapshot, refs),
+        snapshotJson(afterSnapshot, refs),
+      ],
+      evaluate,
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 直播时间选择9月29日', { outputDir });
+
+    expect(result.passed).toBe(false);
+    expect(result.report.steps[0].attempts).toBe(1);
+    expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e20', '2026-09-29 00:00:00');
+    expect(result.report.steps[0].error).toContain('日期不可选：直播时间=2026-09-29');
+    expect(result.report.steps[0].logs.join('\n')).not.toContain('retry-wait');
   });
 
   it('limits repeated option matching to the field scope when labels are duplicated', async () => {
