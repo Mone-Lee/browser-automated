@@ -49,9 +49,9 @@ export async function executeUploadAction(
 
 /** Ant Upload 等组件会隐藏真实 file input，snapshot 缺失时改用 DOM 字段邻近关系定位。 */
 function findHiddenUploadInputSelector(agent: BrowserAgent, field: string): { selector: string } | null {
-  const script = `${uploadDomHelperSource()}
-(() => {
-  const result = findUploadInputByField(${JSON.stringify(field)});
+  const script = `(() => {
+  const uploadHelper = ${uploadDomHelperSource()};
+  const result = uploadHelper.findUploadInputByField(${JSON.stringify(field)});
   return JSON.stringify(result);
 })()
 `;
@@ -67,6 +67,7 @@ function findHiddenUploadInputSelector(agent: BrowserAgent, field: string): { se
 /** 返回在页面上下文执行的上传控件定位工具源码，兼容隐藏 input[type=file]。 */
 function uploadDomHelperSource(): string {
   return `
+(() => {
 const normalizeBrowserOptUploadText = (value) => String(value || '').replace(/[\\s：:，,。；*"'“”]/g, '').toLowerCase();
 const browserOptUploadVisible = (element) => {
   const style = window.getComputedStyle(element);
@@ -133,6 +134,8 @@ function findUploadInputByField(field) {
   best.input.setAttribute('data-browser-opt-upload-id', id);
   return { found: true, selector: '[data-browser-opt-upload-id="' + id + '"]', matchedText: best.text };
 }
+return { findUploadInputByField };
+})()
 `;
 }
 

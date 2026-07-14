@@ -195,9 +195,9 @@ function searchSelectableInLongForm(
 /** 对 switch 优先使用 DOM 中字段同一行的最近开关，避免无障碍 ref 指向或 checked 状态失真。 */
 function clickSwitchDomTarget(agent: BrowserAgent, field: string, option: string): string | null {
   const desiredChecked = /^(是|开|开启|打开|启用|true|yes|on)$/i.test(option.trim());
-  const script = `${switchDomHelperSource()}
-(() => {
-  const result = findSwitchByField(${JSON.stringify(field)});
+  const script = `(() => {
+  const switchHelper = ${switchDomHelperSource()};
+  const result = switchHelper.findSwitchByField(${JSON.stringify(field)});
   if (!result.found || !result.switchId) {
     return JSON.stringify(result);
   }
@@ -234,9 +234,9 @@ function clickSwitchDomTarget(agent: BrowserAgent, field: string, option: string
 /** switch 的 accessibility checked 在部分业务页不可靠，单独走 DOM 近邻状态确认。 */
 function verifySwitchDomState(agent: BrowserAgent, field: string, option: string): boolean | null {
   const desiredChecked = /^(是|开|开启|打开|启用|true|yes|on)$/i.test(option.trim());
-  const script = `${switchDomHelperSource()}
-(() => {
-  const result = findSwitchByField(${JSON.stringify(field)});
+  const script = `(() => {
+  const switchHelper = ${switchDomHelperSource()};
+  const result = switchHelper.findSwitchByField(${JSON.stringify(field)});
   return JSON.stringify({ ...result, desired: ${JSON.stringify(desiredChecked)} });
 })()
 `;
@@ -270,6 +270,7 @@ function parseEvalJson(raw: string): {
 /** 返回在页面上下文执行的 switch 定位工具源码，按字段同一行最近 switch 选择目标。 */
 function switchDomHelperSource(): string {
   return `
+(() => {
 const normalizeBrowserOptText = (value) => String(value || '').replace(/[\\s：:，,。；*]/g, '').toLowerCase();
 const browserOptVisible = (element) => {
   const style = window.getComputedStyle(element);
@@ -322,6 +323,8 @@ function findSwitchByField(field) {
   }
   return { found: false, checked: null };
 }
+return { findSwitchByField };
+})()
 `;
 }
 

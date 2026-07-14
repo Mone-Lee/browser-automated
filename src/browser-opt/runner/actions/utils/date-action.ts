@@ -99,14 +99,14 @@ function selectDatePickerPanelTarget(
 ): string | null {
   const openOutput = agent.click(ref);
   agent.waitMs(300);
-  const script = `${datePickerDomHelperSource()}
-(() => {
-  const result = clickDateCell(${JSON.stringify(expectedDate)});
+  const script = `(() => {
+  const dateHelper = ${datePickerDomHelperSource()};
+  const result = dateHelper.clickDateCell(${JSON.stringify(expectedDate)});
   if (!result.clicked) {
     return JSON.stringify(result);
   }
   const okButton = [...document.querySelectorAll('.ant-picker-ok button, .ant-picker-footer button')]
-    .find((button) => browserOptDateVisible(button) && !button.disabled && /确|ok/i.test(button.textContent || ''));
+    .find((button) => dateHelper.browserOptDateVisible(button) && !button.disabled && /确|ok/i.test(button.textContent || ''));
   if (okButton) {
     okButton.click();
     result.okClicked = true;
@@ -145,14 +145,14 @@ function fillDatePickerDomTarget(
   value: string,
   expectedDate: string,
 ): string | null {
-  const script = `${datePickerDomHelperSource()}
-(() => {
-  const input = findDateInputByField(${JSON.stringify(field)});
+  const script = `(() => {
+  const dateHelper = ${datePickerDomHelperSource()};
+  const input = dateHelper.findDateInputByField(${JSON.stringify(field)});
   if (!input || input.disabled) {
     return JSON.stringify({ found: Boolean(input), filled: false, disabled: Boolean(input?.disabled), readOnly: Boolean(input?.readOnly) });
   }
   input.focus();
-  setNativeInputValue(input, ${JSON.stringify(value)});
+  dateHelper.setNativeInputValue(input, ${JSON.stringify(value)});
   input.dispatchEvent(new Event('input', { bubbles: true }));
   input.dispatchEvent(new Event('change', { bubbles: true }));
   input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
@@ -182,9 +182,9 @@ function fillDatePickerDomTarget(
 
 /** ref fill 后补一次 Enter/blur，触发 rc-picker 对输入内容的解析和提交。 */
 function commitDatePickerDomValue(agent: BrowserAgent, field: string | null): void {
-  const script = `${datePickerDomHelperSource()}
-(() => {
-  const input = findDateInputByField(${JSON.stringify(field)}) || document.activeElement;
+  const script = `(() => {
+  const dateHelper = ${datePickerDomHelperSource()};
+  const input = dateHelper.findDateInputByField(${JSON.stringify(field)}) || document.activeElement;
   if (!input) {
     return JSON.stringify({ found: false });
   }
@@ -231,8 +231,10 @@ function confirmDatePickerValue(
 
 /** 日期时间控件的确认按钮不可用时，输入框里的临时值不能作为已提交结果。 */
 function inspectDatePickerCommitAvailability(agent: BrowserAgent): boolean | null {
-  const script = `${datePickerDomHelperSource()}
-(() => JSON.stringify(inspectDatePickerCommitButton()))()
+  const script = `(() => {
+  const dateHelper = ${datePickerDomHelperSource()};
+  return JSON.stringify(dateHelper.inspectDatePickerCommitButton());
+})()
 `;
 
   try {
@@ -248,8 +250,10 @@ function inspectDatePickerCommitAvailability(agent: BrowserAgent): boolean | nul
 
 /** 如果 DatePicker 面板能看到目标日期且它被禁用，则即使 input 短暂显示该值也不能判成功。 */
 function inspectDateCellAvailability(agent: BrowserAgent, expectedDate: string): boolean | null {
-  const script = `${datePickerDomHelperSource()}
-(() => JSON.stringify(inspectDateCell(${JSON.stringify(expectedDate)})))()
+  const script = `(() => {
+  const dateHelper = ${datePickerDomHelperSource()};
+  return JSON.stringify(dateHelper.inspectDateCell(${JSON.stringify(expectedDate)}));
+})()
 `;
 
   try {
@@ -265,9 +269,9 @@ function inspectDateCellAvailability(agent: BrowserAgent, expectedDate: string):
 
 /** 直接读取 DatePicker input 的值，弥补 snapshot 对受控日期组件状态表达不足的问题。 */
 function verifyDatePickerDomValue(agent: BrowserAgent, field: string | null, expectedDate: string): boolean | null {
-  const script = `${datePickerDomHelperSource()}
-(() => {
-  const input = findDateInputByField(${JSON.stringify(field)});
+  const script = `(() => {
+  const dateHelper = ${datePickerDomHelperSource()};
+  const input = dateHelper.findDateInputByField(${JSON.stringify(field)});
   if (!input) {
     return JSON.stringify({ found: false, value: null });
   }
@@ -305,6 +309,7 @@ function parseEvalJson(raw: string): {
 /** 返回在页面上下文执行的日期控件定位和赋值工具源码，优先按表单 label 关联 input。 */
 function datePickerDomHelperSource(): string {
   return `
+(() => {
 const normalizeBrowserOptDateText = (value) => String(value || '').replace(/[\\s：:，,。；*]/g, '').toLowerCase();
 const browserOptDateVisible = (element) => {
   const style = window.getComputedStyle(element);
@@ -399,6 +404,15 @@ function inspectDatePickerCommitButton() {
   const button = buttons[0];
   return { found: true, disabled: Boolean(button.disabled || button.getAttribute('aria-disabled') === 'true') };
 }
+return {
+  browserOptDateVisible,
+  clickDateCell,
+  findDateInputByField,
+  inspectDateCell,
+  inspectDatePickerCommitButton,
+  setNativeInputValue,
+};
+})()
 `;
 }
 

@@ -46,7 +46,7 @@ function snapshotJson(text: string, refs: Record<string, unknown> = { e1: { role
 function buildAgent(options: {
   snapshots?: ReturnType<typeof snapshotJson>[];
   chat?: () => { raw: string; data: unknown | null; parseError?: string };
-  evaluate?: () => string;
+  evaluate?: (script: string) => string;
 } = {}): BrowserAgent {
   const snapshots = options.snapshots ?? [
     snapshotJson('home page', { e1: { role: 'textbox', name: 'Search' } }),
@@ -693,7 +693,7 @@ describe('BrowserOptRunner', () => {
       if (script.includes('const result = clickDateCell')) {
         return JSON.stringify({ clicked: false, disabled: true, reason: 'date cell disabled' });
       }
-      if (script.includes('JSON.stringify(inspectDateCell')) {
+      if (script.includes('JSON.stringify(dateHelper.inspectDateCell') || script.includes('JSON.stringify(inspectDateCell')) {
         return JSON.stringify({ found: true, disabled: true });
       }
       if (script.includes('setNativeInputValue')) {
@@ -738,7 +738,7 @@ describe('BrowserOptRunner', () => {
       if (script.includes('inspectDatePickerCommitButton')) {
         return JSON.stringify({ found: true, disabled: true });
       }
-      if (script.includes('JSON.stringify(inspectDateCell')) {
+      if (script.includes('JSON.stringify(dateHelper.inspectDateCell') || script.includes('JSON.stringify(inspectDateCell')) {
         return JSON.stringify({ found: false, disabled: false });
       }
       return JSON.stringify({ found: true, value: '2026-09-29 00:00:00' });
@@ -1402,6 +1402,44 @@ describe('BrowserOptRunner', () => {
       [expect.stringContaining(path.join('uploads', '82243689cae75e27b3867a5cbdd4292b.png'))],
     );
     expect(result.report.steps[0].actionOutput).toContain('upload dom selector [data-browser-opt-upload-id="browser-opt-upload-0"]');
+  });
+
+  it('keeps URL download errors when hidden upload lookup is retried', async () => {
+    const outputDir = makeTempDir();
+    const fetchMock = vi.fn(async () => new Response('missing', { status: 404, statusText: 'Not Found' }));
+    vi.stubGlobal('fetch', fetchMock);
+    let evalCalls = 0;
+    const evaluate = vi.fn((script: string) => {
+      evalCalls += 1;
+      if (evalCalls > 1 && script.trimStart().startsWith('const normalizeBrowserOptUploadText')) {
+        throw new Error('Identifier has already been declared');
+      }
+      return JSON.stringify({
+        found: true,
+        selector: '[data-browser-opt-upload-id="browser-opt-upload-0"]',
+      });
+    });
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before upload with visible Ant Upload but no file ref', { e1: { role: 'heading', name: '基础信息' } }),
+        snapshotJson('retry upload with visible Ant Upload but no file ref', { e1: { role: 'heading', name: '基础信息' } }),
+        snapshotJson('after failed upload', { e1: { role: 'heading', name: '基础信息' } }),
+      ],
+      evaluate,
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/live/create。\n\n目标：\n1. 自动上传“直播间分享封面”，图片来源 URL 为“https://stantic.ifengqun.com/front/fq-ecmiddle-sys/upload/82243689cae75e27b3867a5cbdd4292b.png”。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(false);
+    expect(evaluate).toHaveBeenCalledTimes(2);
+    expect((agent.upload as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(result.report.steps[0].error).toBe('下载上传文件失败：404 Not Found');
+    expect(result.report.steps[0].logs.join('\n')).not.toContain('无法找到上传控件');
   });
 
   it('scrolls long forms to find upload controls outside the current snapshot', async () => {
