@@ -119,6 +119,10 @@ export async function executeStep(
     } catch (err) {
       actionError = err instanceof Error ? err.message : String(err);
       logs.push(`attempt ${attempts}: action failed: ${actionError}`);
+      if (isTerminalActionError(actionError)) {
+        logs.push(`terminal-failure: ${actionError}`);
+        break;
+      }
       if (attempts < 2) {
         agent.waitMs(500);
         logs.push(`retry-wait: 等待联动渲染或异步状态更新后重新获取页面。`);
@@ -282,4 +286,9 @@ export async function executeStep(
     error: verification.passed ? undefined : verification.message,
     logs,
   };
+}
+
+/** 确定性动作已确认业务上不可达时不再重试，避免把不可选状态误当异步未完成。 */
+function isTerminalActionError(message: string): boolean {
+  return message.startsWith('日期不可选：');
 }
