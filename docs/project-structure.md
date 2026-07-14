@@ -36,6 +36,71 @@
 - `src/cli/commands/browser-opt.ts`：browser-opt 命令参数解析与执行编排。
 - `src/core/agent.ts`：封装 `agent-browser` 的 open、chat、snapshot、screenshot、scroll、eval、session 等能力。
 
+执行时序：
+
+```mermaid
+sequenceDiagram
+  participant U as 用户
+  participant CLI as browser-opt CLI
+  participant R as BrowserOptRunner
+  participant P as 自然语言解析 utils
+  participant A as BrowserAgent
+  participant AB as agent-browser CLI
+  participant B as 真实浏览器
+
+  U->>CLI: 输入自然语言流程
+  CLI->>R: run(flow, options)
+  R->>P: 提取 URL / 拆分步骤
+  P-->>R: url + steps
+
+  R->>A: open(url)
+  A->>AB: agent-browser open url --session ...
+  AB->>B: 打开页面
+  B-->>AB: 页面状态
+  AB-->>A: stdout
+  A-->>R: open result
+
+  R->>A: snapshot() / screenshot()
+  A->>AB: snapshot -i / screenshot
+  AB->>B: 读取可交互元素与截图
+  B-->>AB: snapshot / image
+  AB-->>A: 结果
+  A-->>R: 证据
+
+  loop 每个自然语言步骤
+    R->>P: parseDeterministicAction(step)
+    P-->>R: open/click/fill/upload/assert 等动作
+
+    R->>A: snapshotJson()
+    A->>AB: snapshot -i --json
+    AB->>B: 获取可交互树
+    B-->>AB: 元素 ref
+    AB-->>A: JSON
+    A-->>R: snapshot evidence
+
+    R->>P: 按字段/文本匹配目标 ref
+    P-->>R: ref 或断言结果
+
+    R->>A: click(ref) / fill(ref,value) / waitForText(...)
+    A->>AB: agent-browser click/fill/wait ...
+    AB->>B: 实际控制浏览器
+    B-->>AB: 执行结果
+    AB-->>A: stdout
+    A-->>R: step output
+
+    R->>A: after snapshot / screenshot
+    A->>AB: snapshot / screenshot
+    AB->>B: 采集执行后证据
+    B-->>AB: 证据
+    AB-->>A: 结果
+    A-->>R: step evidence
+  end
+
+  R->>R: 汇总 PASS/FAIL/HANDOFF 与报告
+  R-->>CLI: BrowserOptRunResult
+  CLI-->>U: 输出执行结果/报告路径
+```
+
 产物：
 
 - `artifacts/browser-opt/<run-id>/report.json`
