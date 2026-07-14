@@ -8,6 +8,11 @@ import {
   findSelectableOption,
 } from '../../../utils.js';
 import { captureTransientSnapshot } from '../../evidence.js';
+import {
+  executeDateSelectOptionAction,
+  resolveDateSelectOption,
+  verifyDateSelectOptionActionEffect,
+} from './date-action.js';
 
 /** 执行选项选择动作，包含 switch、原生单选复选框和长表单滚动搜索兜底。 */
 export function executeSelectOptionAction(
@@ -16,6 +21,11 @@ export function executeSelectOptionAction(
   snapshot: SnapshotEvidence,
   options: DeterministicExecutionOptions,
 ): string {
+  const normalizedDate = resolveDateSelectOption(action);
+  if (normalizedDate) {
+    return executeDateSelectOptionAction(agent, action, snapshot, normalizedDate);
+  }
+
   let option = findSelectableOption(snapshot, action.field, action.option);
   let searchSnapshot = snapshot;
   const fieldLabel = action.field ?? '选项';
@@ -91,6 +101,11 @@ export function verifySelectOptionActionEffect(
   action: Extract<DeterministicAction, { type: 'select-option' }>,
   afterSnapshot: SnapshotEvidence,
 ): { passed: boolean; message: string } {
+  const normalizedDate = resolveDateSelectOption(action);
+  if (normalizedDate) {
+    return verifyDateSelectOptionActionEffect(agent, action, afterSnapshot, normalizedDate);
+  }
+
   const selected = findSelectableOption(afterSnapshot, action.field, action.option);
   if (isSwitchSelectable(selected.role) && action.field) {
     const domState = verifySwitchDomState(agent, action.field, action.option);
