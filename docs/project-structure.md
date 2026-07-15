@@ -199,7 +199,8 @@ tests/
   generated/              自动生成的 Playwright 测试与索引
 ```
 
-执行时序：
+## 执行时序
+**把自然语言先拆成 URL、步骤和结构化动作，再用页面 snapshot 匹配元素 ref，最后通过 BrowserAgent 调 agent-browser CLI 的 open/click/fill/wait/screenshot 等命令去驱动真实浏览器会话**
 
 ```mermaid
 sequenceDiagram
