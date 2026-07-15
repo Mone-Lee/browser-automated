@@ -349,7 +349,7 @@ function isSelectedValueVisible(text: string, field: string | null, option: stri
 
 /** 归一化页面可见文案，减少空白和标点对选择结果确认的影响。 */
 function normalizeVisibleText(value: string): string {
-  return value.toLowerCase().replace(/\s+/g, '').replace(/[：:，,。；"'“”]/g, '').trim();
+  return value.toLowerCase().replace(/\s+/g, '').replace(/[：:，,。；"'‘’“”]/g, '').trim();
 }
 
 /** 根据控件角色生成 agent-browser 已支持的动作名称，报告文本需与实际命令集一致。 */

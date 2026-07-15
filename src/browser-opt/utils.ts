@@ -496,7 +496,7 @@ function isFileInputRole(role: string, label: string): boolean {
 
 /** 归一化待匹配文本，减少空格和中英文标点对匹配结果的干扰。 */
 function normalizeMatchText(value: string): string {
-  return value.toLowerCase().replace(/\s+/g, '').replace(/[：:，,。；"'“”]/g, '').trim();
+  return value.toLowerCase().replace(/\s+/g, '').replace(/[：:，,。；"'‘’“”]/g, '').trim();
 }
 
 /** 识别“是/否、开/关”这类布尔型目标值，供 switch 切换场景复用。 */

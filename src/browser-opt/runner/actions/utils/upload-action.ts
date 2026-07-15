@@ -68,7 +68,7 @@ function findHiddenUploadInputSelector(agent: BrowserAgent, field: string): { se
 function uploadDomHelperSource(): string {
   return `
 (() => {
-const normalizeBrowserOptUploadText = (value) => String(value || '').replace(/[\\s：:，,。；*"'“”]/g, '').toLowerCase();
+const normalizeBrowserOptUploadText = (value) => String(value || '').replace(/[\\s：:，,。；*"'‘’“”]/g, '').toLowerCase();
 const browserOptUploadVisible = (element) => {
   const style = window.getComputedStyle(element);
   const rect = element.getBoundingClientRect();

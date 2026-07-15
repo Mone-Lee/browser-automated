@@ -543,5 +543,5 @@ function formatDateUnavailableMessage(field: string | null, date: string): strin
 
 /** 归一化页面可见文案，减少空白和标点对选择结果确认的影响。 */
 function normalizeVisibleText(value: string): string {
-  return value.toLowerCase().replace(/\s+/g, '').replace(/[：:，,。；"'“”]/g, '').trim();
+  return value.toLowerCase().replace(/\s+/g, '').replace(/[：:，,。；"'‘’“”]/g, '').trim();
 }
