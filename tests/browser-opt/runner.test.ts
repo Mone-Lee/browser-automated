@@ -11,6 +11,7 @@ import {
   extractBrowserOptUrl,
   splitBrowserOptSteps,
 } from '../../src/browser-opt/runner/index.js';
+import { parseDeterministicAction } from '../../src/browser-opt/utils.js';
 import type { BrowserAgent } from '../../src/core/agent.js';
 import type { AgentOptions } from '../../src/core/types.js';
 
@@ -120,6 +121,62 @@ describe('browser-opt parsing', () => {
       '售后服务选择“支持7天无理由退换”',
       '售后服务选择“上门安装”',
     ]);
+  });
+
+  it('recognizes image URL source descriptions as upload actions without requiring the upload verb', () => {
+    expect(parseDeterministicAction('直播间分享封面，图片来源为“https://example.com/share.png”')).toEqual({
+      type: 'upload',
+      field: '直播间分享封面',
+      source: 'https://example.com/share.png',
+    });
+
+    expect(parseDeterministicAction('直播间封面，图片来源 为“https://example.com/cover.png”')).toEqual({
+      type: 'upload',
+      field: '直播间封面',
+      source: 'https://example.com/cover.png',
+    });
+
+    expect(parseDeterministicAction('直播间分享封面，图片来源为‘https://example.com/share.png’')).toEqual({
+      type: 'upload',
+      field: '直播间分享封面',
+      source: 'https://example.com/share.png',
+    });
+
+    expect(parseDeterministicAction("自动上传'直播间分享封面'，图片来源 URL 为'https://example.com/share.png'")).toEqual({
+      type: 'upload',
+      field: '直播间分享封面',
+      source: 'https://example.com/share.png',
+    });
+
+    expect(parseDeterministicAction('使用 https://example.com/banner.png 作为直播间分享封面图片')).toEqual({
+      type: 'upload',
+      field: '直播间分享封面',
+      source: 'https://example.com/banner.png',
+    });
+  });
+
+  it('recognizes curly and straight single quotes across deterministic action types', () => {
+    expect(parseDeterministicAction('直播间名称输入‘自动化直播间’')).toEqual({
+      type: 'fill',
+      field: '直播间名称',
+      value: '自动化直播间',
+    });
+
+    expect(parseDeterministicAction("点击'提交'")).toEqual({
+      type: 'click',
+      target: '提交',
+    });
+
+    expect(parseDeterministicAction('业务类型选择‘安选公开’')).toEqual({
+      type: 'select-option',
+      field: '业务类型',
+      option: '安选公开',
+    });
+
+    expect(parseDeterministicAction('验证页面包含‘Dashboard’')).toEqual({
+      type: 'assert-text',
+      text: 'Dashboard',
+    });
   });
 });
 
@@ -1371,6 +1428,53 @@ describe('BrowserOptRunner', () => {
     expect(uploadedPath).toContain(path.join('uploads', '82243689cae75e27b3867a5cbdd4292b.png'));
     expect(fs.readFileSync(uploadedPath, 'utf-8')).toBe('image-bytes');
     expect(result.report.steps[0].actionOutput).toContain('upload @e3');
+  });
+
+  it('uploads images from source-only natural language descriptions', async () => {
+    const outputDir = makeTempDir();
+    const fetchMock = vi.fn(async () => new Response('image-bytes', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before upload', { e3: { role: 'file', name: '直播间分享封面' } }),
+        snapshotJson('after upload with 封面预览', { e3: { role: 'file', name: '直播间分享封面' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/live/create。\n\n目标：\n1. 直播间分享封面，图片来源为“https://stantic.ifengqun.com/front/fq-ecmiddle-sys/upload/82243689cae75e27b3867a5cbdd4292b.png”。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(true);
+    expect((agent.upload as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
+      'e3',
+      [expect.stringContaining(path.join('uploads', '82243689cae75e27b3867a5cbdd4292b.png'))],
+    );
+  });
+
+  it('does not include curly single quotes in image URLs', async () => {
+    const outputDir = makeTempDir();
+    const fetchMock = vi.fn(async () => new Response('image-bytes', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before upload', { e3: { role: 'file', name: '直播间分享封面' } }),
+        snapshotJson('after upload with 封面预览', { e3: { role: 'file', name: '直播间分享封面' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/live/create。\n\n目标：\n1. 直播间分享封面，图片来源为‘https://stantic.ifengqun.com/front/fq-ecmiddle-sys/upload/82243689cae75e27b3867a5cbdd4292b.png’。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith('https://stantic.ifengqun.com/front/fq-ecmiddle-sys/upload/82243689cae75e27b3867a5cbdd4292b.png');
   });
 
   it('uploads through a hidden file input selector when the accessibility snapshot omits it', async () => {

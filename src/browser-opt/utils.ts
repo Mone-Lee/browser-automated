@@ -13,7 +13,7 @@ import type {
 } from './type.js';
 
 const DEFAULT_OUTPUT_ROOT = path.join(process.cwd(), 'artifacts', 'browser-opt');
-const URL_RE = /https?:\/\/[^\s。，、，)）"'“”]+/i;
+const URL_RE = /https?:\/\/[^\s。，、，)）"'‘’“”]+/i;
 const QUOTED_VALUE_RE = /["“‘']([^"”’']+)["”’']/;
 const SELECTABLE_VERB_RE = /选择|选中|勾选|勾上|设置为|设置成|切换为|切换成|切到|改为|改成|调整为|调整成|设为|设成|置为|置成|变更为|变更成|变为|变成|select|check|toggle/i;
 
@@ -91,7 +91,7 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
     return { type: 'handoff', message: normalized };
   }
 
-  if (url && /上传|upload/.test(normalized)) {
+  if (url && isUploadInstruction(normalized)) {
     return {
       type: 'upload',
       field: parseUploadFieldName(normalized) ?? '文件',
@@ -134,20 +134,51 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
   return null;
 }
 
+/** 识别带远程 URL 的图片/文件上传描述，兼容省略“上传”动词的口语写法。 */
+function isUploadInstruction(instruction: string): boolean {
+  return /上传|upload/i.test(instruction)
+    || /(?:图片|文件|封面)\s*(?:来源|地址|链接|url)\s*(?:为|是|:|：)?/i.test(instruction)
+    || /(?:来源|地址|链接|url)\s*(?:为|是|:|：)?\s*https?:\/\/.+(?:图片|文件|封面)/i.test(instruction)
+    || /(?:使用|用|从)\s*https?:\/\/.+(?:作为|当作|设置为|设为).*(?:图片|文件|封面)/i.test(instruction);
+}
+
 /** 从上传步骤中提取字段名，优先识别引号中的控件名称。 */
 function parseUploadFieldName(instruction: string): string | null {
-  const quoted = instruction.match(/[“"]([^”"]+)[”"]/)?.[1]?.trim();
+  const quoted = instruction.match(/["“‘']([^"”’']+)["”’']/)?.[1]?.trim();
   if (quoted && !URL_RE.test(quoted)) {
     return quoted;
   }
 
   const beforeSource = instruction.split(URL_RE)[0]?.trim() ?? instruction;
-  const object = beforeSource.match(/(?:自动)?上传\s*([^，,。；\n]+?)(?:，|,|图片来源|文件来源|来源|$)/)?.[1]?.trim();
-  if (object) {
-    return object.replace(/^["“]|["”]$/g, '').replace(/[：:]$/g, '').trim();
+  const afterSource = instruction.split(URL_RE).slice(1).join(' ').trim();
+  const candidates = [
+    beforeSource.match(/(?:自动)?上传\s*([^，,。；\n]+?)(?:，|,|图片来源|文件来源|来源|地址|链接|url|$)/i)?.[1],
+    beforeSource.match(/^([^，,。；\n]+?)(?:，|,)?\s*(?:图片|文件|封面)\s*(?:来源|地址|链接|url)\s*(?:为|是|:|：)?/i)?.[1],
+    beforeSource.match(/(?:为|给|将|把)\s*([^，,。；\n]+?)\s*(?:使用|用|从)?\s*$/i)?.[1],
+    afterSource.match(/(?:作为|当作|设置为|设为)\s*([^，,。；\n]+?)(?:图片|文件|封面)?(?:，|,|。|；|$)/i)?.[1],
+  ];
+
+  for (const candidate of candidates) {
+    const cleaned = cleanUploadFieldName(candidate ?? '');
+    if (cleaned) {
+      return cleaned;
+    }
   }
 
   return null;
+}
+
+/** 清理上传字段名外围的动作词和来源提示，保留页面控件文案。 */
+function cleanUploadFieldName(value: string): string | null {
+  const cleaned = value
+    .replace(/^["“‘']|["”’']$/g, '')
+    .replace(/^(请|自动|帮我|给我|将|把|为|给)\s*/, '')
+    .replace(/(?:的)?(?:图片|文件|封面)?\s*(?:来源|地址|链接|url)\s*(?:为|是|:|：)?$/i, '')
+    .replace(/(封面)(?:图片|图)$/i, '$1')
+    .replace(/[：:，,。；]$/g, '')
+    .trim();
+
+  return cleaned || null;
 }
 
 /** 从“字段输入值”类语句中提取字段名，兼容常见中文口语写法。 */
@@ -686,11 +717,11 @@ function parseExpectedText(instruction: string): string | null {
   if (contains?.[1]) {
     return contains[1]
       .replace(/至少\s*\d+.*$/, '')
-      .replace(/^["“]|["”]$/g, '')
+      .replace(/^["“‘']|["”’']$/g, '')
       .trim();
   }
 
-  const quoted = instruction.match(/["“]([^"”]+)["”]/);
+  const quoted = instruction.match(QUOTED_VALUE_RE);
   if (quoted?.[1]) {
     return quoted[1].trim();
   }
