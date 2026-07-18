@@ -369,11 +369,11 @@ const browserOptOrdinalIndex = (value) => {
     return Math.max(Number(exact[1]) - 1, 0);
   }
   const aliases = [
-    ['第一个选项', '第一个', '第一项', '首个', '首项', '第1个', '第1项'],
-    ['第二个选项', '第二个', '第二项', '第2个', '第2项'],
-    ['第三个选项', '第三个', '第三项', '第3个', '第3项'],
-    ['第四个选项', '第四个', '第四项', '第4个', '第4项'],
-    ['第五个选项', '第五个', '第五项', '第5个', '第5项'],
+    ['第一个选项', '第一个', '第一项', '首个', '首项'],
+    ['第二个选项', '第二个', '第二项'],
+    ['第三个选项', '第三个', '第三项'],
+    ['第四个选项', '第四个', '第四项'],
+    ['第五个选项', '第五个', '第五项'],
   ].map((items) => items.map(normalizeBrowserOptText));
   const matched = aliases.findIndex((items) => items.includes(normalized));
   if (matched >= 0) return matched;

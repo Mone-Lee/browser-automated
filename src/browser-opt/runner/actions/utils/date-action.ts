@@ -533,7 +533,7 @@ function isSelectedValueVisible(text: string, field: string | null, option: stri
 
 /** AntD DateTimePicker 面板还开着且“确定”禁用时，当前日期值只是临时输入态。 */
 function isDatePickerConfirmDisabled(text: string): boolean {
-  return /button\s+"(?:确\s*定|OK|Ok|ok)"\s+\[[^\]]*disabled/i.test(text);
+  return /button\s+"(?:确\s*定|ok)"\s+\[[^\]]*disabled/i.test(text);
 }
 
 /** 统一不可选日期的用户侧提示，避免报告里出现“已显示但未提交”的误导信息。 */
