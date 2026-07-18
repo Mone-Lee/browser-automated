@@ -28,7 +28,7 @@
       },
       "liveViewport": {
         "type": "boolean",
-        "description": "Whether to show the real headed browser, default true; this does not open the agent-browser dashboard"
+        "description": "Whether to show the actual system Chrome browser, default true; never use the agent tool's built-in browser or the agent-browser dashboard"
       },
       "outputDir": {
         "type": "string",

@@ -42,6 +42,7 @@ For production environments, describe upload steps as manual handoff so the oper
 
 Every execution must follow these rules:
 
+- Always open the actual system Chrome browser for the run. Do not open or operate inside the agent tool's built-in browser, including the Copilot/Codex in-app browser or any agent-browser dashboard/preview window.
 - Strictly run an `open -> snapshot --json -> deterministic act -> re-snapshot` loop.
 - Take a screenshot for every step.
 - Use text matching or element existence checks for verification points.
@@ -93,7 +94,7 @@ Auth state reuse policy:
 - Pass `--state <path>` to use a custom state file without automatic profile fallback.
 - Do not rely on focused-browser reuse for login import: ordinary Chrome is usually not CDP-accessible, and auto-connect can attach to the wrong temporary browser.
 
-It shows and keeps the real headed browser by default so the user can watch the operation and inspect the final page state, but it must not open the agent-browser dashboard at `http://localhost:4848`. Use `--no-live-viewport` only when the user explicitly wants headless execution. `--agent-chat` is a legacy compatibility mode. It may require `AI_GATEWAY_API_KEY`; avoid it when the caller can inspect snapshots and produce deterministic actions.
+It shows and keeps the actual system Chrome browser by default so the user can watch the operation and inspect the final page state. This must be a real Chrome window, not the agent tool's built-in browser such as the Copilot/Codex in-app browser, and it must not open the agent-browser dashboard at `http://localhost:4848`. Use `--no-live-viewport` only when the user explicitly wants headless execution. `--agent-chat` is a legacy compatibility mode. It may require `AI_GATEWAY_API_KEY`; avoid it when the caller can inspect snapshots and produce deterministic actions.
 
 ## Output
 
