@@ -7,6 +7,10 @@ import type { BrowserAgent } from '../../core/agent.js';
 import type { SnapshotEvidence } from '../type.js';
 import { countSnapshotNodes, snapshotText } from '../utils.js';
 
+interface CaptureSettledSnapshotOptions {
+  reloadAfterBlank?: boolean;
+}
+
 /** 采集一份机器可读快照并同时落盘，供动作匹配与报告复用。 */
 export function captureSnapshot(agent: BrowserAgent, filePath: string): SnapshotEvidence {
   const output = agent.snapshotJson();
@@ -28,40 +32,37 @@ export function captureTransientSnapshot(agent: BrowserAgent): SnapshotEvidence 
   };
 }
 
-/** 打开页面后等待空白初始页退场，避免把 about:blank 误判成目标页面状态。 */
-export function captureSettledSnapshot(agent: BrowserAgent, filePath: string, logs: string[]): SnapshotEvidence {
+/** 打开页面后短暂等待空白初始页退场，必要时刷新一次，避免卡在 SPA 半初始化状态。 */
+export function captureSettledSnapshot(
+  agent: BrowserAgent,
+  filePath: string,
+  logs: string[],
+  options: CaptureSettledSnapshotOptions = {},
+): SnapshotEvidence {
   let snapshot = captureSnapshot(agent, filePath);
+  let blankWaits = 0;
   for (let attempt = 1; attempt <= 5 && isBlankInitialSnapshot(snapshot); attempt += 1) {
+    blankWaits = attempt;
     logs.push(`open-wait ${attempt}: snapshot 仍为空白页，等待页面接管后重试。`);
     agent.waitMs(500);
     snapshot = captureSnapshot(agent, filePath);
+  }
+  if (blankWaits > 0 && options.reloadAfterBlank) {
+    logs.push(`open-reload: 初始打开经历空白页，刷新一次避免停留在半初始化页面。`);
+    agent.reload();
+    agent.waitMs(500);
+    snapshot = captureSnapshot(agent, filePath);
+    for (let attempt = 1; attempt <= 5 && isBlankInitialSnapshot(snapshot); attempt += 1) {
+      logs.push(`open-reload-wait ${attempt}: 刷新后 snapshot 仍为空白页，继续短暂等待。`);
+      agent.waitMs(500);
+      snapshot = captureSnapshot(agent, filePath);
+    }
   }
   return snapshot;
 }
 
 function isBlankInitialSnapshot(snapshot: SnapshotEvidence): boolean {
-  const origin = findStringProperty(snapshot.output.data, 'origin');
-  return snapshot.nodeCount === 0 && snapshot.text.trim() === '(no interactive elements)' && (!origin || origin === 'about:blank');
-}
-
-function findStringProperty(value: unknown, key: string): string | null {
-  if (!value || typeof value !== 'object') {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  if (typeof record[key] === 'string') {
-    return record[key] as string;
-  }
-
-  for (const entry of Object.values(record)) {
-    const found = findStringProperty(entry, key);
-    if (found) {
-      return found;
-    }
-  }
-
-  return null;
+  return snapshot.nodeCount === 0 && snapshot.text.trim() === '(no interactive elements)';
 }
 
 export function normalizeUrlForCompare(value: string): string {

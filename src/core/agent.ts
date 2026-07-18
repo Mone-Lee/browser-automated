@@ -254,6 +254,11 @@ export class BrowserAgent {
     return this.run(['open', url]);
   }
 
+  /** 刷新当前页面，用于处理 SPA 首次进入后卡在半初始化状态的场景。 */
+  reload(): string {
+    return this.evaluate('window.location.reload()');
+  }
+
   /** 通过 ref 点击元素，例如 snapshot 结果中的 e5。 */
   click(ref: string): string {
     return this.run(['click', `@${ref.replace(/^@/, '')}`]);

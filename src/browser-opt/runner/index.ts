@@ -83,7 +83,7 @@ export class BrowserOptRunner {
 
       const openSnapshotPath = path.join(outputDir, '00-open.snapshot.json');
       const openScreenshotPath = path.join(outputDir, '00-open.png');
-      let openSnapshot = captureSettledSnapshot(agent, openSnapshotPath, logs);
+      let openSnapshot = captureSettledSnapshot(agent, openSnapshotPath, logs, { reloadAfterBlank: true });
       agent.screenshot(openScreenshotPath);
       screenshots.push(openScreenshotPath);
       logs.push(`snapshot: ${openSnapshotPath}`);
@@ -113,7 +113,7 @@ export class BrowserOptRunner {
         });
         logs.push(`fallback-open: ${url}`);
         agent.open(url);
-        openSnapshot = captureSettledSnapshot(agent, openSnapshotPath, logs);
+        openSnapshot = captureSettledSnapshot(agent, openSnapshotPath, logs, { reloadAfterBlank: true });
         agent.screenshot(openScreenshotPath);
         logs.push(`fallback-snapshot: ${openSnapshotPath}`);
         logs.push(`fallback-screenshot: ${openScreenshotPath}`);

@@ -57,6 +57,7 @@ function buildAgent(options: {
 
   return {
     open: vi.fn(() => 'opened'),
+    reload: vi.fn(() => 'reloaded'),
     getSessionId: vi.fn(() => 'browser-opt-test-session'),
     snapshotJson: vi.fn(() => snapshots.shift() ?? snapshotJson('fallback')),
     screenshot: vi.fn((filePath?: string) => {
@@ -100,6 +101,12 @@ describe('browser-opt parsing', () => {
 2. 验证页面包含 "Example"。`);
 
     expect(steps).toEqual(['打开首页。', '验证页面包含 "Example"。']);
+  });
+
+  it('splits flows that contain escaped newline literals', () => {
+    const steps = splitBrowserOptSteps('测试 https://example.com 的页面。\\n\\n目标：\\n1. 打开页面。\\n2. 售后周期选择第一个选项。');
+
+    expect(steps).toEqual(['打开页面。', '售后周期选择第一个选项。']);
   });
 
   it('uses the whole text as one step when no numbered steps exist', () => {
@@ -171,6 +178,12 @@ describe('browser-opt parsing', () => {
       type: 'select-option',
       field: '业务类型',
       option: '安选公开',
+    });
+
+    expect(parseDeterministicAction('\\n2. 售后周期选择第一个选项')).toEqual({
+      type: 'select-option',
+      field: '售后周期',
+      option: '第一个选项',
     });
 
     expect(parseDeterministicAction('验证页面包含‘Dashboard’')).toEqual({
@@ -1098,6 +1111,102 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps[0].actionOutput).toContain('open select @e61');
   });
 
+  it('uses a DOM dropdown fallback when a field ref click would be unreliable', async () => {
+    const outputDir = makeTempDir();
+    const closedSnapshot = [
+      '- generic "7天" [ref=e10] clickable [cursor:pointer]',
+      '  - generic "7天" [ref=e11] clickable [cursor:pointer, onclick]',
+      '    - combobox "* 售后周期 :" [expanded=false, required, ref=e12]',
+    ].join('\n');
+    const selectedSnapshot = [
+      '- generic "提货当天" [ref=e10] clickable [cursor:pointer]',
+      '  - generic "提货当天" [ref=e11] clickable [cursor:pointer, onclick]',
+      '    - combobox "* 售后周期 :" [expanded=false, required, ref=e12]',
+    ].join('\n');
+    const agent = buildAgent({
+      evaluate: (script) => {
+        if (script.includes('selectHelper.clickVisibleOption')) {
+          return JSON.stringify({ found: true, clicked: true });
+        }
+        if (script.includes('selectHelper.openDropdownByField')) {
+          return JSON.stringify({ found: true, opened: true });
+        }
+        return JSON.stringify({ found: false });
+      },
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(closedSnapshot, {
+          e10: { role: 'generic', name: '7天' },
+          e11: { role: 'generic', name: '7天' },
+          e12: { role: 'combobox', name: '* 售后周期 :' },
+        }),
+        snapshotJson(selectedSnapshot, {
+          e10: { role: 'generic', name: '提货当天' },
+          e11: { role: 'generic', name: '提货当天' },
+          e12: { role: 'combobox', name: '* 售后周期 :' },
+        }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 售后周期选择"提货当天"', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect((agent.evaluate as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(2);
+    expect(result.report.steps[0].actionOutput).toContain('select dom click 售后周期=提货当天');
+  });
+
+  it('selects an ordinal dropdown option without requiring the option text upfront', async () => {
+    const outputDir = makeTempDir();
+    const closedSnapshot = [
+      '- generic "7天" [ref=e10] clickable [cursor:pointer]',
+      '  - generic "7天" [ref=e11] clickable [cursor:pointer, onclick]',
+      '    - combobox "* 售后周期 :" [expanded=false, required, ref=e12]',
+    ].join('\n');
+    const selectedSnapshot = [
+      '- generic "2天" [ref=e10] clickable [cursor:pointer]',
+      '  - generic "2天" [ref=e11] clickable [cursor:pointer, onclick]',
+      '    - combobox "* 售后周期 :" [expanded=false, required, ref=e12]',
+    ].join('\n');
+    const agent = buildAgent({
+      evaluate: (script) => {
+        if (script.includes('selectHelper.clickVisibleOption')) {
+          return JSON.stringify({ found: true, clicked: true, selectedText: '2天' });
+        }
+        if (script.includes('selectHelper.openDropdownByField')) {
+          return JSON.stringify({ found: true, opened: true });
+        }
+        return JSON.stringify({ found: false });
+      },
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(closedSnapshot, {
+          e10: { role: 'generic', name: '7天' },
+          e11: { role: 'generic', name: '7天' },
+          e12: { role: 'combobox', name: '* 售后周期 :' },
+        }),
+        snapshotJson(selectedSnapshot, {
+          e10: { role: 'generic', name: '2天' },
+          e11: { role: 'generic', name: '2天' },
+          e12: { role: 'combobox', name: '* 售后周期 :' },
+        }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 售后周期选择第一个选项', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(result.report.steps[0].actionOutput).toContain('select dom click 售后周期=第一个选项 (2天)');
+    expect(result.report.steps[0].verification).toContain('已确认按位置选择：售后周期=第一个选项');
+    const clickScript = (agent.evaluate as ReturnType<typeof vi.fn>).mock.calls
+      .map(([script]) => String(script))
+      .find((script) => script.includes('selectHelper.clickVisibleOption')) ?? '';
+    expect(clickScript).toContain('const scopedRoot = containers[0]?.element');
+  });
+
   it('skips a switch field when it is already in the requested state', async () => {
     const outputDir = makeTempDir();
     const switchSnapshot = [
@@ -1188,6 +1297,7 @@ describe('BrowserOptRunner', () => {
       snapshots: [
         blankSnapshot,
         snapshotJson('open snapshot', { e1: { role: 'heading', name: 'Example' } }),
+        snapshotJson('open snapshot after reload', { e1: { role: 'heading', name: 'Example' } }),
         snapshotJson('before snapshot', { e1: { role: 'heading', name: 'Example' } }),
         snapshotJson('after snapshot with Example', { e1: { role: 'heading', name: 'Example' } }),
       ],
@@ -1200,7 +1310,51 @@ describe('BrowserOptRunner', () => {
 
     expect(result.passed).toBe(true);
     expect((agent.waitMs as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(500);
+    expect((agent.reload as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
     expect(result.report.logs.join('\n')).toContain('open-wait 1');
+    expect(result.report.logs.join('\n')).toContain('open-reload');
+  });
+
+  it('waits and retries when the target URL snapshot is still blank', async () => {
+    const outputDir = makeTempDir();
+    const blankTargetSnapshot = {
+      raw: JSON.stringify({
+        success: true,
+        data: {
+          origin: 'https://example.com/#/detail?id=1',
+          refs: {},
+          snapshot: '(no interactive elements)',
+        },
+      }),
+      data: {
+        success: true,
+        data: {
+          origin: 'https://example.com/#/detail?id=1',
+          refs: {},
+          snapshot: '(no interactive elements)',
+        },
+      },
+    };
+    const agent = buildAgent({
+      snapshots: [
+        blankTargetSnapshot,
+        snapshotJson('Example detail', { e1: { role: 'heading', name: 'Example' } }),
+        snapshotJson('Example detail after reload', { e1: { role: 'heading', name: 'Example' } }),
+        snapshotJson('before snapshot', { e1: { role: 'heading', name: 'Example' } }),
+        snapshotJson('after snapshot with Example', { e1: { role: 'heading', name: 'Example' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com/#/detail?id=1。\n\n目标：\n1. 验证页面包含 "Example"。', {
+      outputDir,
+    });
+
+    expect(result.passed).toBe(true);
+    expect((agent.waitMs as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(500);
+    expect((agent.reload as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect(result.report.logs.join('\n')).toContain('open-wait 1');
+    expect(result.report.logs.join('\n')).toContain('open-reload');
   });
 
   it('does not fill an unrelated textbox when the requested field is missing on a login page', async () => {

@@ -54,6 +54,14 @@ export function executeSelectOptionAction(
   }
 
   const searchOutput: string[] = [];
+  const dropdownDomTarget = action.field ? clickDropdownDomTarget(agent, action.field, action.option) : { attempted: false, output: null };
+  if (dropdownDomTarget.output) {
+    return dropdownDomTarget.output;
+  }
+  if (dropdownDomTarget.attempted && !option.ref && findSelectableFieldRef(searchSnapshot, action.field)) {
+    throw new Error(`无法通过 DOM 安全选择下拉选项：${fieldLabel} -> ${action.option}`);
+  }
+
   if (!option.ref) {
     const fieldRef = findSelectableFieldRef(searchSnapshot, action.field);
     if (fieldRef) {
@@ -126,6 +134,10 @@ export function verifySelectOptionActionEffect(
     return { passed: true, message: `已确认页面显示选择值：${action.field ?? '选项'}=${action.option}` };
   }
 
+  if (isOrdinalOptionIntent(action.option) && action.field && isFieldSelectedValueVisible(afterSnapshot.text, action.field)) {
+    return { passed: true, message: `已确认按位置选择：${action.field}=${action.option}` };
+  }
+
   return { passed: false, message: `动作后未确认目标已选中：${action.field ?? '选项'}=${action.option}` };
 }
 
@@ -157,6 +169,39 @@ function clickNativeSelectableDomTarget(agent: BrowserAgent, role: string | null
       : null;
   } catch {
     return null;
+  }
+}
+
+/** 普通下拉优先按 DOM 中字段同组控件和可见弹层选项点击，避开嵌套布局里的 ref 坐标漂移。 */
+function clickDropdownDomTarget(agent: BrowserAgent, field: string, option: string): { attempted: boolean; output: string | null } {
+  const openScript = `(() => {
+  const selectHelper = ${dropdownDomHelperSource()};
+  return JSON.stringify(selectHelper.openDropdownByField(${JSON.stringify(field)}));
+})()`;
+
+  try {
+    const opened = parseEvalJson(agent.evaluate(openScript));
+    if (typeof opened.opened !== 'boolean') {
+      return { attempted: false, output: null };
+    }
+    if (!opened.found || opened.opened === false) {
+      return { attempted: true, output: null };
+    }
+
+    agent.waitMs(300);
+    const clickScript = `(() => {
+  const selectHelper = ${dropdownDomHelperSource()};
+  return JSON.stringify(selectHelper.clickVisibleOption(${JSON.stringify(option)}));
+})()`;
+    const clicked = parseEvalJson(agent.evaluate(clickScript));
+    if (clicked.clicked === true) {
+      agent.waitMs(300);
+      const selectedText = clicked.selectedText ? ` (${clicked.selectedText})` : '';
+      return { attempted: true, output: `select dom click ${field}=${option}${selectedText}` };
+    }
+    return { attempted: true, output: null };
+  } catch {
+    return { attempted: true, output: null };
   }
 }
 
@@ -260,11 +305,183 @@ function parseEvalJson(raw: string): {
   switchId?: string;
   matchedCount?: number;
   disabled?: boolean;
+  opened?: boolean;
+  selectedText?: string;
 } {
   const decoded = JSON.parse(raw.trim()) as unknown;
   return typeof decoded === 'string'
     ? JSON.parse(decoded) as ReturnType<typeof parseEvalJson>
     : decoded as ReturnType<typeof parseEvalJson>;
+}
+
+/** 返回在页面上下文执行的下拉定位工具源码，兼容 Ant Design 和常见伪下拉结构。 */
+function dropdownDomHelperSource(): string {
+  return `
+(() => {
+const normalizeBrowserOptText = (value) => String(value || '').replace(/[\\s：:，,。；*]/g, '').toLowerCase();
+const browserOptVisible = (element) => {
+  const style = window.getComputedStyle(element);
+  const rect = element.getBoundingClientRect();
+  return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0;
+};
+const browserOptCenterDistance = (a, b) => {
+  const ax = (a.left + a.right) / 2;
+  const ay = (a.top + a.bottom) / 2;
+  const bx = (b.left + b.right) / 2;
+  const by = (b.top + b.bottom) / 2;
+  return Math.abs(ax - bx) + Math.abs(ay - by);
+};
+const browserOptDispatchMouse = (element) => {
+  const rect = element.getBoundingClientRect();
+  const init = {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    clientX: (rect.left + rect.right) / 2,
+    clientY: (rect.top + rect.bottom) / 2,
+  };
+  element.dispatchEvent(new MouseEvent('mousedown', init));
+  element.dispatchEvent(new MouseEvent('mouseup', init));
+  element.dispatchEvent(new MouseEvent('click', init));
+};
+const browserOptSelects = () => [...document.querySelectorAll([
+  '.ant-select:not(.ant-select-disabled)',
+  '.el-select:not(.is-disabled)',
+  '.ant-cascader-picker:not(.ant-cascader-picker-disabled)',
+  '[role="combobox"]:not([aria-disabled="true"])',
+  'select:not(:disabled)'
+].join(','))].filter(browserOptVisible);
+const browserOptClickableSelect = (element) =>
+  element.matches('select')
+    ? element
+    : element.querySelector('.ant-select-selector, .el-input, .ant-cascader-input, [role="combobox"]') || element;
+const browserOptDropdownContainers = () => [...document.querySelectorAll([
+  '.ant-select-dropdown:not(.ant-select-dropdown-hidden)',
+  '.el-select-dropdown:not([style*="display: none"])',
+  '[role="listbox"]'
+].join(','))]
+  .filter(browserOptVisible)
+  .map((element) => ({ element, rect: element.getBoundingClientRect() }));
+const browserOptOrdinalIndex = (value) => {
+  const normalized = normalizeBrowserOptText(value);
+  const exact = normalized.match(/^(?:第)?(\\d+)(?:个|项|个选项|项选项)?$/);
+  if (exact) {
+    return Math.max(Number(exact[1]) - 1, 0);
+  }
+  const aliases = [
+    ['第一个选项', '第一个', '第一项', '首个', '首项', '第1个', '第1项'],
+    ['第二个选项', '第二个', '第二项', '第2个', '第2项'],
+    ['第三个选项', '第三个', '第三项', '第3个', '第3项'],
+    ['第四个选项', '第四个', '第四项', '第4个', '第4项'],
+    ['第五个选项', '第五个', '第五项', '第5个', '第5项'],
+  ].map((items) => items.map(normalizeBrowserOptText));
+  const matched = aliases.findIndex((items) => items.includes(normalized));
+  if (matched >= 0) return matched;
+  if (['最后一个选项', '最后一个', '最后一项', '末项'].map(normalizeBrowserOptText).includes(normalized)) {
+    return -1;
+  }
+  return null;
+};
+const browserOptOptionCandidates = () => {
+  const active = document.querySelector('[data-browser-opt-active-select="true"]');
+  const activeRect = active?.getBoundingClientRect();
+  const containers = browserOptDropdownContainers()
+    .map((item) => ({
+      ...item,
+      distance: activeRect ? browserOptCenterDistance(activeRect, item.rect) : 0,
+    }))
+    .sort((a, b) => a.distance - b.distance);
+  const scopedRoot = containers[0]?.element;
+  if (!scopedRoot) {
+    return [];
+  }
+  return [...scopedRoot.querySelectorAll([
+    '.ant-select-item-option',
+    '.ant-select-dropdown-menu-item',
+    '.el-select-dropdown__item',
+    '[role="option"]'
+  ].join(','))]
+  .filter(browserOptVisible)
+  .filter((element) => {
+    const ariaDisabled = element.getAttribute('aria-disabled') === 'true';
+    const className = String(element.className || '');
+    return !ariaDisabled && !className.includes('disabled');
+  })
+  .map((element) => ({ element, text: normalizeBrowserOptText(element.textContent), rawText: String(element.textContent || '').trim(), rect: element.getBoundingClientRect() }))
+  .filter((item) => item.text)
+  .sort((a, b) => a.rect.top - b.rect.top || a.rect.left - b.rect.left);
+};
+const browserOptClosestFieldContainers = (labelElement) => {
+  const containers = [];
+  let current = labelElement;
+  for (let depth = 0; current && depth < 8; depth += 1, current = current.parentElement) {
+    if (normalizeBrowserOptText(current.textContent).length > 0) {
+      containers.push(current);
+    }
+  }
+  return containers
+    .filter((element) => browserOptSelects().some((select) => element.contains(select)))
+    .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+    .sort((a, b) => (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height));
+};
+function openDropdownByField(field) {
+  const fieldText = normalizeBrowserOptText(field);
+  const labels = [...document.querySelectorAll('body *')]
+    .filter((element) => browserOptVisible(element) && normalizeBrowserOptText(element.textContent).includes(fieldText))
+    .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+    .sort((a, b) => (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height));
+  const selects = browserOptSelects().map((element) => ({ element, rect: element.getBoundingClientRect() }));
+  for (const label of labels) {
+    for (const container of browserOptClosestFieldContainers(label.element)) {
+      const target = browserOptSelects()
+        .filter((select) => container.element.contains(select))
+        .map((element) => ({ element, rect: element.getBoundingClientRect(), distance: browserOptCenterDistance(label.rect, element.getBoundingClientRect()) }))
+        .sort((a, b) => a.distance - b.distance)[0];
+      if (target) {
+        document.querySelectorAll('[data-browser-opt-active-select="true"]').forEach((element) => element.removeAttribute('data-browser-opt-active-select'));
+        target.element.setAttribute('data-browser-opt-active-select', 'true');
+        browserOptDispatchMouse(browserOptClickableSelect(target.element));
+        return { found: true, opened: true, strategy: 'container' };
+      }
+    }
+
+    const sameGroup = selects
+      .map((item) => {
+        const verticalOverlap = Math.min(label.rect.bottom, item.rect.bottom) - Math.max(label.rect.top, item.rect.top);
+        const yDistance = Math.abs((label.rect.top + label.rect.bottom) / 2 - (item.rect.top + item.rect.bottom) / 2);
+        const rightSide = item.rect.left >= label.rect.left - 4;
+        return { ...item, verticalOverlap, yDistance, rightSide, distance: browserOptCenterDistance(label.rect, item.rect) };
+      })
+      .filter((item) => item.rightSide && (item.verticalOverlap > 0 || item.yDistance < Math.max(label.rect.height, item.rect.height) * 1.5))
+      .sort((a, b) => a.yDistance - b.yDistance || a.distance - b.distance);
+    const target = sameGroup[0];
+    if (target) {
+      document.querySelectorAll('[data-browser-opt-active-select="true"]').forEach((element) => element.removeAttribute('data-browser-opt-active-select'));
+      target.element.setAttribute('data-browser-opt-active-select', 'true');
+      browserOptDispatchMouse(browserOptClickableSelect(target.element));
+      return { found: true, opened: true, strategy: 'row' };
+    }
+  }
+  return { found: false, opened: false };
+}
+function clickVisibleOption(option) {
+  const optionText = normalizeBrowserOptText(option);
+  const options = browserOptOptionCandidates();
+  const ordinalIndex = browserOptOrdinalIndex(option);
+  const target = typeof ordinalIndex === 'number'
+    ? options[ordinalIndex === -1 ? options.length - 1 : ordinalIndex]
+    : options
+      .filter((item) => item.text.includes(optionText) || optionText.includes(item.text))
+      .sort((a, b) => (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height))[0];
+  if (!target) {
+    return { found: false, clicked: false };
+  }
+  browserOptDispatchMouse(target.element);
+  return { found: true, clicked: true, selectedText: target.rawText };
+}
+return { openDropdownByField, clickVisibleOption };
+})()
+`;
 }
 
 /** 返回在页面上下文执行的 switch 定位工具源码，按字段同一行最近 switch 选择目标。 */
@@ -345,6 +562,36 @@ function isSelectedValueVisible(text: string, field: string | null, option: stri
   }
 
   return normalizedText.includes(normalizeVisibleText(field));
+}
+
+/** 识别“第一个选项/最后一个”这类按位置选择的意图。 */
+function isOrdinalOptionIntent(option: string): boolean {
+  const normalized = normalizeVisibleText(option);
+  return /^(?:第)?\d+(?:个|项|个选项|项选项)?$/.test(normalized)
+    || /^(?:第)?[一二三四五六七八九十]+(?:个|项|个选项|项选项)$/.test(normalized)
+    || /^(首个|首项|最后一个选项|最后一个|最后一项|末项)$/.test(normalized);
+}
+
+/** 位置型选择无法用原始目标文案确认，改看字段附近是否存在具体选择值。 */
+function isFieldSelectedValueVisible(text: string, field: string): boolean {
+  const lines = text.split('\n');
+  const normalizedField = normalizeVisibleText(field);
+  const fieldIndex = lines.findIndex((line) => normalizeVisibleText(line).includes(normalizedField));
+  if (fieldIndex < 0) {
+    return false;
+  }
+
+  const start = Math.max(0, fieldIndex - 3);
+  const end = Math.min(lines.length, fieldIndex + 4);
+  for (let index = start; index < end; index += 1) {
+    const match = lines[index]?.match(/-\s*(?:generic|combobox|button)\s+"([^"]+)"/i);
+    const value = normalizeVisibleText(match?.[1] ?? '');
+    if (value && !value.includes(normalizedField) && !normalizedField.includes(value)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /** 归一化页面可见文案，减少空白和标点对选择结果确认的影响。 */

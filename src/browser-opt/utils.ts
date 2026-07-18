@@ -19,13 +19,13 @@ const SELECTABLE_VERB_RE = /选择|选中|勾选|勾上|设置为|设置成|切�
 
 /** 从自然语言描述中提取第一个 URL，作为 browser-opt 的起始页面。 */
 export function extractBrowserOptUrl(text: string): string | null {
-  const match = text.match(URL_RE);
+  const match = normalizeBrowserOptFlowText(text).match(URL_RE);
   return match ? match[0] : null;
 }
 
 /** 把自然语言流程拆成顺序步骤，优先识别编号目标，无法识别时回退为单步骤。 */
 export function splitBrowserOptSteps(text: string): string[] {
-  const lines = text
+  const lines = normalizeBrowserOptFlowText(text)
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean);
@@ -81,7 +81,7 @@ function splitCompoundSelectableStep(instruction: string): string[] {
 
 /** 从自然语言步骤中提炼结构化动作，供确定性执行层消费。 */
 export function parseDeterministicAction(instruction: string): DeterministicAction | null {
-  const normalized = instruction.replace(/^\d+[\.)、]\s*/, '').trim();
+  const normalized = cleanInstructionPrefix(normalizeBrowserOptFlowText(instruction));
   const url = normalized.match(URL_RE)?.[0];
   if (url && /访问|打开|open|goto|navigate/i.test(normalized)) {
     return { type: 'open', url };
@@ -132,6 +132,18 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
   }
 
   return null;
+}
+
+/** 将 CLI 或上层封装传入的字面量换行还原，避免 "\\n2." 被当作字段名。 */
+function normalizeBrowserOptFlowText(text: string): string {
+  return text.replace(/\\r\\n|\\n|\\r/g, '\n');
+}
+
+/** 清理步骤前缀中的编号和多余空白，让动作解析只面对业务语义。 */
+function cleanInstructionPrefix(instruction: string): string {
+  return instruction
+    .replace(/^\s*(?:目标[:：]\s*)?\d+[\.)、]\s*/, '')
+    .trim();
 }
 
 /** 识别带远程 URL 的图片/文件上传描述，兼容省略“上传”动词的口语写法。 */
@@ -275,6 +287,7 @@ function parseLooseSelectableTarget(instruction: string): { field: string | null
 /** 清理字段名和选项值外围的语气词、引号和标点，保留真实业务文案。 */
 function cleanSelectableText(value: string): string | null {
   const cleaned = value
+    .replace(/^\s*(?:目标[:：]\s*)?\d+[\.)、]\s*/, '')
     .replace(/^["“‘']|["”’']$/g, '')
     .replace(/^(为|成|到)\s*/, '')
     .replace(/[：:，,。；]$/g, '')
