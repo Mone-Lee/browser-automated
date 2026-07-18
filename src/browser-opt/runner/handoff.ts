@@ -53,6 +53,36 @@ export function triggerLoginHandoff(agent: BrowserAgent, logs: string[], reason:
   return buildHandoffContext(agent, message, output);
 }
 
+/** 识别上传后进入图片裁剪、确认上传等交互式后处理页，需要人工确认后才能继续流程。 */
+export function shouldTriggerUploadPostProcessHandoff(snapshot: SnapshotEvidence): boolean {
+  const text = snapshot.text.replace(/\s+/g, '');
+  const hasImageAsset = /\.(?:png|jpe?g|webp|gif|bmp|svg)(?:\b|[^\w])/i.test(text)
+    || /图片|照片|封面|白底图|主图|配图/.test(text);
+  const hasCropAction = /图片裁(?:切|剪)|裁(?:切|剪)图片|裁(?:切|剪)图|裁(?:切|剪)|剪裁|裁剪框|编辑图片|调整图片|调整裁剪/.test(text);
+  const hasUploadConfirm = /保存并上传|确认上传|上传并保存|保存上传|确定上传|确认提交|保存图片|确定使用|确认使用|使用图片|完成/.test(text);
+  const hasPendingState = /待处理|待裁(?:切|剪)|未处理|处理中|等待处理|待确认|待上传|未上传/.test(text);
+  const hasCropControl = /缩放|放大|缩小|旋转|比例|目标尺寸|目标大小|推荐尺寸|预览|slider/.test(text);
+  const hasBypassAction = /跳过|取消|重新选择|重新上传|更换图片/.test(text);
+
+  return (hasCropAction && (hasUploadConfirm || hasCropControl || hasPendingState))
+    || (hasImageAsset && hasUploadConfirm && (hasPendingState || hasCropAction || hasCropControl))
+    || (hasPendingState && hasCropAction && hasBypassAction);
+}
+
+/** 上传后出现必须人工处理的裁剪/确认界面时，统一生成 handoff 上下文并记录日志。 */
+export function triggerUploadPostProcessHandoff(
+  agent: BrowserAgent,
+  logs: string[],
+  field: string,
+): BrowserOptHandoffContext {
+  const message = `上传“${field}”后页面进入图片裁剪或确认上传流程。请在浏览器中完成裁剪、确认上传，然后继续当前 browser-opt 流程。`;
+  const output = agent.handoff(message);
+  const actionOutput = `handoff ${JSON.stringify(message)}\n${output}`.trim();
+  logs.push(`handoff: ${message}`);
+  logs.push(`handoff-output: ${actionOutput}`);
+  return buildHandoffContext(agent, message, actionOutput);
+}
+
 /** 登录页拦截统一走 handoff，而不是把它当成普通动作异常直接抛出。 */
 export function buildLoginHandoffActionOutput(agent: BrowserAgent, message: string): string {
   const output = agent.handoff(message);

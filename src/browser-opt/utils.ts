@@ -349,16 +349,11 @@ export function findSelectableFieldRef(snapshot: SnapshotEvidence, field: string
   return findBestNodeRef(nodes, field);
 }
 
-/** 查找上传控件，先匹配文件输入，再回退到同名上传按钮。 */
+/** 查找上传控件，只返回快照中可确认的真实文件输入，避免把上传按钮误当成 input。 */
 export function findUploadRef(snapshot: SnapshotEvidence, field: string): string | null {
   const nodes = getSnapshotNodes(snapshot);
   const fileInputs = nodes.filter((node) => isFileInputRole(node.role, node.label));
-  const fileInputRef = findBestNodeRef(fileInputs, field) ?? fileInputs[0]?.ref;
-  if (fileInputRef) {
-    return fileInputRef;
-  }
-
-  return findBestNodeRef(nodes.filter((node) => !isTextboxRole(node.role)), field);
+  return findBestNodeRef(fileInputs, field) ?? fileInputs[0]?.ref ?? null;
 }
 
 /** 在候选节点集合里做一次精确优先、字符兜底的模糊匹配。 */
@@ -491,7 +486,7 @@ function isGenericTextboxField(field: string): boolean {
 
 /** 识别 snapshot 中可能代表文件上传的输入控件。 */
 function isFileInputRole(role: string, label: string): boolean {
-  return /file/i.test(role) || /上传|upload|选择文件|choose\s+file/i.test(label);
+  return /file/i.test(role) || (/input/i.test(role) && /上传|upload|选择文件|choose\s+file/i.test(label));
 }
 
 /** 归一化待匹配文本，减少空格和中英文标点对匹配结果的干扰。 */

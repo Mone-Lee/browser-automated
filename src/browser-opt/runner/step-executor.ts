@@ -20,7 +20,9 @@ import {
   resumeFromHandoff,
   saveAuthenticatedHandoffState,
   shouldTriggerLoginHandoff,
+  shouldTriggerUploadPostProcessHandoff,
   triggerLoginHandoff,
+  triggerUploadPostProcessHandoff,
   buildHandoffContext,
 } from './handoff.js';
 
@@ -182,12 +184,39 @@ export async function executeStep(
     }
   }
 
-  const afterSnapshot = parsedAction?.type === 'open'
-    ? captureSettledSnapshot(agent, afterSnapshotPath, logs)
-    : captureSnapshot(agent, afterSnapshotPath);
+  let afterSnapshot = captureActionAfterSnapshot(agent, parsedAction?.type ?? null, afterSnapshotPath, logs);
   agent.screenshot(afterScreenshotPath);
   logs.push(`after-state: ${summarizeSnapshot(afterSnapshot)}`);
   logs.push(`after-screenshot: ${afterScreenshotPath}`);
+
+  if (!actionError && parsedAction?.type === 'upload' && shouldTriggerUploadPostProcessHandoff(afterSnapshot)) {
+    const handoff = triggerUploadPostProcessHandoff(agent, logs, parsedAction.field);
+    const resumed = await resumeFromHandoff(agent, logs, handoff, options.handoff);
+
+    if (!resumed) {
+      return {
+        index,
+        instruction,
+        passed: false,
+        handoffTriggered: true,
+        attempts,
+        beforeSnapshotPath,
+        afterSnapshotPath,
+        beforeScreenshotPath,
+        afterScreenshotPath,
+        actionOutput: [actionOutput, handoff.output].filter(Boolean).join('\n').trim(),
+        verification: handoff.message,
+        logs,
+      };
+    }
+
+    afterSnapshot = captureSnapshot(agent, afterSnapshotPath);
+    agent.screenshot(afterScreenshotPath);
+    logs.push(`resume-snapshot: ${afterSnapshotPath}`);
+    logs.push(`resume-state: ${summarizeSnapshot(afterSnapshot)}`);
+    logs.push(`resume-screenshot: ${afterScreenshotPath}`);
+    actionOutput = [actionOutput, handoff.output].filter(Boolean).join('\n').trim();
+  }
 
   if (actionError) {
     return {
@@ -302,4 +331,32 @@ export async function executeStep(
 /** 确定性动作已确认业务上不可达时不再重试，避免把不可选状态误当异步未完成。 */
 function isTerminalActionError(message: string): boolean {
   return message.startsWith('日期不可选：');
+}
+
+/** 上传动作后图片裁剪弹层可能异步出现，短暂轮询后再交给 handoff 探测。 */
+function captureActionAfterSnapshot(
+  agent: BrowserAgent,
+  actionType: string | null,
+  afterSnapshotPath: string,
+  logs: string[],
+): ReturnType<typeof captureSnapshot> {
+  if (actionType === 'open') {
+    return captureSettledSnapshot(agent, afterSnapshotPath, logs);
+  }
+
+  let snapshot = captureSnapshot(agent, afterSnapshotPath);
+  if (actionType !== 'upload' || shouldTriggerUploadPostProcessHandoff(snapshot)) {
+    return snapshot;
+  }
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    agent.waitMs(500);
+    logs.push(`upload-postprocess-wait ${attempt}: 等待上传后的裁剪或确认弹层渲染。`);
+    snapshot = captureSnapshot(agent, afterSnapshotPath);
+    if (shouldTriggerUploadPostProcessHandoff(snapshot)) {
+      break;
+    }
+  }
+
+  return snapshot;
 }

@@ -1508,6 +1508,129 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps[0].actionOutput).toContain('upload dom selector [data-browser-opt-upload-id="browser-opt-upload-0"]');
   });
 
+  it('uses the hidden file input when Ant Upload exposes only a visible upload button', async () => {
+    const outputDir = makeTempDir();
+    const fetchMock = vi.fn(async () => new Response('image-bytes', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before upload with Ant Upload button', {
+          e142: { role: 'button', name: '上传商品白底图' },
+        }),
+        snapshotJson('after upload with 商品白底图预览', {
+          e142: { role: 'button', name: '上传商品白底图' },
+        }),
+      ],
+      evaluate: () => JSON.stringify({
+        found: true,
+        selector: '[data-browser-opt-upload-id="browser-opt-upload-0"]',
+      }),
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/goods/create。\n\n目标：\n1. 自动上传“商品白底图”，图片来源 URL 为“https://stantic.ifengqun.com/front/fq-ecmiddle-sys/upload/82243689cae75e27b3867a5cbdd4292b.png”。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(true);
+    expect((agent.upload as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
+      '[data-browser-opt-upload-id="browser-opt-upload-0"]',
+      [expect.stringContaining(path.join('uploads', '82243689cae75e27b3867a5cbdd4292b.png'))],
+    );
+    expect((agent.upload as ReturnType<typeof vi.fn>)).not.toHaveBeenCalledWith(
+      'e142',
+      expect.anything(),
+    );
+  });
+
+  it('hands off after upload when the page enters an image crop workflow', async () => {
+    const outputDir = makeTempDir();
+    const fetchMock = vi.fn(async () => new Response('image-bytes', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before upload', { e3: { role: 'file', name: '商品白底图' } }),
+        snapshotJson('82243689cae75e27b3867a5cbdd4292b.png 558 x 180 待处理 跳过 裁切 保存并上传 (0/1)', {
+          e4: { role: 'button', name: '裁切' },
+          e5: { role: 'button', name: '保存并上传' },
+        }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/goods/create。\n\n目标：\n1. 自动上传“商品白底图”，图片来源 URL 为“https://stantic.ifengqun.com/front/fq-ecmiddle-sys/upload/82243689cae75e27b3867a5cbdd4292b.png”。\n2. 商品标题输入“芝麻丸礼盒1.25kg/1盒”。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(false);
+    expect(result.report.status).toBe('HANDOFF');
+    expect(result.report.steps).toHaveLength(1);
+    expect(result.report.steps[0].handoffTriggered).toBe(true);
+    expect(result.report.steps[0].verification).toContain('上传“商品白底图”后页面进入图片裁剪或确认上传流程');
+    expect((agent.handoff as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
+      '上传“商品白底图”后页面进入图片裁剪或确认上传流程。请在浏览器中完成裁剪、确认上传，然后继续当前 browser-opt 流程。',
+    );
+    expect((agent.fill as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+  });
+
+  it('waits briefly after upload for a delayed image crop workflow before continuing', async () => {
+    const outputDir = makeTempDir();
+    const fetchMock = vi.fn(async () => new Response('image-bytes', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before upload', { e3: { role: 'file', name: '商品白底图' } }),
+        snapshotJson('after upload before crop appears', {
+          e6: { role: 'textbox', name: '商品标题' },
+        }),
+        snapshotJson('82243689cae75e27b3867a5cbdd4292b.png 待处理 跳过 裁切 保存并上传 (0/1)', {
+          e4: { role: 'button', name: '裁切' },
+          e5: { role: 'button', name: '保存并上传' },
+        }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/goods/create。\n\n目标：\n1. 自动上传“商品白底图”，图片来源 URL 为“https://stantic.ifengqun.com/front/fq-ecmiddle-sys/upload/82243689cae75e27b3867a5cbdd4292b.png”。\n2. 商品标题输入“芝麻丸礼盒1.25kg/1盒”。',
+      { outputDir },
+    );
+
+    expect(result.report.status).toBe('HANDOFF');
+    expect((agent.waitMs as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(500);
+    expect(result.report.steps[0].logs.join('\n')).toContain('upload-postprocess-wait 1');
+    expect((agent.fill as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+  });
+
+  it('recognizes alternate upload post-process wording as handoff', async () => {
+    const outputDir = makeTempDir();
+    const fetchMock = vi.fn(async () => new Response('image-bytes', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before upload', { e3: { role: 'file', name: '商品白底图' } }),
+        snapshotJson('主图 编辑图片 调整图片 预览 确定使用 重新上传', {
+          e4: { role: 'button', name: '确定使用' },
+        }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/goods/create。\n\n目标：\n1. 自动上传“商品白底图”，图片来源 URL 为“https://stantic.ifengqun.com/front/fq-ecmiddle-sys/upload/82243689cae75e27b3867a5cbdd4292b.png”。\n2. 商品标题输入“芝麻丸礼盒1.25kg/1盒”。',
+      { outputDir },
+    );
+
+    expect(result.report.status).toBe('HANDOFF');
+    expect((agent.fill as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+  });
+
   it('keeps URL download errors when hidden upload lookup is retried', async () => {
     const outputDir = makeTempDir();
     const fetchMock = vi.fn(async () => new Response('missing', { status: 404, statusText: 'Not Found' }));
