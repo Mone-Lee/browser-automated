@@ -37,7 +37,6 @@ function makeSteps(text = '验证页面包含“Example”。'): string[] {
 function workflow(name: string): BrowserOptWorkflow {
   const now = new Date().toISOString();
   return {
-    version: 2,
     id: safeWorkflowId(name),
     name,
     target: {
@@ -60,7 +59,7 @@ describe('browser-opt Workflow store', () => {
     const workflowDir = makeTempDir();
     const result = saveBrowserOptWorkflow({
       name: '创建安选公开直播流程',
-      flow: '测试 https://example.com/live/create。\n1. 验证页面包含“Example”。',
+      flow: '测试 https://example.com/live/create。\n1. 打开页面。\n2. 验证页面包含“Example”。',
       workflowDir,
     });
 
@@ -106,7 +105,6 @@ describe('browser-opt Workflow store', () => {
 
     fs.writeFileSync(path.join(workflowDir, 'broken.json'), '{invalid', 'utf-8');
     fs.writeFileSync(path.join(workflowDir, 'missing-url.json'), JSON.stringify({
-      version: 2,
       id: 'missing-url',
       name: '缺少地址',
       target: {
@@ -121,6 +119,25 @@ describe('browser-opt Workflow store', () => {
     expect(loaded.warnings).toHaveLength(2);
   });
 
+  it('loads legacy versioned Workflow files and normalizes them to the current shape', () => {
+    const workflowDir = makeTempDir();
+    fs.writeFileSync(path.join(workflowDir, '旧流程.json'), JSON.stringify({
+      version: 2,
+      id: '旧流程',
+      name: '旧流程',
+      target: {
+        url: 'https://example.com/legacy',
+      },
+      steps: ['打开页面。', '验证页面包含“Example”。'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }), 'utf-8');
+
+    const [loaded] = loadBrowserOptWorkflows(workflowDir).workflows;
+    expect(loaded).toEqual(expect.not.objectContaining({ version: 2 }));
+    expect(loaded.steps).toEqual(['验证页面包含“Example”。']);
+  });
+
   it('renders a structured Workflow back to the runner flow format', () => {
     const rendered = renderBrowserOptWorkflowFlow({
       ...workflow('创建安选公开直播流程'),
@@ -128,6 +145,7 @@ describe('browser-opt Workflow store', () => {
         url: 'https://example.com/live/create',
       },
       steps: [
+        '打开页面。',
         '在“直播间名称”输入“自动化测试直播间”。',
         '点击“提交”按钮。',
       ],

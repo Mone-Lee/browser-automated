@@ -77,7 +77,6 @@ export function saveBrowserOptWorkflow(input: SaveBrowserOptWorkflowInput): Save
 
   const now = new Date().toISOString();
   const workflow: BrowserOptWorkflow = {
-    version: 2,
     id,
     name,
     target: workflowContent.target,
@@ -121,8 +120,12 @@ function parseBrowserOptWorkflow(value: unknown, filePath: string): BrowserOptWo
 
   const candidate = value as Partial<BrowserOptWorkflow>;
   const fields: Array<keyof BrowserOptWorkflow> = ['id', 'name', 'createdAt', 'updatedAt'];
-  if (candidate.version !== 2 || fields.some((field) => typeof candidate[field] !== 'string' || !candidate[field]?.trim())) {
-    throw new Error('Workflow 格式无效，必须包含 version=2、id、name、createdAt、updatedAt');
+  const version = (candidate as Partial<BrowserOptWorkflow> & { version?: unknown }).version;
+  if (version !== undefined && version !== 2) {
+    throw new Error('Workflow 格式无效，version 仅兼容旧版值 2');
+  }
+  if (fields.some((field) => typeof candidate[field] !== 'string' || !candidate[field]?.trim())) {
+    throw new Error('Workflow 格式无效，必须包含 id、name、createdAt、updatedAt');
   }
   if (!candidate.target || typeof candidate.target !== 'object' || typeof candidate.target.url !== 'string') {
     throw new Error('Workflow 格式无效，target.url 不能为空');
@@ -134,7 +137,14 @@ function parseBrowserOptWorkflow(value: unknown, filePath: string): BrowserOptWo
     throw new Error('Workflow id 必须与文件名一致');
   }
   validateWorkflowInput(candidate.name as string, candidate.target.url, candidate.steps);
-  return candidate as BrowserOptWorkflow;
+  return {
+    id: candidate.id as string,
+    name: candidate.name as string,
+    target: candidate.target,
+    steps: normalizeWorkflowSteps(candidate.steps),
+    createdAt: candidate.createdAt as string,
+    updatedAt: candidate.updatedAt as string,
+  };
 }
 
 /** 把自然语言 flow 解析为结构化 Workflow 内容，便于人读和手动维护。 */
@@ -143,7 +153,7 @@ function parseWorkflowContent(flow: string): { target: { url: string }; steps: s
   if (!url) {
     throw new Error('Workflow 流程必须包含可访问的 http:// 或 https:// URL。');
   }
-  const steps = splitBrowserOptSteps(flow);
+  const steps = normalizeWorkflowSteps(splitBrowserOptSteps(flow));
   return { target: { url }, steps };
 }
 
@@ -178,6 +188,16 @@ function compareWorkflows(left: BrowserOptWorkflow, right: BrowserOptWorkflow): 
 
 /** 运行前将结构化 Workflow 还原为现有 runner 可消费的自然语言 flow。 */
 export function renderBrowserOptWorkflowFlow(workflow: BrowserOptWorkflow): string {
-  const numberedSteps = workflow.steps.map((step, index) => `${index + 1}. ${step}`);
+  const numberedSteps = normalizeWorkflowSteps(workflow.steps).map((step, index) => `${index + 1}. ${step}`);
   return `测试 ${workflow.target.url}。\n${numberedSteps.join('\n')}`;
+}
+
+/** target.url 已经承担打开页面职责，steps 只保留打开后的业务动作。 */
+function normalizeWorkflowSteps(steps: string[]): string[] {
+  return steps.filter((step, index) => index !== 0 || !isTargetOpenPlaceholder(step));
+}
+
+/** 识别旧版或口语化流程里的首步打开占位，避免保存和运行时重复表达 URL 打开。 */
+function isTargetOpenPlaceholder(step: string): boolean {
+  return /^(?:请)?(?:打开|访问|进入)(?:页面|网页|首页|目标页面|目标地址|链接)?[。.!！]*$/i.test(step.trim());
 }

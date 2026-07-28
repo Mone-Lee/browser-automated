@@ -8,7 +8,6 @@ export interface BrowserOptWorkflowTarget {
 }
 
 export interface BrowserOptWorkflow {
-  version: 2;
   id: string;
   name: string;
   target: BrowserOptWorkflowTarget;
