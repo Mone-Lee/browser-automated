@@ -55,34 +55,48 @@ Every execution must follow these rules:
 
 ## Saved workflows
 
-Reusable flows are stored as versioned JSON files under the calling project's
+Reusable flows are stored as JSON files under the calling project's
 `.browser-opt/workflows/` directory by default. Resolve relative paths from the
 calling project's current working directory, not from this skill or package directory.
+
+This local symlinked skill should invoke the current repository's built CLI
+directly, because the agent execution environment may not include the globally
+linked npm bin directory in `PATH`. The repository must be built during setup
+or after source changes; do not run `npm --prefix ... run build` from the
+calling project's sandbox. Use this command prefix for every `browser-opt`
+invocation:
+
+```bash
+/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js
+```
+
+Only use `browser-opt ...` when `command -v browser-opt` succeeds in the same
+execution environment. Only use `npx browser-opt ...` when the calling project
+has installed the package locally or the npm package has been published.
 
 Save a complete flow without executing it:
 
 ```bash
-npx browser-opt save "创建安选公开直播流程" --flow "<full natural language flow>"
-npx browser-opt save "创建安选公开直播流程" --flow "<full natural language flow>" --workflow-dir ./custom/workflows
+/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js save "创建安选公开直播流程" --flow "<full natural language flow>"
+/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js save "创建安选公开直播流程" --flow "<full natural language flow>" --workflow-dir ./custom/workflows
 ```
 
 Saving an existing name fails by default. Only pass `--force` when the user
 explicitly wants to replace it.
 
 Saved workflow files are structured JSON, not a single `flow` string. The
-persisted schema uses a top-level `url` plus a `steps` object array so humans
-can review and edit it more easily:
+persisted schema uses `target.url` as the page entrypoint plus a `steps` string
+array for business actions after the page is opened. When `target.url` exists,
+do not include a first step such as "打开页面":
 
 ```json
 {
-  "version": 2,
   "id": "创建安选公开直播流程",
   "name": "创建安选公开直播流程",
   "target": {
     "url": "https://example.com/live/create"
   },
   "steps": [
-    "打开页面",
     "在“直播间名称”输入“自动化测试直播间”。",
     "验证页面包含“创建成功”。"
   ],
@@ -100,22 +114,23 @@ When `/browser-opt` is followed by a short request without a URL, such as:
 Do not treat it as a new one-shot flow. First run:
 
 ```bash
-npx browser-opt match "<short request>" --json
+/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js match "<short request>" --json
 ```
 
 Handle the JSON result as follows:
 
-- `matched`: run `npx browser-opt run --workflow-id "<matched.id>"`.
+- `matched`: run `/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js run --workflow-id "<matched.id>"`.
 - `ambiguous`: show the returned candidates, at most three, and ask the user to
-  choose one. Do not open a browser before the choice. Then run the selected ID.
+  choose one, even when there is only one weakly similar candidate. Do not open a
+  browser before the choice. Then run the selected ID.
 - `not-found`: tell the user no saved workflow matched and show the returned
   available workflow names. Ask for a more specific request or a full flow with URL.
 - Warnings describe invalid workflow files that were skipped. Report them without
   blocking valid candidates.
 
 Use `--workflow-dir` consistently on both `match` and `run` when the user selects
-a custom directory. Use `npx browser-opt list --json` when the user asks to see all
-saved workflows.
+a custom directory. Use `/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js list --json` when
+the user asks to see all saved workflows.
 
 ## Trigger
 
@@ -136,17 +151,17 @@ workflow request. A full flow includes its target URL:
 Translate that into:
 
 ```bash
-npx browser-opt "<full natural language flow>"
+/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js "<full natural language flow>"
 ```
 
 Optional runtime flags:
 
 ```bash
-npx browser-opt "<flow>" --profile Default
-npx browser-opt "<flow>" --state ./.browser-automated/states/browser-opt-default.json
-npx browser-opt "<flow>" --no-live-viewport
-npx browser-opt "<flow>" --output-dir ./artifacts/browser-opt
-npx browser-opt "<flow>" --agent-chat
+/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js "<flow>" --profile Default
+/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js "<flow>" --state ./.browser-automated/states/browser-opt-default.json
+/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js "<flow>" --no-live-viewport
+/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js "<flow>" --output-dir ./artifacts/browser-opt
+/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js "<flow>" --agent-chat
 ```
 
 Auth state reuse policy:

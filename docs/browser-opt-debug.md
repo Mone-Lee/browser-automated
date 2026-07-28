@@ -34,6 +34,19 @@ ln -sfn /Users/lee/Documents/project/browser-automated/skills/browser-opt ~/.cod
 2. 验证页面包含 "Example"。
 ```
 
+开发期在普通终端里推荐优先使用全局 `npm link` 后的 `browser-opt ...` 命令，避免
+`npx browser-opt ...` 在未发布 npm 包时回退到 registry 查询并触发 404。
+Codex 通过软链 Skill 触发时，执行环境可能没有加载 nvm 的全局 bin 目录，因此
+`skills/browser-opt/SKILL.md` 会直接调用当前仓库的构建产物：
+
+```bash
+/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js
+```
+
+注意：跨项目触发的 Skill sandbox 可能没有权限读取本仓库的 `package.json`，
+所以不要在 Skill 调用时执行 `npm --prefix ... run build`。需要在本仓库安装、
+更新或修改源码后，先回到本仓库执行 `npm run build`。
+
 如果不使用全局 `npm link`，也可以在目标项目中安装本地包：
 
 ```bash
@@ -47,7 +60,7 @@ npm install -D /Users/lee/Documents/project/browser-automated
 可复用流程默认保存在执行命令项目的 `.browser-opt/workflows/` 目录：
 
 ```bash
-npx browser-opt save "创建安选公开直播流程" --flow "测试 https://example.com/live/create。
+browser-opt save "创建安选公开直播流程" --flow "测试 https://example.com/live/create。
 
 目标：
 1. 打开创建页面。
@@ -60,9 +73,9 @@ npx browser-opt save "创建安选公开直播流程" --flow "测试 https://exa
 查看和匹配已保存流程：
 
 ```bash
-npx browser-opt list
-npx browser-opt match "执行创建安选公开直播流程" --json
-npx browser-opt run "执行创建安选公开直播流程"
+browser-opt list
+browser-opt match "执行创建安选公开直播流程" --json
+browser-opt run "执行创建安选公开直播流程"
 ```
 
 在 Codex 中可以直接输入：
@@ -71,9 +84,9 @@ npx browser-opt run "执行创建安选公开直播流程"
 /browser-opt 执行创建安选公开直播流程
 ```
 
-Skill 会先匹配当前项目中的 Workflow。名称精确命中或只有一个相似候选时直接执行；
-存在多个相似流程时只展示最接近的三个，待用户选择后才启动浏览器；未命中时展示当前
-可用流程，不会把缺少 URL 的短句误当成即时流程执行。
+Skill 会先匹配当前项目中的 Workflow。名称精确命中或唯一候选足够强时才直接执行；
+相似但不够强的候选会先展示并等待选择，最多展示最接近的三个；未命中时展示当前可用流程，
+不会把缺少 URL 的短句误当成即时流程执行。
 
 ## 修改后的生效规则
 
@@ -142,6 +155,9 @@ ls ./artifacts/browser-opt/smoke
 
 ## 常见判断
 
+- 已执行 `npm link`：优先直接使用 `browser-opt ...`，这是当前项目联调其他仓库时最稳的方式。
+- 软链 Skill 在 Codex 中触发：优先按 `SKILL.md` 使用绝对路径调用当前仓库的 `dist/cli/browser-opt.js`，避免执行环境没有全局 npm bin。
+- 只有目标项目安装了本地包或已发布包：再使用 `npx browser-opt ...`。
 - 只跑 `npm test -- tests/cli/browser-opt.test.ts`：测试 CLI 包装层，不触发真实浏览器。
 - 直接跑 `node dist/cli/browser-opt.js ...`：触发真实 `agent-browser`，但不测试 Codex Skill 自动发现。
 - 在 Codex 中按 `skills/browser-opt/SKILL.md` 要求执行：测试 Agent 遵守 Skill 文档以及真实 `agent-browser` 调用。
