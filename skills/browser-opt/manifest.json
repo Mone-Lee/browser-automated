@@ -1,22 +1,29 @@
 {
   "name": "browser-opt",
-  "version": "0.1.0",
-  "description": "M1 natural-language browser execution loop with simplified PASS/FAIL results",
+  "version": "0.2.0",
+  "description": "Run immediate or project-saved natural-language browser workflows with simplified PASS/FAIL results",
   "triggers": [
     "browser-opt",
     "natural language browser flow",
     "execute browser flow",
-    "自然语言执行浏览器流程"
+    "自然语言执行浏览器流程",
+    "执行已保存的浏览器流程",
+    "运行 workflow"
   ],
   "inputs": {
     "type": "object",
-    "required": [
-      "flow"
-    ],
     "properties": {
       "flow": {
         "type": "string",
         "description": "Full natural-language browser flow including a URL and expected steps"
+      },
+      "query": {
+        "type": "string",
+        "description": "Short request used to match a saved workflow in the calling project"
+      },
+      "workflowDir": {
+        "type": "string",
+        "description": "Optional workflow directory, default browser-opt/workflows under the calling project"
       },
       "profile": {
         "type": "string",

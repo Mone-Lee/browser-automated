@@ -11,8 +11,17 @@ export {
 } from './browser-e2e/index.js';
 export {
   BrowserOptRunner,
+  DEFAULT_BROWSER_OPT_WORKFLOW_DIR,
   browserOptTemplate,
   extractBrowserOptUrl,
+  findBrowserOptWorkflowById,
+  loadBrowserOptWorkflows,
+  matchBrowserOptWorkflows,
+  normalizeBrowserOptWorkflowQuery,
+  resolveBrowserOptWorkflowDir,
+  safeWorkflowId,
+  saveBrowserOptWorkflow,
+  scoreBrowserOptWorkflow,
   splitBrowserOptSteps,
 } from './browser-opt/index.js';
 export type {
@@ -30,6 +39,13 @@ export type {
   BrowserOptRunResult,
   BrowserOptRunnerOptions,
   BrowserOptStepResult,
+  BrowserOptWorkflow,
+  BrowserOptWorkflowCandidate,
+  BrowserOptWorkflowLoadResult,
+  BrowserOptWorkflowMatchResult,
+  BrowserOptWorkflowMatchStatus,
+  SaveBrowserOptWorkflowInput,
+  SaveBrowserOptWorkflowResult,
 } from './browser-opt/index.js';
 export type {
   GeneratedTestMeta,

@@ -42,6 +42,39 @@ npm install -D /Users/lee/Documents/project/browser-automated
 
 然后通过 `npx browser-opt "<自然语言流程>"` 执行 CLI。
 
+## 保存并一句话调用 Workflow
+
+可复用流程默认保存在执行命令项目的 `browser-opt/workflows/` 目录：
+
+```bash
+browser-opt save "创建安选公开直播流程" --flow "测试 https://example.com/live/create。
+
+目标：
+1. 打开创建页面。
+2. 验证页面显示直播间名称。"
+```
+
+同名流程默认拒绝覆盖；确认更新时显式添加 `--force`。如需使用其他目录，
+保存、匹配和运行时都传入同一个 `--workflow-dir <目录>`。
+
+查看和匹配已保存流程：
+
+```bash
+browser-opt list
+browser-opt match "执行创建安选公开直播流程" --json
+browser-opt run "执行创建安选公开直播流程"
+```
+
+在 Codex 中可以直接输入：
+
+```text
+/browser-opt 执行创建安选公开直播流程
+```
+
+Skill 会先匹配当前项目中的 Workflow。名称精确命中或只有一个相似候选时直接执行；
+存在多个相似流程时只展示最接近的三个，待用户选择后才启动浏览器；未命中时展示当前
+可用流程，不会把缺少 URL 的短句误当成即时流程执行。
+
 ## 修改后的生效规则
 
 如果已经执行过 `npm link`，当前项目继续修改 CLI 或 Skill 后，生效规则如下：

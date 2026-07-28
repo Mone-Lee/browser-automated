@@ -118,6 +118,159 @@ if (command === 'open') {
 }
 
 describe('browser-opt CLI', () => {
+  it('saves, lists and matches a project Workflow as JSON', () => {
+    const workflowDir = makeTempDir();
+    const flow = '测试 https://example.com。\\n\\n目标：\\n1. 验证页面包含 "Example"。';
+    const saved = runCli([
+      'browser-opt',
+      'save',
+      '创建安选公开直播流程',
+      '--flow',
+      flow,
+      '--workflow-dir',
+      workflowDir,
+    ]);
+
+    expect(saved.status).toBe(0);
+    expect(saved.stdout).toContain('已保存 Workflow');
+    expect(fs.existsSync(path.join(workflowDir, '创建安选公开直播流程.json'))).toBe(true);
+
+    const listed = runCli(['browser-opt', 'list', '--workflow-dir', workflowDir, '--json']);
+    expect(listed.status).toBe(0);
+    expect(JSON.parse(listed.stdout).workflows[0].name).toBe('创建安选公开直播流程');
+
+    const matched = runCli([
+      'browser-opt',
+      'match',
+      '执行创建安选公开直播流程',
+      '--workflow-dir',
+      workflowDir,
+      '--json',
+    ]);
+    expect(matched.status).toBe(0);
+    expect(JSON.parse(matched.stdout)).toEqual(expect.objectContaining({
+      status: 'matched',
+      matched: expect.objectContaining({ name: '创建安选公开直播流程', score: 1 }),
+    }));
+  });
+
+  it('runs an exact saved Workflow through the existing browser runner', () => {
+    const workflowDir = makeTempDir();
+    const outputDir = makeTempDir();
+    const saveResult = runCli([
+      'browser-opt',
+      'save',
+      '示例验证流程',
+      '--flow',
+      '测试 https://example.com。\\n1. 验证页面包含 "Example"。',
+      '--workflow-dir',
+      workflowDir,
+    ]);
+    expect(saveResult.status).toBe(0);
+
+    const result = runCli([
+      'browser-opt',
+      'run',
+      '执行示例验证流程',
+      '--workflow-dir',
+      workflowDir,
+      '--output-dir',
+      outputDir,
+    ]);
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe('执行成功');
+  });
+
+  it('runs a selected saved Workflow by stable ID', () => {
+    const workflowDir = makeTempDir();
+    const outputDir = makeTempDir();
+    const saved = runCli([
+      'browser-opt',
+      'save',
+      '按 ID 执行流程',
+      '--flow',
+      '测试 https://example.com。\\n1. 验证页面包含 "Example"。',
+      '--workflow-dir',
+      workflowDir,
+    ]);
+    expect(saved.status).toBe(0);
+
+    const result = runCli([
+      'browser-opt',
+      'run',
+      '--workflow-id',
+      '按-ID-执行流程',
+      '--workflow-dir',
+      workflowDir,
+      '--output-dir',
+      outputDir,
+    ]);
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe('执行成功');
+  });
+
+  it('keeps an immediate English flow starting with run backward compatible', () => {
+    const outputDir = makeTempDir();
+    const result = runCli([
+      'browser-opt',
+      'run https://example.com。\\n1. 验证页面包含 "Example"。',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe('执行成功');
+  });
+
+  it('returns three choices without starting a browser for an ambiguous query', () => {
+    const workflowDir = makeTempDir();
+    const commandLog = path.join(makeTempDir(), 'agent-browser.log');
+    for (const name of ['创建安选公开直播流程', '创建安选私域直播流程', '创建安选直播预告流程', '删除订单流程']) {
+      const saved = runCli([
+        'browser-opt',
+        'save',
+        name,
+        '--flow',
+        `测试 https://example.com。\\n1. 验证页面包含 "${name}"。`,
+        '--workflow-dir',
+        workflowDir,
+      ]);
+      expect(saved.status).toBe(0);
+    }
+
+    const result = runCli([
+      'browser-opt',
+      'run',
+      '创建安选直播流程',
+      '--workflow-dir',
+      workflowDir,
+    ], { AGENT_BROWSER_LOG: commandLog });
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toContain('找到多个相似 Workflow');
+    expect((result.stdout.match(/^  \d\./gm) ?? [])).toHaveLength(3);
+    expect(fs.existsSync(commandLog)).toBe(false);
+  });
+
+  it('rejects overwriting a saved Workflow unless --force is used', () => {
+    const workflowDir = makeTempDir();
+    const args = [
+      'browser-opt',
+      'save',
+      '重复流程',
+      '--flow',
+      '测试 https://example.com。\\n1. 验证页面包含 "Example"。',
+      '--workflow-dir',
+      workflowDir,
+    ];
+    expect(runCli(args).status).toBe(0);
+
+    const duplicate = runCli(args);
+    expect(duplicate.status).toBe(1);
+    expect(duplicate.stderr).toContain('已存在');
+    expect(runCli([...args, '--force']).status).toBe(0);
+  });
+
   it('prints the template and exits non-zero when no flow is provided', () => {
     const result = runCli(['browser-opt']);
 

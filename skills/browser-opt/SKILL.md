@@ -53,9 +53,52 @@ Every execution must follow these rules:
 - Prefer deterministic commands and element refs over natural-language `chat`.
 - Final report must include `PASS` or `FAIL`, evidence screenshot paths, and detailed logs.
 
+## Saved workflows
+
+Reusable flows are stored as versioned JSON files under the calling project's
+`browser-opt/workflows/` directory by default. Resolve relative paths from the
+calling project's current working directory, not from this skill or package directory.
+
+Save a complete flow without executing it:
+
+```bash
+browser-opt save "创建安选公开直播流程" --flow "<full natural language flow>"
+browser-opt save "创建安选公开直播流程" --flow "<full natural language flow>" --workflow-dir ./custom/workflows
+```
+
+Saving an existing name fails by default. Only pass `--force` when the user
+explicitly wants to replace it.
+
+When `/browser-opt` is followed by a short request without a URL, such as:
+
+```text
+/browser-opt 执行创建安选公开直播流程
+```
+
+Do not treat it as a new one-shot flow. First run:
+
+```bash
+browser-opt match "<short request>" --json
+```
+
+Handle the JSON result as follows:
+
+- `matched`: run `browser-opt run --workflow-id "<matched.id>"`.
+- `ambiguous`: show the returned candidates, at most three, and ask the user to
+  choose one. Do not open a browser before the choice. Then run the selected ID.
+- `not-found`: tell the user no saved workflow matched and show the returned
+  available workflow names. Ask for a more specific request or a full flow with URL.
+- Warnings describe invalid workflow files that were skipped. Report them without
+  blocking valid candidates.
+
+Use `--workflow-dir` consistently on both `match` and `run` when the user selects
+a custom directory. Use `browser-opt list --json` when the user asks to see all
+saved workflows.
+
 ## Trigger
 
-Use `/browser-opt` followed by the full natural-language flow:
+Use `/browser-opt` followed by either a full natural-language flow or a saved
+workflow request. A full flow includes its target URL:
 
 ```text
 /browser-opt 测试 https://example.com 的搜索功能。
