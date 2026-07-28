@@ -51,7 +51,8 @@ export function loadBrowserOptWorkflows(workflowDir?: string): BrowserOptWorkflo
 export function saveBrowserOptWorkflow(input: SaveBrowserOptWorkflowInput): SaveBrowserOptWorkflowResult {
   const name = input.name.trim();
   const flow = input.flow.trim();
-  validateWorkflowInput(name, flow);
+  const workflowContent = parseWorkflowContent(flow);
+  validateWorkflowInput(name, workflowContent.target.url, workflowContent.steps);
 
   const workflowDir = resolveBrowserOptWorkflowDir(input.workflowDir);
   const loaded = loadBrowserOptWorkflows(input.workflowDir);
@@ -76,10 +77,11 @@ export function saveBrowserOptWorkflow(input: SaveBrowserOptWorkflowInput): Save
 
   const now = new Date().toISOString();
   const workflow: BrowserOptWorkflow = {
-    version: 1,
+    version: 2,
     id,
     name,
-    flow,
+    target: workflowContent.target,
+    steps: workflowContent.steps,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
@@ -118,30 +120,51 @@ function parseBrowserOptWorkflow(value: unknown, filePath: string): BrowserOptWo
   }
 
   const candidate = value as Partial<BrowserOptWorkflow>;
-  const fields: Array<keyof BrowserOptWorkflow> = ['id', 'name', 'flow', 'createdAt', 'updatedAt'];
-  if (candidate.version !== 1 || fields.some((field) => typeof candidate[field] !== 'string' || !candidate[field]?.trim())) {
-    throw new Error('Workflow 格式无效，必须包含 version=1、id、name、flow、createdAt、updatedAt');
+  const fields: Array<keyof BrowserOptWorkflow> = ['id', 'name', 'createdAt', 'updatedAt'];
+  if (candidate.version !== 2 || fields.some((field) => typeof candidate[field] !== 'string' || !candidate[field]?.trim())) {
+    throw new Error('Workflow 格式无效，必须包含 version=2、id、name、createdAt、updatedAt');
+  }
+  if (!candidate.target || typeof candidate.target !== 'object' || typeof candidate.target.url !== 'string') {
+    throw new Error('Workflow 格式无效，target.url 不能为空');
+  }
+  if (!Array.isArray(candidate.steps)) {
+    throw new Error('Workflow 格式无效，steps 必须是字符串数组');
   }
   if (path.basename(filePath, '.json') !== candidate.id) {
     throw new Error('Workflow id 必须与文件名一致');
   }
-  validateWorkflowInput(candidate.name as string, candidate.flow as string);
+  validateWorkflowInput(candidate.name as string, candidate.target.url, candidate.steps);
   return candidate as BrowserOptWorkflow;
 }
 
-function validateWorkflowInput(name: string, flow: string): void {
+/** 把自然语言 flow 解析为结构化 Workflow 内容，便于人读和手动维护。 */
+function parseWorkflowContent(flow: string): { target: { url: string }; steps: string[] } {
+  const url = extractBrowserOptUrl(flow);
+  if (!url) {
+    throw new Error('Workflow 流程必须包含可访问的 http:// 或 https:// URL。');
+  }
+  const steps = splitBrowserOptSteps(flow);
+  return { target: { url }, steps };
+}
+
+function validateWorkflowInput(name: string, url: string, steps: string[]): void {
   if (!name) {
     throw new Error('Workflow 名称不能为空。');
   }
   safeWorkflowId(name);
-  if (!flow) {
-    throw new Error('Workflow 流程不能为空。');
+  if (!url.trim()) {
+    throw new Error('Workflow URL 不能为空。');
   }
-  if (!extractBrowserOptUrl(flow)) {
+  if (!/^https?:\/\//i.test(url)) {
     throw new Error('Workflow 流程必须包含可访问的 http:// 或 https:// URL。');
   }
-  if (splitBrowserOptSteps(flow).length === 0) {
+  if (!Array.isArray(steps) || steps.length === 0) {
     throw new Error('Workflow 流程必须包含至少一个可执行步骤。');
+  }
+  for (const step of steps) {
+    if (typeof step !== 'string' || !step.trim()) {
+      throw new Error('Workflow steps 必须是非空字符串数组。');
+    }
   }
 }
 
@@ -151,4 +174,10 @@ function normalizeWorkflowName(name: string): string {
 
 function compareWorkflows(left: BrowserOptWorkflow, right: BrowserOptWorkflow): number {
   return left.name.localeCompare(right.name, 'zh-CN') || left.id.localeCompare(right.id, 'zh-CN');
+}
+
+/** 运行前将结构化 Workflow 还原为现有 runner 可消费的自然语言 flow。 */
+export function renderBrowserOptWorkflowFlow(workflow: BrowserOptWorkflow): string {
+  const numberedSteps = workflow.steps.map((step, index) => `${index + 1}. ${step}`);
+  return `测试 ${workflow.target.url}。\n${numberedSteps.join('\n')}`;
 }

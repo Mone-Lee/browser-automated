@@ -55,6 +55,29 @@ Workflow 默认保存到当前工作目录的 `browser-opt/workflows/`。可以�
 `browser-opt list` 查看，或用 `browser-opt match "<查询>" --json` 获取 Skill
 可解析的唯一命中、前三个相似候选或未命中结果。
 
+保存后的 JSON 会落成更适合人工维护的结构化格式，大致如下：
+
+```json
+{
+  "version": 2,
+  "id": "示例首页验证流程",
+  "name": "示例首页验证流程",
+  "target": {
+    "url": "https://example.com"
+  },
+  "steps": [
+    "打开首页",
+    "验证页面包含 \"Example\"。",
+    "点击导航中的 More information",
+    "验证页面成功跳转"
+  ],
+  "createdAt": "2026-07-28T08:00:00.000Z",
+  "updatedAt": "2026-07-28T08:00:00.000Z"
+}
+```
+
+其中 `steps` 是纯字符串数组，方便手动调整顺序和文案；运行时会再渲染回 browser-opt 现有的自然语言执行格式。
+
 E2E skill 流程：
 
 ```bash

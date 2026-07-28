@@ -5,6 +5,7 @@ export {
   DEFAULT_BROWSER_OPT_WORKFLOW_DIR,
   findBrowserOptWorkflowById,
   loadBrowserOptWorkflows,
+  renderBrowserOptWorkflowFlow,
   resolveBrowserOptWorkflowDir,
   safeWorkflowId,
   saveBrowserOptWorkflow,
@@ -20,6 +21,7 @@ export type {
   BrowserOptWorkflowLoadResult,
   BrowserOptWorkflowMatchResult,
   BrowserOptWorkflowMatchStatus,
+  BrowserOptWorkflowTarget,
   SaveBrowserOptWorkflowInput,
   SaveBrowserOptWorkflowResult,
 } from './type.js';

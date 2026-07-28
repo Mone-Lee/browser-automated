@@ -11,6 +11,7 @@ import {
   findBrowserOptWorkflowById,
   loadBrowserOptWorkflows,
   matchBrowserOptWorkflows,
+  renderBrowserOptWorkflowFlow,
   resolveBrowserOptWorkflowDir,
   saveBrowserOptWorkflow,
 } from '../../browser-opt/workflow/index.js';
@@ -174,7 +175,7 @@ async function runWorkflowCommand(query: string, flags: Record<string, string | 
       printAvailableWorkflows(loaded.workflows);
       process.exit(BROWSER_OPT_EXIT_CODE_NOT_FOUND);
     }
-    await executeBrowserOptFlow(workflow.flow, flags);
+    await executeBrowserOptFlow(renderBrowserOptWorkflowFlow(workflow), flags);
     return;
   }
   if (!query.trim()) {
@@ -191,7 +192,7 @@ async function runWorkflowCommand(query: string, flags: Record<string, string | 
     printWorkflowMatch(result);
     process.exit(BROWSER_OPT_EXIT_CODE_NOT_FOUND);
   }
-  await executeBrowserOptFlow(result.matched.workflow.flow, flags);
+  await executeBrowserOptFlow(renderBrowserOptWorkflowFlow(result.matched.workflow), flags);
 }
 
 /** JSON 输出收敛为候选元数据，避免匹配阶段把完整自动化正文回显给调用方。 */

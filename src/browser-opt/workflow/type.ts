@@ -3,11 +3,16 @@
  * 这些类型同时服务于公共 API、CLI JSON 输出和 Skill 调用协议。
  */
 
+export interface BrowserOptWorkflowTarget {
+  url: string;
+}
+
 export interface BrowserOptWorkflow {
-  version: 1;
+  version: 2;
   id: string;
   name: string;
-  flow: string;
+  target: BrowserOptWorkflowTarget;
+  steps: string[];
   createdAt: string;
   updatedAt: string;
 }

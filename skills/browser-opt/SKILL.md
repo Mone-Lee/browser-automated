@@ -69,6 +69,28 @@ browser-opt save "创建安选公开直播流程" --flow "<full natural language
 Saving an existing name fails by default. Only pass `--force` when the user
 explicitly wants to replace it.
 
+Saved workflow files are structured JSON, not a single `flow` string. The
+persisted schema uses a top-level `url` plus a `steps` object array so humans
+can review and edit it more easily:
+
+```json
+{
+  "version": 2,
+  "id": "创建安选公开直播流程",
+  "name": "创建安选公开直播流程",
+  "target": {
+    "url": "https://example.com/live/create"
+  },
+  "steps": [
+    "打开页面",
+    "在“直播间名称”输入“自动化测试直播间”。",
+    "验证页面包含“创建成功”。"
+  ],
+  "createdAt": "2026-07-28T08:00:00.000Z",
+  "updatedAt": "2026-07-28T08:00:00.000Z"
+}
+```
+
 When `/browser-opt` is followed by a short request without a URL, such as:
 
 ```text

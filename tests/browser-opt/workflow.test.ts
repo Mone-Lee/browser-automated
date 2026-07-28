@@ -9,6 +9,7 @@ import {
   loadBrowserOptWorkflows,
   matchBrowserOptWorkflows,
   normalizeBrowserOptWorkflowQuery,
+  renderBrowserOptWorkflowFlow,
   resolveBrowserOptWorkflowDir,
   safeWorkflowId,
   saveBrowserOptWorkflow,
@@ -29,13 +30,20 @@ function makeTempDir(): string {
   return dir;
 }
 
+function makeSteps(text = '验证页面包含“Example”。'): string[] {
+  return [text];
+}
+
 function workflow(name: string): BrowserOptWorkflow {
   const now = new Date().toISOString();
   return {
-    version: 1,
+    version: 2,
     id: safeWorkflowId(name),
     name,
-    flow: `测试 https://example.com/${encodeURIComponent(name)}。\n1. 验证页面包含“Example”。`,
+    target: {
+      url: `https://example.com/${encodeURIComponent(name)}`,
+    },
+    steps: makeSteps(),
     createdAt: now,
     updatedAt: now,
   };
@@ -58,6 +66,8 @@ describe('browser-opt Workflow store', () => {
 
     expect(result.created).toBe(true);
     expect(path.basename(result.filePath)).toBe('创建安选公开直播流程.json');
+    expect(result.workflow.target.url).toBe('https://example.com/live/create');
+    expect(result.workflow.steps).toEqual(['验证页面包含“Example”。']);
     expect(loadBrowserOptWorkflows(workflowDir).workflows).toEqual([result.workflow]);
   });
 
@@ -83,7 +93,7 @@ describe('browser-opt Workflow store', () => {
     });
     expect(updated.created).toBe(false);
     expect(updated.workflow.createdAt).toBe(first.workflow.createdAt);
-    expect(updated.workflow.flow).toContain('Updated');
+    expect(updated.workflow.steps[0]).toContain('Updated');
   });
 
   it('rejects flows without a URL and skips malformed files while loading', () => {
@@ -96,16 +106,38 @@ describe('browser-opt Workflow store', () => {
 
     fs.writeFileSync(path.join(workflowDir, 'broken.json'), '{invalid', 'utf-8');
     fs.writeFileSync(path.join(workflowDir, 'missing-url.json'), JSON.stringify({
-      version: 1,
+      version: 2,
       id: 'missing-url',
       name: '缺少地址',
-      flow: '1. 打开页面。',
+      target: {
+        url: '',
+      },
+      steps: ['打开页面。'],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }), 'utf-8');
     const loaded = loadBrowserOptWorkflows(workflowDir);
     expect(loaded.workflows).toEqual([]);
     expect(loaded.warnings).toHaveLength(2);
+  });
+
+  it('renders a structured Workflow back to the runner flow format', () => {
+    const rendered = renderBrowserOptWorkflowFlow({
+      ...workflow('创建安选公开直播流程'),
+      target: {
+        url: 'https://example.com/live/create',
+      },
+      steps: [
+        '在“直播间名称”输入“自动化测试直播间”。',
+        '点击“提交”按钮。',
+      ],
+    });
+
+    expect(rendered).toBe([
+      '测试 https://example.com/live/create。',
+      '1. 在“直播间名称”输入“自动化测试直播间”。',
+      '2. 点击“提交”按钮。',
+    ].join('\n'));
   });
 });
 
