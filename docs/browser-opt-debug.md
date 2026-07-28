@@ -44,10 +44,10 @@ npm install -D /Users/lee/Documents/project/browser-automated
 
 ## 保存并一句话调用 Workflow
 
-可复用流程默认保存在执行命令项目的 `browser-opt/workflows/` 目录：
+可复用流程默认保存在执行命令项目的 `.browser-opt/workflows/` 目录：
 
 ```bash
-browser-opt save "创建安选公开直播流程" --flow "测试 https://example.com/live/create。
+npx browser-opt save "创建安选公开直播流程" --flow "测试 https://example.com/live/create。
 
 目标：
 1. 打开创建页面。
@@ -60,9 +60,9 @@ browser-opt save "创建安选公开直播流程" --flow "测试 https://example
 查看和匹配已保存流程：
 
 ```bash
-browser-opt list
-browser-opt match "执行创建安选公开直播流程" --json
-browser-opt run "执行创建安选公开直播流程"
+npx browser-opt list
+npx browser-opt match "执行创建安选公开直播流程" --json
+npx browser-opt run "执行创建安选公开直播流程"
 ```
 
 在 Codex 中可以直接输入：

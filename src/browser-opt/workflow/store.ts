@@ -12,7 +12,7 @@ import type {
   SaveBrowserOptWorkflowResult,
 } from './type.js';
 
-export const DEFAULT_BROWSER_OPT_WORKFLOW_DIR = path.join('browser-opt', 'workflows');
+export const DEFAULT_BROWSER_OPT_WORKFLOW_DIR = path.join('.browser-opt', 'workflows');
 
 /** 相对目录始终以调用者当前项目为基准，避免依赖 browser-opt 包的安装位置。 */
 export function resolveBrowserOptWorkflowDir(workflowDir?: string, cwd = process.cwd()): string {

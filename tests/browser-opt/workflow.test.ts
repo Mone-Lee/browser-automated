@@ -52,7 +52,7 @@ function workflow(name: string): BrowserOptWorkflow {
 describe('browser-opt Workflow store', () => {
   it('resolves the default directory from the caller project', () => {
     expect(resolveBrowserOptWorkflowDir(undefined, '/tmp/example-project')).toBe(
-      path.resolve('/tmp/example-project/browser-opt/workflows'),
+      path.resolve('/tmp/example-project/.browser-opt/workflows'),
     );
   });
 

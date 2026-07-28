@@ -23,7 +23,7 @@
       },
       "workflowDir": {
         "type": "string",
-        "description": "Optional workflow directory, default browser-opt/workflows under the calling project"
+        "description": "Optional workflow directory, default .browser-opt/workflows under the calling project"
       },
       "profile": {
         "type": "string",

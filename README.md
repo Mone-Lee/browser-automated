@@ -12,7 +12,7 @@
 | 能力 | 对外入口 | 主要代码 | 主要产物 |
 | --- | --- | --- | --- |
 | 自然语言入口、确定性执行网页操作 | `browser-opt` | `src/browser-opt/`、`src/core/agent.ts` | `artifacts/browser-opt/<run>/report.{json,md}`、截图、snapshot |
-| 沉淀可复用 Skill / Workflow | `browser-opt save/run`、`skills/browser-opt` | `src/browser-opt/workflow/`、`skills/browser-opt` | `browser-opt/workflows/*.json` |
+| 沉淀可复用 Skill / Workflow | `npx browser-opt save/run`、`skills/browser-opt` | `src/browser-opt/workflow/`、`skills/browser-opt` | `.browser-opt/workflows/*.json` |
 | 生成 E2E 测试代码 | `browser-e2e gen`、`browser-e2e run --auto-generate` | `src/browser-e2e/generate.ts`、`src/browser-e2e/test-reuse/playwright.ts` | `tests/generated/*.spec.ts`、`tests/generated/index.json` |
 | handoff 机制 | `browser-e2e` 执行流程内置 | `src/cli/`、`src/browser-e2e/deterministic.ts`、`src/core/agent.ts` | 同一 session 的用户接管与恢复记录 |
 
@@ -51,8 +51,8 @@ npx browser-opt save "示例首页验证流程" --flow "测试 https://example.c
 npx browser-opt run "执行示例首页验证流程"
 ```
 
-Workflow 默认保存到当前工作目录的 `browser-opt/workflows/`。可以通过
-`browser-opt list` 查看，或用 `browser-opt match "<查询>" --json` 获取 Skill
+Workflow 默认保存到当前工作目录的 `.browser-opt/workflows/`。可以通过
+`npx browser-opt list` 查看，或用 `npx browser-opt match "<查询>" --json` 获取 Skill
 可解析的唯一命中、前三个相似候选或未命中结果。
 
 保存后的 JSON 会落成更适合人工维护的结构化格式，大致如下：
