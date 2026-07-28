@@ -189,6 +189,18 @@ describe('browser-opt Workflow matcher', () => {
     expect(result.matched?.workflow.id).toBe(target.id);
   });
 
+  it('does not match a weakly similar workflow directly', () => {
+    const result = matchBrowserOptWorkflows('创建安选生鲜直播流程', [
+      workflow('创建安选公开直播（测试环境）'),
+      workflow('删除商品流程'),
+    ]);
+
+    expect(result.status).toBe('not-found');
+    expect(result.matched).toBeNull();
+    expect(result.candidates).toEqual([]);
+    expect(result.available.map((item) => item.name)).toContain('创建安选公开直播（测试环境）');
+  });
+
   it('returns only the closest three candidates with stable ordering', () => {
     const result = matchBrowserOptWorkflows('创建安选直播流程', [
       workflow('创建安选公开直播流程'),

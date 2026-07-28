@@ -8,7 +8,8 @@ import type {
   BrowserOptWorkflowMatchResult,
 } from './type.js';
 
-const MIN_MATCH_SCORE = 0.2;
+const MIN_MATCH_SCORE = 0.45;
+const DIRECT_MATCH_SCORE = 0.88;
 const MAX_AMBIGUOUS_CANDIDATES = 3;
 const LEADING_INTENT_RE = /^(?:请|麻烦|帮我|我要|我想要|现在)*(?:执行|运行|调用|启动|开始|打开)+/u;
 
@@ -23,7 +24,7 @@ export function normalizeBrowserOptWorkflowQuery(value: string): string {
     .replace(/[\p{P}\p{S}\s]+/gu, '');
 }
 
-/** 精确或唯一候选可直接执行；多个非精确候选只返回最接近的三个。 */
+/** 精确或足够强的唯一候选可直接执行；弱相似候选只返回给调用方确认。 */
 export function matchBrowserOptWorkflows(
   query: string,
   workflows: BrowserOptWorkflow[],
@@ -45,7 +46,10 @@ export function matchBrowserOptWorkflows(
     return { status: 'matched', matched: exact, candidates: [exact], available };
   }
   if (scored.length === 1) {
-    return { status: 'matched', matched: scored[0], candidates: scored, available };
+    if (scored[0].score >= DIRECT_MATCH_SCORE) {
+      return { status: 'matched', matched: scored[0], candidates: scored, available };
+    }
+    return { status: 'ambiguous', matched: null, candidates: scored, available };
   }
   if (scored.length > 1) {
     return {

@@ -218,7 +218,8 @@ function printWorkflowMatch(result: BrowserOptWorkflowMatchResult): void {
     return;
   }
   if (result.status === 'ambiguous') {
-    console.log('找到多个相似 Workflow，请选择后使用 --workflow-id 执行：');
+    const label = result.candidates.length > 1 ? '找到多个相似 Workflow' : '找到相似 Workflow';
+    console.log(`${label}，请选择后使用 --workflow-id 执行：`);
     result.candidates.forEach((candidate, index) => {
       console.log(`  ${index + 1}. ${candidate.workflow.name} [${candidate.workflow.id}]`);
     });
