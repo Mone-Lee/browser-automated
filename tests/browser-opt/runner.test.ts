@@ -48,6 +48,8 @@ function buildAgent(options: {
   snapshots?: ReturnType<typeof snapshotJson>[];
   chat?: () => { raw: string; data: unknown | null; parseError?: string };
   evaluate?: (script: string) => string;
+  getUrl?: () => string;
+  getTabs?: () => Array<{ active: boolean; tabId: string; title: string; type: string; url: string }>;
 } = {}): BrowserAgent {
   const snapshots = options.snapshots ?? [
     snapshotJson('home page', { e1: { role: 'textbox', name: 'Search' } }),
@@ -59,6 +61,9 @@ function buildAgent(options: {
     open: vi.fn(() => 'opened'),
     reload: vi.fn(() => 'reloaded'),
     getSessionId: vi.fn(() => 'browser-opt-test-session'),
+    getUrl: vi.fn(options.getUrl ?? (() => 'https://example.com')),
+    getTabs: vi.fn(options.getTabs ?? (() => [])),
+    switchTab: vi.fn(() => 'switched'),
     snapshotJson: vi.fn(() => snapshots.shift() ?? snapshotJson('fallback')),
     screenshot: vi.fn((filePath?: string) => {
       if (filePath) {
@@ -1355,6 +1360,63 @@ describe('BrowserOptRunner', () => {
     expect((agent.reload as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
     expect(result.report.logs.join('\n')).toContain('open-wait 1');
     expect(result.report.logs.join('\n')).toContain('open-reload');
+  });
+
+  it('switches from about:blank to a non-empty tab before executing the first step', async () => {
+    const outputDir = makeTempDir();
+    const blankSnapshot = {
+      raw: JSON.stringify({ success: true, data: { origin: 'about:blank', refs: {}, snapshot: '(no interactive elements)' } }),
+      data: { success: true, data: { origin: 'about:blank', refs: {}, snapshot: '(no interactive elements)' } },
+    };
+    const agent = buildAgent({
+      snapshots: [
+        ...Array.from({ length: 6 }, () => blankSnapshot),
+        snapshotJson('登录远方的梦想直播平台', { e1: { role: 'textbox', name: '请输入手机号' } }),
+        snapshotJson('登录远方的梦想直播平台', { e1: { role: 'textbox', name: '请输入手机号' } }),
+      ],
+      getUrl: () => 'about:blank',
+      getTabs: () => [
+        { active: true, tabId: 't1', title: 'about:blank', type: 'page', url: 'about:blank' },
+        { active: false, tabId: 't2', title: '远方直播助手', type: 'page', url: 'http://localhost:3301/login' },
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://test-live.ifengqun.com/live/create?time=2。\n\n目标：\n1. 验证页面包含 "创建直播"。', {
+      outputDir,
+    });
+
+    expect(result.report.status).toBe('HANDOFF');
+    expect((agent.switchTab as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('t2');
+    expect((agent.handoff as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect(result.report.logs.join('\n')).toContain('open-tab-recovery: 当前活动页为 about:blank');
+  });
+
+  it('fails before business steps when the browser remains on an unrecoverable about:blank page', async () => {
+    const outputDir = makeTempDir();
+    const blankSnapshot = {
+      raw: JSON.stringify({ success: true, data: { origin: 'about:blank', refs: {}, snapshot: '(no interactive elements)' } }),
+      data: { success: true, data: { origin: 'about:blank', refs: {}, snapshot: '(no interactive elements)' } },
+    };
+    const agent = buildAgent({
+      snapshots: Array.from({ length: 12 }, () => blankSnapshot),
+      getUrl: () => 'about:blank',
+      getTabs: () => [
+        { active: true, tabId: 't1', title: 'about:blank', type: 'page', url: 'about:blank' },
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 在“名称”输入“测试”。', {
+      outputDir,
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.report.status).toBe('FAIL');
+    expect(result.report.steps).toHaveLength(0);
+    expect((agent.fill as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect((agent.screenshot as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect(result.report.logs.join('\n')).toContain('浏览器页面未成功打开：当前会话持续停留在 about:blank');
   });
 
   it('does not fill an unrelated textbox when the requested field is missing on a login page', async () => {

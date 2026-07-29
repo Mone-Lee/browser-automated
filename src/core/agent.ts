@@ -20,6 +20,19 @@ export interface AgentBrowserJsonResult {
   parseError?: string;
 }
 
+export interface BrowserTabInfo {
+  /** 当前标签页是否处于激活状态。 */
+  active: boolean;
+  /** agent-browser 返回的稳定标签页标识，可用于后续切换。 */
+  tabId: string;
+  /** 浏览器标签页标题。 */
+  title: string;
+  /** 浏览器标签页类型，例如 `page`。 */
+  type: string;
+  /** 当前标签页地址。 */
+  url: string;
+}
+
 function parseJsonOutput(raw: string): AgentBrowserJsonResult {
   try {
     return {
@@ -54,6 +67,7 @@ export class BrowserAgent {
   private readonly reuseRunningBrowser: boolean;
   private readonly browserArgs: string[];
   private liveViewportReady: boolean;
+  private browserOpened: boolean;
 
   constructor(options: AgentOptions = {}) {
     this.sessionId = options.sessionId ?? `browser-agent-${Date.now()}-${randomUUID().slice(0, 8)}`;
@@ -68,6 +82,7 @@ export class BrowserAgent {
       options.browserArgs ??
       (!this.profile && (!this.reuseRunningBrowser || this.statePath) ? DEFAULT_CLEAN_BROWSER_ARGS : []);
     this.liveViewportReady = false;
+    this.browserOpened = false;
   }
 
   /** 返回当前 agent 使用的 agent-browser 会话 id。 */
@@ -100,7 +115,7 @@ export class BrowserAgent {
       ...(reuseRunningBrowser ? ['--auto-connect'] : []),
       ...(useNamedSession ? ['--session', this.sessionId] : []),
       ...(useHeaded ? ['--headed'] : []),
-      ...(args[0] === 'open' && browserArgs.length > 0
+      ...((args[0] === 'open' || this.browserOpened) && browserArgs.length > 0
         ? ['--args', browserArgs.join(',')]
         : []),
       ...args,
@@ -115,7 +130,7 @@ export class BrowserAgent {
 
   /** 底层命令执行入口，负责调用单条 agent-browser 命令并返回 stdout。 */
   private run(args: string[], options: { headed?: boolean; statePath?: string | null } = {}): string {
-    const useHeaded = options.headed ?? (args[0] === 'open' ? this.headed : false);
+    const useHeaded = options.headed ?? this.headed;
     const result: SpawnSyncReturns<string> = spawnSync(
       'agent-browser',
       this.buildGlobalArgs(args, useHeaded, Object.hasOwn(options, 'statePath') ? { statePath: options.statePath } : {}),
@@ -127,6 +142,12 @@ export class BrowserAgent {
     }
     if (result.status !== 0) {
       throw new Error(this.resultErrorMessage(result, `agent-browser exited with code ${result.status}`));
+    }
+
+    if (args[0] === 'open') {
+      this.browserOpened = true;
+    } else if (args[0] === 'close') {
+      this.browserOpened = false;
     }
 
     if (useHeaded && this.openLiveDashboard && args[0] === 'open') {
@@ -350,6 +371,36 @@ export class BrowserAgent {
   /** 获取当前页面 URL。 */
   getUrl(): string {
     return this.run(['get', 'url']).trim();
+  }
+
+  /** 获取当前浏览器窗口中的页面标签页，供上层从意外的空白活动页恢复。 */
+  getTabs(): BrowserTabInfo[] {
+    const output = parseJsonOutput(this.run(['tab', 'list', '--json']));
+    if (!output.data || typeof output.data !== 'object') {
+      return [];
+    }
+
+    const data = output.data as { data?: { tabs?: unknown } };
+    if (!Array.isArray(data.data?.tabs)) {
+      return [];
+    }
+
+    return data.data.tabs.filter((tab): tab is BrowserTabInfo => {
+      if (!tab || typeof tab !== 'object') {
+        return false;
+      }
+      const candidate = tab as Partial<BrowserTabInfo>;
+      return typeof candidate.tabId === 'string'
+        && typeof candidate.url === 'string'
+        && typeof candidate.title === 'string'
+        && typeof candidate.type === 'string'
+        && typeof candidate.active === 'boolean';
+    });
+  }
+
+  /** 切换到指定稳定标签页 id。 */
+  switchTab(tabId: string): string {
+    return this.run(['tab', tabId]);
   }
 
   /**

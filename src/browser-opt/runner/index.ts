@@ -20,7 +20,7 @@ import {
   splitBrowserOptSteps,
   summarizeSnapshot,
 } from '../utils.js';
-import { captureSettledSnapshot } from './evidence.js';
+import { captureSettledSnapshot, isAboutBlankOpen } from './evidence.js';
 import {
   resumeFromHandoff,
   saveAuthenticatedHandoffState,
@@ -83,12 +83,18 @@ export class BrowserOptRunner {
 
       const openSnapshotPath = path.join(outputDir, '00-open.snapshot.json');
       const openScreenshotPath = path.join(outputDir, '00-open.png');
-      let openSnapshot = captureSettledSnapshot(agent, openSnapshotPath, logs, { reloadAfterBlank: true });
+      let openSnapshot = captureSettledSnapshot(agent, openSnapshotPath, logs, {
+        reloadAfterBlank: true,
+        targetUrl: url,
+      });
       agent.screenshot(openScreenshotPath);
       screenshots.push(openScreenshotPath);
       logs.push(`snapshot: ${openSnapshotPath}`);
       logs.push(`screenshot: ${openScreenshotPath}`);
       logs.push(`page-state: ${summarizeSnapshot(openSnapshot)}`);
+      if (isAboutBlankOpen(agent, openSnapshot)) {
+        throw new Error('浏览器页面未成功打开：当前会话持续停留在 about:blank，且没有可恢复的业务页或登录页。');
+      }
 
       /**
        * state 已存在但运行中被登录页拦截时，最多回退一次到对应 profile 重新导入。
@@ -113,11 +119,17 @@ export class BrowserOptRunner {
         });
         logs.push(`fallback-open: ${url}`);
         agent.open(url);
-        openSnapshot = captureSettledSnapshot(agent, openSnapshotPath, logs, { reloadAfterBlank: true });
+        openSnapshot = captureSettledSnapshot(agent, openSnapshotPath, logs, {
+          reloadAfterBlank: true,
+          targetUrl: url,
+        });
         agent.screenshot(openScreenshotPath);
         logs.push(`fallback-snapshot: ${openSnapshotPath}`);
         logs.push(`fallback-screenshot: ${openScreenshotPath}`);
         logs.push(`fallback-page-state: ${summarizeSnapshot(openSnapshot)}`);
+        if (isAboutBlankOpen(agent, openSnapshot)) {
+          throw new Error('浏览器页面未成功打开：profile 回退后仍停留在 about:blank。');
+        }
         if (!shouldTriggerLoginHandoff(flow, url, openSnapshot) && options.authStateSavePath) {
           saveAuthState(agent, options.authStateSavePath, logs);
         }

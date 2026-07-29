@@ -379,7 +379,7 @@ describe('BrowserAgent', () => {
       });
     });
 
-    it('does not pass headed launch flags to follow-up snapshots', () => {
+    it('keeps headed mode on follow-up snapshots so the daemon does not replace the visible browser', () => {
       mockSpawnSync.mockReturnValue(makeOkResult('{"success":true,"data":{"snapshot":"button","refs":{}}}'));
 
       const agent = new BrowserAgent({ sessionId: 'test-session', liveViewport: true });
@@ -387,7 +387,35 @@ describe('BrowserAgent', () => {
 
       expect(mockSpawnSync).toHaveBeenCalledWith(
         'agent-browser',
-        ['--session', 'test-session', 'snapshot', '-i', '--json'],
+        ['--session', 'test-session', '--headed', 'snapshot', '-i', '--json'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+    });
+
+    it('keeps browser launch arguments on commands after open so the daemon preserves the page', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult('{"success":true,"data":{"snapshot":"button","refs":{}}}'));
+
+      const agent = new BrowserAgent({
+        sessionId: 'test-session',
+        liveViewport: true,
+        openLiveDashboard: false,
+      });
+      agent.open('https://example.com');
+      agent.snapshotJson();
+
+      expect(mockSpawnSync).toHaveBeenNthCalledWith(
+        2,
+        'agent-browser',
+        [
+          '--session',
+          'test-session',
+          '--headed',
+          '--args',
+          '--disable-session-crashed-bubble,--no-first-run,--no-default-browser-check',
+          'snapshot',
+          '-i',
+          '--json',
+        ],
         expect.objectContaining({ encoding: 'utf-8' }),
       );
     });
@@ -619,6 +647,43 @@ describe('BrowserAgent', () => {
 
       const agent = new BrowserAgent({ sessionId: 'test-session' });
       expect(agent.getUrl()).toBe('https://example.com/page');
+    });
+  });
+
+  describe('tabs', () => {
+    it('lists tabs and switches by stable tab id', () => {
+      mockSpawnSync
+        .mockReturnValueOnce({
+          status: 0,
+          stdout: JSON.stringify({
+            success: true,
+            data: {
+              tabs: [
+                { active: true, tabId: 't2', title: 'Example', type: 'page', url: 'https://example.com' },
+              ],
+            },
+          }),
+          stderr: '',
+        })
+        .mockReturnValueOnce({ status: 0, stdout: 'switched', stderr: '' });
+      const agent = new BrowserAgent({ sessionId: 'test-session' });
+
+      expect(agent.getTabs()).toEqual([
+        { active: true, tabId: 't2', title: 'Example', type: 'page', url: 'https://example.com' },
+      ]);
+      expect(agent.switchTab('t2')).toBe('switched');
+      expect(mockSpawnSync).toHaveBeenNthCalledWith(
+        1,
+        'agent-browser',
+        ['--session', 'test-session', 'tab', 'list', '--json'],
+        expect.any(Object),
+      );
+      expect(mockSpawnSync).toHaveBeenNthCalledWith(
+        2,
+        'agent-browser',
+        ['--session', 'test-session', 'tab', 't2'],
+        expect.any(Object),
+      );
     });
   });
 });
