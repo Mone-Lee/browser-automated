@@ -10,6 +10,7 @@ export interface BrowserOptWorkflowTarget {
 export interface BrowserOptWorkflow {
   id: string;
   name: string;
+  filePath?: string;
   target: BrowserOptWorkflowTarget;
   steps: string[];
   createdAt: string;

@@ -67,6 +67,8 @@ describe('browser-opt Workflow store', () => {
     expect(path.basename(result.filePath)).toBe('创建安选公开直播流程.json');
     expect(result.workflow.target.url).toBe('https://example.com/live/create');
     expect(result.workflow.steps).toEqual(['验证页面包含“Example”。']);
+    expect(result.workflow.filePath).toBe(result.filePath);
+    expect(JSON.parse(fs.readFileSync(result.filePath, 'utf-8'))).toEqual(expect.not.objectContaining({ version: expect.anything() }));
     expect(loadBrowserOptWorkflows(workflowDir).workflows).toEqual([result.workflow]);
   });
 

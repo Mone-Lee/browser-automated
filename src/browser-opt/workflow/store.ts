@@ -76,7 +76,7 @@ export function saveBrowserOptWorkflow(input: SaveBrowserOptWorkflowInput): Save
   }
 
   const now = new Date().toISOString();
-  const workflow: BrowserOptWorkflow = {
+  const workflowContentToSave: BrowserOptWorkflow = {
     id,
     name,
     target: workflowContent.target,
@@ -86,8 +86,8 @@ export function saveBrowserOptWorkflow(input: SaveBrowserOptWorkflowInput): Save
   };
 
   fs.mkdirSync(workflowDir, { recursive: true });
-  fs.writeFileSync(filePath, `${JSON.stringify(workflow, null, 2)}\n`, 'utf-8');
-  return { workflow, filePath, created: !targetExists };
+  fs.writeFileSync(filePath, `${JSON.stringify(workflowContentToSave, null, 2)}\n`, 'utf-8');
+  return { workflow: { ...workflowContentToSave, filePath }, filePath, created: !targetExists };
 }
 
 /** 按稳定 ID 查找 Workflow，供候选选择后绕过再次模糊匹配。 */
@@ -140,6 +140,7 @@ function parseBrowserOptWorkflow(value: unknown, filePath: string): BrowserOptWo
   return {
     id: candidate.id as string,
     name: candidate.name as string,
+    filePath,
     target: candidate.target,
     steps: normalizeWorkflowSteps(candidate.steps),
     createdAt: candidate.createdAt as string,
