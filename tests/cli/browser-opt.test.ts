@@ -445,9 +445,10 @@ describe('browser-opt CLI', () => {
     expect(commands).toContain('state save');
   });
 
-  it('falls back to the default profile when the default state opens on a login page', () => {
+  it('uses interactive handoff instead of profile fallback when the default state opens on a login page', () => {
     const outputDir = makeTempDir();
     const commandLog = path.join(makeTempDir(), 'agent-browser.log');
+    const resumeMarker = path.join(makeTempDir(), 'resume-marker');
     const stateOpenMarker = path.join(makeTempDir(), 'state-opened');
     const stateDir = makeTempDir();
     const statePath = path.join(stateDir, 'browser-opt-default.json');
@@ -461,15 +462,19 @@ describe('browser-opt CLI', () => {
       AGENT_BROWSER_LOG: commandLog,
       AGENT_BROWSER_LOGIN_SNAPSHOT: '1',
       AGENT_BROWSER_LOGIN_SNAPSHOT_STATE_ONLY: '1',
+      AGENT_BROWSER_RESUME_MARKER: resumeMarker,
       AGENT_BROWSER_STATE_OPEN_MARKER: stateOpenMarker,
       BROWSER_OPT_AUTH_STATE_DIR: stateDir,
-    });
+    }, 'done\n');
 
     expect(result.status).toBe(0);
     const commands = fs.readFileSync(commandLog, 'utf-8');
     expect(commands.match(new RegExp(`--state ${statePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g')) ?? []).toHaveLength(1);
-    expect(commands).toContain('--profile Default --headed open https://example.com');
-    expect(commands).toContain('close');
+    expect(commands).not.toContain('--profile Default');
+    expect(commands).not.toContain('close');
+    expect(commands).toContain('handoff');
+    expect(commands).toContain('resume');
+    expect(commands.split('\n').filter((command) => /\bopen https:\/\/example\.com\b/.test(command))).toHaveLength(1);
     expect(commands).toContain(`state save ${statePath}`);
   });
 
@@ -557,6 +562,7 @@ describe('browser-opt CLI', () => {
     const commands = fs.readFileSync(commandLog, 'utf-8');
     expect(commands).toContain('handoff');
     expect(commands).toContain('resume');
+    expect(commands.split('\n').filter((command) => /\bopen https:\/\/example\.com\/live\/create\b/.test(command))).toHaveLength(1);
     expect(commands).toContain('fill @e2 安选公开直播自动化');
     expect(commands).toContain('state save');
   });

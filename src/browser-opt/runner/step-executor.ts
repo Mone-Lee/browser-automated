@@ -56,7 +56,6 @@ export async function executeStep(
       logs.push(`auth-state-fallback-retry: 步骤 ${index} 执行前检测到登录页跳转`);
       return executeStep(fallbackAgent, outputDir, index, instruction, {
         ...options,
-        alreadyOpenedUrl: undefined,
       });
     }
 
@@ -67,7 +66,6 @@ export async function executeStep(
       saveAuthenticatedHandoffState(agent, options.authStateSavePath, logs, resumedSnapshot);
       return executeStep(agent, outputDir, index, instruction, {
         ...options,
-        alreadyOpenedUrl: undefined,
       });
     }
     return {
@@ -144,7 +142,6 @@ export async function executeStep(
         logs.push(`auth-state-fallback-retry: ${verification}`);
         return executeStep(fallbackAgent, outputDir, index, instruction, {
           ...options,
-          alreadyOpenedUrl: undefined,
         });
       }
     }
@@ -179,7 +176,6 @@ export async function executeStep(
       saveAuthenticatedHandoffState(agent, options.authStateSavePath, logs, resumedSnapshot);
       return executeStep(agent, outputDir, index, instruction, {
         ...options,
-        alreadyOpenedUrl: undefined,
       });
     }
   }
@@ -279,7 +275,6 @@ export async function executeStep(
         logs.push(`auth-state-fallback-retry: 步骤 ${index} 验证时检测到登录页跳转`);
         return executeStep(fallbackAgent, outputDir, index, instruction, {
           ...options,
-          alreadyOpenedUrl: undefined,
         });
       }
       const handoff = triggerLoginHandoff(agent, logs, `步骤 ${index} 验证时检测到登录页跳转`);
@@ -289,7 +284,6 @@ export async function executeStep(
         saveAuthenticatedHandoffState(agent, options.authStateSavePath, logs, resumedSnapshot);
         return executeStep(agent, outputDir, index, instruction, {
           ...options,
-          alreadyOpenedUrl: undefined,
         });
       }
       return {

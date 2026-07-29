@@ -319,6 +319,122 @@ describe('BrowserOptRunner', () => {
     expect(result.report.logs.join('\n')).toContain('auth-state-fallback: state 登录态疑似失效，改用 profile Default 重新导入。');
   });
 
+  it('uses the current state window for interactive login handoff instead of opening a profile fallback', async () => {
+    const outputDir = makeTempDir();
+    const authStatePath = path.join(makeTempDir(), 'auth-state.json');
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('登录远方的梦想直播平台', { e1: { role: 'textbox', name: '请输入手机号' } }),
+        snapshotJson('创建直播页', { e2: { role: 'textbox', name: '直播间名称' } }),
+        snapshotJson('before visit after resume', { e2: { role: 'textbox', name: '直播间名称' } }),
+        snapshotJson('after visit after resume', { e2: { role: 'textbox', name: '直播间名称' } }),
+        snapshotJson('before input', { e2: { role: 'textbox', name: '直播间名称' } }),
+        snapshotJson('after 安选公开直播自动化', { e2: { role: 'textbox', name: '直播间名称' } }),
+      ],
+    });
+    const capturedOptions: AgentOptions[] = [];
+    const waitForUserResume = vi.fn(async () => {});
+    const runner = new BrowserOptRunner(makeFactory(agent, capturedOptions));
+
+    const result = await runner.run('执行创建安选公开直播流程：\n1. 访问 https://test-live.ifengqun.com/live/create?time=2\n2. 直播间名称输入“安选公开直播自动化”', {
+      outputDir,
+      statePath: authStatePath,
+      authStateSavePath: authStatePath,
+      authStateFallbackProfile: 'Default',
+      handoff: {
+        waitForUserResume,
+      },
+    });
+
+    expect(result.passed).toBe(true);
+    expect(capturedOptions).toHaveLength(1);
+    expect(capturedOptions[0]).toEqual(expect.objectContaining({ statePath: authStatePath }));
+    expect((agent.close as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect((agent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((agent.handoff as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((agent.resume as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect(waitForUserResume).toHaveBeenCalledTimes(1);
+    expect(result.report.logs.join('\n')).not.toContain('auth-state-fallback');
+    expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e2', '安选公开直播自动化');
+  });
+
+  it('closes the invalid state window and keeps the profile candidate when it remains blank', async () => {
+    const outputDir = makeTempDir();
+    const authStatePath = path.join(makeTempDir(), 'auth-state.json');
+    const originalAgent = buildAgent({
+      snapshots: [
+        snapshotJson('登录远方的梦想直播平台', { e1: { role: 'textbox', name: '请输入手机号' } }),
+      ],
+      getUrl: () => 'https://test-live.ifengqun.com/login',
+    });
+    const blankSnapshot = {
+      raw: JSON.stringify({ success: true, data: { origin: 'about:blank', refs: {}, snapshot: '(no interactive elements)' } }),
+      data: { success: true, data: { origin: 'about:blank', refs: {}, snapshot: '(no interactive elements)' } },
+    };
+    const fallbackAgent = buildAgent({
+      snapshots: Array.from({ length: 12 }, () => blankSnapshot),
+      getUrl: () => 'about:blank',
+      getTabs: () => [
+        { active: true, tabId: 't1', title: 'about:blank', type: 'page', url: 'about:blank' },
+      ],
+    });
+    const agents = [originalAgent, fallbackAgent];
+    const runner = new BrowserOptRunner(() => agents.shift() ?? fallbackAgent);
+
+    const result = await runner.run('测试 https://test-live.ifengqun.com/live/create?time=2。\n\n目标：\n1. 验证页面包含 "创建直播"。', {
+      outputDir,
+      statePath: authStatePath,
+      authStateSavePath: authStatePath,
+      authStateFallbackProfile: 'Default',
+    });
+
+    expect(result.report.status).toBe('FAIL');
+    expect((originalAgent.close as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((originalAgent.handoff as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect((fallbackAgent.close as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect((fallbackAgent.handoff as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(result.report.screenshots).toEqual([
+      path.join(result.report.outputDir, '00-open.png'),
+      path.join(result.report.outputDir, '00-profile-fallback.png'),
+      path.join(result.report.outputDir, '01-before.png'),
+      path.join(result.report.outputDir, '01-after.png'),
+    ]);
+    expect(result.report.logs.join('\n')).toContain(
+      'auth-state-fallback-blank: profile 候选页停留在 about:blank，保留候选窗口供排查。',
+    );
+  });
+
+  it('waits for handoff in the profile candidate when the candidate opens the login page', async () => {
+    const outputDir = makeTempDir();
+    const authStatePath = path.join(makeTempDir(), 'auth-state.json');
+    const loginSnapshot = snapshotJson('登录远方的梦想直播平台', {
+      e1: { role: 'textbox', name: '请输入手机号' },
+    });
+    const originalAgent = buildAgent({
+      snapshots: [loginSnapshot],
+      getUrl: () => 'https://test-live.ifengqun.com/login',
+    });
+    const fallbackAgent = buildAgent({
+      snapshots: [loginSnapshot],
+      getUrl: () => 'https://test-live.ifengqun.com/login',
+    });
+    const agents = [originalAgent, fallbackAgent];
+    const runner = new BrowserOptRunner(() => agents.shift() ?? fallbackAgent);
+
+    const result = await runner.run('测试 https://test-live.ifengqun.com/live/create?time=2。\n\n目标：\n1. 验证页面包含 "创建直播"。', {
+      outputDir,
+      statePath: authStatePath,
+      authStateSavePath: authStatePath,
+      authStateFallbackProfile: 'Default',
+    });
+
+    expect(result.report.status).toBe('HANDOFF');
+    expect((originalAgent.close as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((originalAgent.handoff as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect((fallbackAgent.close as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect((fallbackAgent.handoff as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+  });
+
   it('executes field input steps with deterministic fill commands by default', async () => {
     const outputDir = makeTempDir();
     const agent = buildAgent({
@@ -1510,7 +1626,7 @@ describe('BrowserOptRunner', () => {
     expect((agent.stateSave as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(authStateSavePath);
     expect(result.report.logs.findIndex((log) => log.startsWith('auth-state-save:')))
       .toBeLessThan(result.report.logs.findIndex((log) => log.startsWith('resume-snapshot:')));
-    expect((agent.open as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(2, 'https://test-live.ifengqun.com/live/create?time=2');
+    expect((agent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
     expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e2', '安选公开直播自动化');
   });
 

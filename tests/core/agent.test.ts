@@ -527,11 +527,10 @@ describe('BrowserAgent', () => {
       expect(output).toContain('RESUME');
     });
 
-    it('falls back to a headed browser when handoff is unsupported', () => {
+    it('falls back to the live viewport without reopening the page when handoff is unsupported', () => {
       mockSpawnSync
         .mockReturnValueOnce(makeErrorResult('Unknown command: handoff'))
         .mockReturnValueOnce(makeOkResult('https://example.com/login\n'))
-        .mockReturnValueOnce(makeOkResult('opened headed browser'))
         .mockReturnValueOnce(makeOkResult('Dashboard started at http://localhost:4848'))
         .mockReturnValueOnce(makeOkResult('Streaming enabled on ws://127.0.0.1:61898'))
         .mockReturnValueOnce(makeOkResult('Streaming disabled'))
@@ -555,40 +554,30 @@ describe('BrowserAgent', () => {
       expect(mockSpawnSync).toHaveBeenNthCalledWith(
         3,
         'agent-browser',
-        [
-          '--session',
-          'test-session',
-          '--headed',
-          '--args',
-          '--disable-session-crashed-bubble,--no-first-run,--no-default-browser-check',
-          'open',
-          'https://example.com/login',
-        ],
+        ['dashboard', 'start', '--port', '4848'],
         expect.objectContaining({ encoding: 'utf-8' }),
       );
       expect(mockSpawnSync).toHaveBeenNthCalledWith(
         4,
         'agent-browser',
-        ['dashboard', 'start', '--port', '4848'],
+        ['--session', 'test-session', 'stream', 'status'],
         expect.objectContaining({ encoding: 'utf-8' }),
       );
       expect(mockSpawnSync).toHaveBeenNthCalledWith(
         5,
         'agent-browser',
-        ['--session', 'test-session', 'stream', 'status'],
+        ['--session', 'test-session', 'stream', 'disable'],
         expect.objectContaining({ encoding: 'utf-8' }),
       );
       expect(mockSpawnSync).toHaveBeenNthCalledWith(
         6,
         'agent-browser',
-        ['--session', 'test-session', 'stream', 'disable'],
-        expect.objectContaining({ encoding: 'utf-8' }),
-      );
-      expect(mockSpawnSync).toHaveBeenNthCalledWith(
-        7,
-        'agent-browser',
         ['--session', 'test-session', 'stream', 'enable', '--port', '9223'],
         expect.objectContaining({ encoding: 'utf-8' }),
+      );
+      expect(mockSpawnSync).toHaveBeenCalledTimes(6);
+      expect(mockSpawnSync.mock.calls.map((call) => call[1])).not.toContainEqual(
+        expect.arrayContaining(['--headed', 'open', 'https://example.com/login']),
       );
       expect(output).toContain('HANDOFF_FALLBACK');
     });

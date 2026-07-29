@@ -64,9 +64,9 @@ export class BrowserOptRunner {
     const screenshots: string[] = [];
     const stepResults: BrowserOptStepResult[] = [];
     let handoffTriggered = false;
-    let initialOpenCanBeReused = true;
     let fatalError: string | undefined;
     let authStateFallbackUsed = false;
+    const allowAuthStateFallback = !options.handoff?.waitForUserResume;
     let agent = this.agentFactory({
       sessionId: options.sessionId,
       profile: options.profile,
@@ -103,14 +103,17 @@ export class BrowserOptRunner {
        */
       const retryAuthStateFallback = (): BrowserAgent | null => {
         const canFallbackAuthState = options.statePath && options.authStateFallbackProfile;
-        if (!canFallbackAuthState || authStateFallbackUsed) {
+        if (!allowAuthStateFallback || !canFallbackAuthState || authStateFallbackUsed) {
           return null;
         }
 
         authStateFallbackUsed = true;
         logs.push(`auth-state-fallback: state 登录态疑似失效，改用 profile ${options.authStateFallbackProfile} 重新导入。`);
-        agent.close();
-        agent = this.agentFactory({
+        const previousAgent = agent;
+        const fallbackSnapshotPath = path.join(outputDir, '00-profile-fallback.snapshot.json');
+        const fallbackScreenshotPath = path.join(outputDir, '00-profile-fallback.png');
+        previousAgent.close();
+        const fallbackAgent = this.agentFactory({
           profile: options.authStateFallbackProfile,
           sessionName: options.sessionName,
           reuseRunningBrowser: options.reuseRunningBrowser ?? false,
@@ -118,23 +121,35 @@ export class BrowserOptRunner {
           openLiveDashboard: false,
           timeout: options.timeout,
         });
-        logs.push(`fallback-open: ${url}`);
-        agent.open(url);
-        openSnapshot = captureSettledSnapshot(agent, openSnapshotPath, logs, {
-          reloadAfterBlank: true,
-          targetUrl: url,
-        });
-        agent.screenshot(openScreenshotPath);
-        logs.push(`fallback-snapshot: ${openSnapshotPath}`);
-        logs.push(`fallback-screenshot: ${openScreenshotPath}`);
-        logs.push(`fallback-page-state: ${summarizeSnapshot(openSnapshot)}`);
-        if (isAboutBlankOpen(agent, openSnapshot)) {
-          throw new Error('浏览器页面未成功打开：profile 回退后仍停留在 about:blank。');
+        agent = fallbackAgent;
+
+        try {
+          logs.push(`fallback-open: ${url}`);
+          fallbackAgent.open(url);
+          const fallbackSnapshot = captureSettledSnapshot(fallbackAgent, fallbackSnapshotPath, logs, {
+            reloadAfterBlank: true,
+            targetUrl: url,
+          });
+          fallbackAgent.screenshot(fallbackScreenshotPath);
+          screenshots.push(fallbackScreenshotPath);
+          logs.push(`fallback-snapshot: ${fallbackSnapshotPath}`);
+          logs.push(`fallback-screenshot: ${fallbackScreenshotPath}`);
+          logs.push(`fallback-page-state: ${summarizeSnapshot(fallbackSnapshot)}`);
+          openSnapshot = fallbackSnapshot;
+          if (isAboutBlankOpen(fallbackAgent, fallbackSnapshot)) {
+            logs.push('auth-state-fallback-blank: profile 候选页停留在 about:blank，保留候选窗口供排查。');
+            return fallbackAgent;
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          logs.push(`auth-state-fallback-failed: profile 候选启动失败，保留候选窗口供排查：${message}`);
+          return fallbackAgent;
         }
+
         if (!shouldTriggerLoginHandoff(flow, url, openSnapshot) && options.authStateSavePath) {
           saveAuthState(agent, options.authStateSavePath, logs);
         }
-        return shouldTriggerLoginHandoff(flow, url, openSnapshot) ? null : agent;
+        return agent;
       };
 
       if (shouldTriggerLoginHandoff(flow, url, openSnapshot)) {
@@ -147,7 +162,6 @@ export class BrowserOptRunner {
         const resumed = await resumeFromHandoff(agent, logs, handoff, options.handoff);
         if (resumed) {
           handoffTriggered = false;
-          initialOpenCanBeReused = false;
           const resumedSnapshot = captureSettledSnapshot(agent, openSnapshotPath, logs);
           agent.screenshot(openScreenshotPath);
           saveAuthenticatedHandoffState(agent, options.authStateSavePath, logs, resumedSnapshot);
@@ -160,7 +174,7 @@ export class BrowserOptRunner {
       for (let index = 0; index < steps.length && !handoffTriggered; index++) {
         const result = await executeStep(agent, outputDir, index + 1, steps[index], {
           useAgentChat: options.useAgentChat ?? false,
-          alreadyOpenedUrl: index === 0 && initialOpenCanBeReused ? url : undefined,
+          alreadyOpenedUrl: index === 0 ? url : undefined,
           authStateSavePath: options.authStateSavePath,
           retryAuthStateFallback,
           handoff: options.handoff,

@@ -191,8 +191,9 @@ Auth state reuse policy:
 
 - `browser-opt` first checks its saved auth state under `.browser-automated/states/`.
 - If a default state file exists, it loads that state first, so only cookies/storage are reused and prior Chrome tabs are not restored.
-- If the default state opens on a login screen, or the page asynchronously redirects to login before/during a step, `browser-opt` falls back to the selected Chrome profile once and saves refreshed cookies/storage back to the default state file.
+- If the default state opens on a login screen during an interactive CLI run, keep the same command session alive and wait for the user to complete handoff; do not start a second `browser-opt run` while the first command is waiting.
 - If the execution environment cannot keep stdin attached and the command exits at handoff, rerun the exact same saved workflow command only after the user has completed login. The CLI now uses a stable `--session` for the same workflow/URL so the rerun can reuse the prior browser session instead of creating a random new one.
+- In non-interactive runs without a handoff wait hook, if the default state opens on a login screen, or the page asynchronously redirects to login before/during a step, `browser-opt` falls back to the selected Chrome profile once and saves refreshed cookies/storage back to the default state file.
 - If no default state file exists, it starts once with `--profile Default` and saves cookies/storage for later runs.
 - Pass `--profile <name>` to choose a different Chrome profile for first import and default-state fallback.
 - Pass `--state <path>` to use a custom state file without automatic profile fallback.

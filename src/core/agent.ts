@@ -448,13 +448,12 @@ export class BrowserAgent {
         ].join('\n');
       }
 
-      const openOutput = this.run(['open', url], { headed: true }).trim();
+      this.ensureLiveViewport();
       return [
-        'HANDOFF_FALLBACK: opened a visible browser window for manual interaction.',
+        'HANDOFF_FALLBACK: enabled the live viewport for manual interaction without reopening the page.',
         `Session: ${this.sessionId}`,
         `URL: ${url}`,
         `Reason: ${message}`,
-        openOutput,
       ]
         .filter(Boolean)
         .join('\n');
