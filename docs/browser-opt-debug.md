@@ -88,6 +88,20 @@ Skill 会先匹配当前项目中的 Workflow。名称精确命中或唯一候�
 相似但不够强的候选会先展示并等待选择，最多展示最接近的三个；未命中时展示当前可用流程，
 不会把缺少 URL 的短句误当成即时流程执行。
 
+## 登录态与 handoff
+
+`browser-opt` 默认优先使用当前项目 `.browser-automated/states/` 下保存的 state 文件，只复用 cookies/storage，不恢复历史 Chrome 标签页。首次没有 state 时，才用 `--profile Default` 导入登录态，并在流程结束后保存 state。
+
+当已有 state 打开目标页面后被拦到登录页时，交互式 CLI 不会立刻新开 profile fallback 窗口，而是保留当前 session 进入 handoff：
+
+1. 在可见浏览器里手动完成登录、验证码、OAuth 或 MFA。
+2. 回到终端输入 `done`、`ok`、`继续` 或 `完成`。
+3. `browser-opt` 恢复同一 session，等待页面离开登录态后保存新的 state，再继续后续步骤。
+
+如果 Codex 或其他执行环境不能保持 stdin，命令可能在 handoff 处以 `HANDOFF` 退出。此时不要马上启动第二个流程去抢同一登录窗口；先在已经打开的浏览器里完成登录，再重跑完全相同的保存流程命令。CLI 会为同一项目和同一 workflow/流程生成稳定 `--session`，重跑时可以继续使用之前的浏览器 session。需要手动固定会话时，可以显式传 `--session <id>`。
+
+只有在非交互运行且没有 handoff 等待逻辑时，默认 state 失效才会回退到 `--profile <name>` 对应的 Chrome profile，重新导入登录态并刷新 state。显式传 `--state <path>` 表示使用隔离 state，不会自动回退到 profile。
+
 ## 修改后的生效规则
 
 如果已经执行过 `npm link`，当前项目继续修改 CLI 或 Skill 后，生效规则如下：
@@ -130,6 +144,8 @@ node dist/cli/browser-opt.js "测试 https://example.com。
 
 这个命令会真正调用 `agent-browser` CLI，执行浏览器打开、snapshot、确定性动作、截图和报告生成。`browser-opt` 默认显示并保留真实浏览器窗口，便于观察操作流程和执行后的页面状态，但不会打开 agent-browser 的 `http://localhost:4848` 截图面板；如需无头执行，可额外传 `--no-live-viewport`。如需旧的 `agent-browser chat` 路径，可额外传 `--agent-chat`，但这可能需要 `AI_GATEWAY_API_KEY`。
 
+测试受保护页面时，如果终端提示 `Browser Opt Handoff`，请在当前可见浏览器中完成登录，然后在同一个终端输入 `done` 继续。恢复后会继续使用同一 session，不会重新打开目标页面覆盖用户刚完成的登录状态。
+
 执行后检查产物：
 
 ```bash
@@ -162,3 +178,4 @@ ls ./artifacts/browser-opt/smoke
 - 直接跑 `node dist/cli/browser-opt.js ...`：触发真实 `agent-browser`，但不测试 Codex Skill 自动发现。
 - 在 Codex 中按 `skills/browser-opt/SKILL.md` 要求执行：测试 Agent 遵守 Skill 文档以及真实 `agent-browser` 调用。
 - 重开 Codex 后输入 `/browser-opt ...`：测试完整的 Skill 发现、触发、执行链路。
+- 登录态失效并看到 handoff：优先在当前浏览器和当前命令里完成登录后继续；如果命令已经退出，再完成登录并重跑同一个保存流程命令。

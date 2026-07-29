@@ -283,7 +283,8 @@ interface BrowserOptAuthState {
  * 登录态复用策略：
  * 1. 默认 state 存在时优先加载，避免每次从完整 Chrome profile 启动。
  * 2. 默认 state 不存在时用 profile 首次导入，并把 cookies/storage 保存成 state。
- * 3. 只有自动选择的默认 state 才允许后续 profile fallback；显式 --state 保持隔离语义。
+ * 3. 默认 state 失效时交互 CLI 优先 handoff；非交互 fallback 只允许自动选择的默认 state 使用 profile。
+ * 4. 显式 --state 保持隔离语义，不自动回退到 profile。
  */
 function resolveBrowserOptAuthState(flags: Record<string, string | boolean>, profile: string): BrowserOptAuthState {
   const configuredStatePath = resolveStatePath(flags);
