@@ -62,6 +62,7 @@ for (let i = 0; i < args.length; i++) {
     break;
   }
 }
+
 const command = args[commandIndex];
 if (command === 'open') {
   if (process.env.AGENT_BROWSER_STATE_OPEN_MARKER) {
@@ -115,6 +116,13 @@ if (command === 'open') {
   );
   fs.chmodSync(binPath, 0o755);
   return dir;
+}
+
+function extractLoggedSessions(commands: string): string[] {
+  return commands
+    .split('\n')
+    .map((command) => command.match(/(?:^|\s)--session\s+(\S+)/)?.[1])
+    .filter((session): session is string => Boolean(session));
 }
 
 describe('browser-opt CLI', () => {
@@ -179,6 +187,56 @@ describe('browser-opt CLI', () => {
     ]);
     expect(result.status).toBe(0);
     expect(result.stdout.trim()).toBe('执行成功');
+  });
+
+  it('reuses a stable browser session when rerunning the same saved Workflow', () => {
+    const workflowDir = makeTempDir();
+    const firstOutputDir = makeTempDir();
+    const secondOutputDir = makeTempDir();
+    const firstCommandLog = path.join(makeTempDir(), 'first-agent-browser.log');
+    const secondCommandLog = path.join(makeTempDir(), 'second-agent-browser.log');
+    const stateDir = makeTempDir();
+    fs.writeFileSync(path.join(stateDir, 'browser-opt-default.json'), JSON.stringify({ cookies: [], origins: [] }));
+    const saveResult = runCli([
+      'browser-opt',
+      'save',
+      '稳定会话流程',
+      '--flow',
+      '测试 https://example.com。\\n1. 验证页面包含 "Example"。',
+      '--workflow-dir',
+      workflowDir,
+    ]);
+    expect(saveResult.status).toBe(0);
+
+    const first = runCli([
+      'browser-opt',
+      'run',
+      '--workflow-id',
+      '稳定会话流程',
+      '--workflow-dir',
+      workflowDir,
+      '--output-dir',
+      firstOutputDir,
+    ], { AGENT_BROWSER_LOG: firstCommandLog, BROWSER_OPT_AUTH_STATE_DIR: stateDir });
+    const second = runCli([
+      'browser-opt',
+      'run',
+      '--workflow-id',
+      '稳定会话流程',
+      '--workflow-dir',
+      workflowDir,
+      '--output-dir',
+      secondOutputDir,
+    ], { AGENT_BROWSER_LOG: secondCommandLog, BROWSER_OPT_AUTH_STATE_DIR: stateDir });
+
+    expect(first.status).toBe(0);
+    expect(second.status).toBe(0);
+    const firstSessions = extractLoggedSessions(fs.readFileSync(firstCommandLog, 'utf-8'));
+    const secondSessions = extractLoggedSessions(fs.readFileSync(secondCommandLog, 'utf-8'));
+    expect(new Set(firstSessions).size).toBe(1);
+    expect(new Set(secondSessions).size).toBe(1);
+    expect(firstSessions[0]).toBe(secondSessions[0]);
+    expect(firstSessions[0]).toMatch(/^browser-opt-[a-f0-9]{16}$/);
   });
 
   it('runs a selected saved Workflow by stable ID', () => {

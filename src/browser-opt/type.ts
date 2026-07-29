@@ -46,6 +46,7 @@ export interface BrowserOptRunResult {
 }
 
 export interface BrowserOptRunnerOptions {
+  sessionId?: string;
   profile?: string;
   sessionName?: string;
   statePath?: string;

@@ -7,6 +7,7 @@ import {
   browserOptTemplate,
   extractBrowserOptUrl,
 } from '../../browser-opt/runner/index.js';
+import { createHash } from 'node:crypto';
 import {
   findBrowserOptWorkflowById,
   loadBrowserOptWorkflows,
@@ -76,6 +77,7 @@ export async function cmdBrowserOpt(args: string[]): Promise<void> {
 async function executeBrowserOptFlow(
   text: string,
   flags: Record<string, string | boolean>,
+  identity?: string,
 ): Promise<void> {
   const liveViewport = resolveLiveViewport(flags);
   const requestedProfile = resolveProfile(flags) ?? DEFAULT_BROWSER_PROFILE;
@@ -85,6 +87,7 @@ async function executeBrowserOptFlow(
 
   const runner = new BrowserOptRunner();
   const runnerOptions: BrowserOptRunnerOptions = {
+    sessionId: resolveBrowserOptSessionId(flags, identity ?? text),
     profile: authState.profile,
     statePath: authState.statePath,
     authStateSavePath: authState.authStateSavePath,
@@ -175,7 +178,7 @@ async function runWorkflowCommand(query: string, flags: Record<string, string | 
       printAvailableWorkflows(loaded.workflows);
       process.exit(BROWSER_OPT_EXIT_CODE_NOT_FOUND);
     }
-    await executeBrowserOptFlow(renderBrowserOptWorkflowFlow(workflow), flags);
+    await executeBrowserOptFlow(renderBrowserOptWorkflowFlow(workflow), flags, workflow.id);
     return;
   }
   if (!query.trim()) {
@@ -192,7 +195,7 @@ async function runWorkflowCommand(query: string, flags: Record<string, string | 
     printWorkflowMatch(result);
     process.exit(BROWSER_OPT_EXIT_CODE_NOT_FOUND);
   }
-  await executeBrowserOptFlow(renderBrowserOptWorkflowFlow(result.matched.workflow), flags);
+  await executeBrowserOptFlow(renderBrowserOptWorkflowFlow(result.matched.workflow), flags, result.matched.workflow.id);
 }
 
 /** JSON 输出收敛为候选元数据，避免匹配阶段把完整自动化正文回显给调用方。 */
@@ -304,6 +307,17 @@ function defaultBrowserOptStatePath(profile: string): string {
   const stateDir = process.env.BROWSER_OPT_AUTH_STATE_DIR || path.resolve(process.cwd(), DEFAULT_AUTH_STATE_DIR);
   const stateName = profile.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'default';
   return path.join(stateDir, `browser-opt-${stateName}.json`);
+}
+
+/** 为同一项目里的同一流程生成稳定 session，避免 handoff 后重跑时新建随机浏览器窗口。 */
+function resolveBrowserOptSessionId(flags: Record<string, string | boolean>, identity: string): string {
+  const configuredSession = getStringFlag(flags, 'session')?.trim();
+  if (configuredSession) {
+    return configuredSession;
+  }
+
+  const seed = `${process.cwd()}\n${identity}`;
+  return `browser-opt-${createHash('sha256').update(seed).digest('hex').slice(0, 16)}`;
 }
 
 /** 读取终端输入，供 handoff 暂停点等待用户确认继续。 */

@@ -68,6 +68,7 @@ export class BrowserOptRunner {
     let fatalError: string | undefined;
     let authStateFallbackUsed = false;
     let agent = this.agentFactory({
+      sessionId: options.sessionId,
       profile: options.profile,
       sessionName: options.sessionName,
       statePath: options.statePath,
