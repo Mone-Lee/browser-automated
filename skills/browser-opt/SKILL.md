@@ -120,17 +120,40 @@ Do not treat it as a new one-shot flow. First run:
 Handle the JSON result as follows:
 
 - `matched`: run `/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js run --workflow-id "<matched.id>"`.
-- `ambiguous`: show the returned candidates, at most three, and ask the user to
-  choose one, even when there is only one weakly similar candidate. Do not open a
-  browser before the choice. Then run the selected ID.
+- `ambiguous`: do not rely on the CLI's human-readable stdout as the user-facing
+  choice list, and do not ask through a modal/input tool that may render Markdown
+  as plain text. Parse `match --json`, then ask in a normal assistant message.
+  Show the returned candidates, at most three, numbered from 1. Render each
+  candidate name itself as a Markdown file link using `filePath`, such as
+  `[创建安选公开直播流程](</absolute/path/创建安选公开直播流程.json>)`. Do not show a
+  bare `file://` URL. Ask the user to reply with the number (for example `1`,
+  `2`, or `3`), even when there is only one weakly similar candidate. Do not
+  open a browser before the choice. Then map the selected number back to the
+  candidate ID and run it. In GitHub Copilot Chat, local Markdown file links may
+  render as plain text; include `displayPath` in backticks after the link so the
+  path remains visible and can be opened through VS Code's file detection.
 - `not-found`: tell the user no saved workflow matched and show the returned
-  available workflow names. Ask for a more specific request or a full flow with URL.
+  available workflow names as Markdown file links using `filePath` when present.
+  Ask for a more specific request or a full flow with URL.
 - Warnings describe invalid workflow files that were skipped. Report them without
   blocking valid candidates.
 
 Use `--workflow-dir` consistently on both `match` and `run` when the user selects
 a custom directory. Use `/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js list --json` when
 the user asks to see all saved workflows.
+
+Example ambiguous response format:
+
+```markdown
+匹配结果是 `ambiguous`，请回复要执行的流程编号：
+
+1. [创建安选公开直播（测试环境）](</Users/lee/project/.browser-opt/workflows/创建安选公开直播（测试环境）.json>)
+   `.browser-opt/workflows/创建安选公开直播（测试环境）.json`
+2. [创建安选私域直播](</Users/lee/project/.browser-opt/workflows/创建安选私域直播.json>)
+   `.browser-opt/workflows/创建安选私域直播.json`
+
+请回复数字，例如 `1`。
+```
 
 ## Trigger
 
