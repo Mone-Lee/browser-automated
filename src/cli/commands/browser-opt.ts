@@ -200,6 +200,8 @@ function toWorkflowMatchOutput(result: BrowserOptWorkflowMatchResult, warnings: 
   const compact = (workflow: BrowserOptWorkflow, score?: number) => ({
     id: workflow.id,
     name: workflow.name,
+    ...(workflow.filePath ? { filePath: workflow.filePath } : {}),
+    ...(workflow.filePath ? { displayPath: formatWorkflowDisplayPath(workflow.filePath) } : {}),
     ...(score === undefined ? {} : { score }),
   });
   return {
@@ -219,9 +221,9 @@ function printWorkflowMatch(result: BrowserOptWorkflowMatchResult): void {
   }
   if (result.status === 'ambiguous') {
     const label = result.candidates.length > 1 ? '找到多个相似 Workflow' : '找到相似 Workflow';
-    console.log(`${label}，请选择后使用 --workflow-id 执行：`);
+    console.log(`${label}，请选择候选序号，或使用 --workflow-id 执行：`);
     result.candidates.forEach((candidate, index) => {
-      console.log(`  ${index + 1}. ${candidate.workflow.name} [${candidate.workflow.id}]`);
+      console.log(`  ${index + 1}. ${formatWorkflowLink(candidate.workflow)} [${candidate.workflow.id}]`);
     });
     return;
   }
@@ -236,7 +238,7 @@ function printAvailableWorkflows(workflows: BrowserOptWorkflow[]): void {
   }
   console.log('可用 Workflow：');
   for (const workflow of workflows) {
-    console.log(`  - ${workflow.name} [${workflow.id}]`);
+    console.log(`  - ${formatWorkflowLink(workflow)} [${workflow.id}]`);
   }
 }
 
@@ -244,6 +246,27 @@ function printWorkflowWarnings(warnings: string[]): void {
   for (const warning of warnings) {
     console.error(`跳过无效 Workflow：${warning}`);
   }
+}
+
+/** 在支持 Markdown 的界面里把候选流程渲染为可点击文件链接，终端里仍保留可读名称。 */
+function formatWorkflowLink(workflow: BrowserOptWorkflow): string {
+  if (!workflow.filePath) {
+    return workflow.name;
+  }
+  return `[${escapeMarkdownLinkText(workflow.name)}](<${workflow.filePath}>)`;
+}
+
+function escapeMarkdownLinkText(text: string): string {
+  return text.replace(/([\\\[\]])/g, '\\$1');
+}
+
+/** 优先给调用方返回工作区相对路径，便于 VS Code/Copilot 识别为本地文件引用。 */
+function formatWorkflowDisplayPath(filePath: string): string {
+  const relativePath = path.relative(process.cwd(), filePath);
+  if (relativePath && !relativePath.startsWith('..') && !path.isAbsolute(relativePath)) {
+    return relativePath;
+  }
+  return filePath;
 }
 
 interface BrowserOptAuthState {

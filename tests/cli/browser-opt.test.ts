@@ -248,8 +248,43 @@ describe('browser-opt CLI', () => {
 
     expect(result.status).toBe(3);
     expect(result.stdout).toContain('找到多个相似 Workflow');
+    expect(result.stdout).toContain(`[创建安选公开直播流程](<${path.join(workflowDir, '创建安选公开直播流程.json')}>)`);
     expect((result.stdout.match(/^  \d\./gm) ?? [])).toHaveLength(3);
     expect(fs.existsSync(commandLog)).toBe(false);
+  });
+
+  it('includes workflow file paths in machine-readable match output', () => {
+    const workflowDir = makeTempDir();
+    const saved = runCli([
+      'browser-opt',
+      'save',
+      '创建安选公开直播流程',
+      '--flow',
+      '测试 https://example.com。\\n1. 验证页面包含 "Example"。',
+      '--workflow-dir',
+      workflowDir,
+    ]);
+    expect(saved.status).toBe(0);
+
+    const result = runCli([
+      'browser-opt',
+      'match',
+      '创建安选公开直播流程',
+      '--workflow-dir',
+      workflowDir,
+      '--json',
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      status: 'matched',
+      matched: {
+        id: '创建安选公开直播流程',
+        name: '创建安选公开直播流程',
+        filePath: path.join(workflowDir, '创建安选公开直播流程.json'),
+        displayPath: path.join(workflowDir, '创建安选公开直播流程.json'),
+      },
+    });
   });
 
   it('rejects overwriting a saved Workflow unless --force is used', () => {
