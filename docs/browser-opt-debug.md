@@ -90,7 +90,7 @@ Skill 会先匹配当前项目中的 Workflow。名称精确命中或唯一候�
 
 ## 登录态与 handoff
 
-`browser-opt` 默认优先使用当前项目 `.browser-automated/states/` 下保存的 state 文件，只复用 cookies/storage，不恢复历史 Chrome 标签页。首次没有 state 时，才用 `--profile Default` 导入登录态，并在流程结束后保存 state。
+`browser-opt` 默认优先使用当前项目 `.browser-opt/states/` 下保存的 state 文件，只复用 cookies/storage，不恢复历史 Chrome 标签页。首次没有 state 时，才用 `--profile Default` 导入登录态，并在流程结束后保存 state。
 
 当已有 state 打开目标页面后被拦到登录页时，交互式 CLI 不会立刻新开 profile fallback 窗口，而是保留当前 session 进入 handoff：
 
@@ -139,7 +139,7 @@ node dist/cli/browser-opt.js "测试 https://example.com。
 
 目标：
 1. 打开首页。
-2. 验证页面包含 \"Example\"。" --output-dir ./artifacts/browser-opt/smoke
+2. 验证页面包含 \"Example\"。" --output-dir ./.browser-opt/artifacts/smoke
 ```
 
 这个命令会真正调用 `agent-browser` CLI，执行浏览器打开、snapshot、确定性动作、截图和报告生成。`browser-opt` 默认显示并保留真实浏览器窗口，便于观察操作流程和执行后的页面状态，但不会打开 agent-browser 的 `http://localhost:4848` 截图面板；如需无头执行，可额外传 `--no-live-viewport`。如需旧的 `agent-browser chat` 路径，可额外传 `--agent-chat`，但这可能需要 `AI_GATEWAY_API_KEY`。
@@ -149,7 +149,7 @@ node dist/cli/browser-opt.js "测试 https://example.com。
 执行后检查产物：
 
 ```bash
-ls ./artifacts/browser-opt/smoke
+ls ./.browser-opt/artifacts/smoke
 ```
 
 预期能看到 `report.json`、`report.md`、截图和 snapshot 文件。

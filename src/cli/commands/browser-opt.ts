@@ -40,7 +40,7 @@ const BROWSER_OPT_EXIT_CODE_HANDOFF = 2;
 const BROWSER_OPT_EXIT_CODE_AMBIGUOUS = 3;
 const BROWSER_OPT_EXIT_CODE_NOT_FOUND = 4;
 const DEFAULT_BROWSER_PROFILE = 'Default';
-const DEFAULT_AUTH_STATE_DIR = '.browser-automated/states';
+const DEFAULT_AUTH_STATE_DIR = '.browser-opt/states';
 
 export async function cmdBrowserOpt(args: string[]): Promise<void> {
   const parsed = parseCliArgs(args);

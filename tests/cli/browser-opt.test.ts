@@ -24,16 +24,23 @@ function makeTempDir(): string {
   return dir;
 }
 
-function runCli(args: string[], env: Record<string, string> = {}, input?: string) {
+interface RunCliOptions {
+  cwd?: string;
+  useDefaultAuthStateDir?: boolean;
+}
+
+function runCli(args: string[], env: Record<string, string> = {}, input?: string, options: RunCliOptions = {}) {
   const authStateDir = makeTempDir();
-  return spawnSync('node', ['--import', 'tsx', 'src/cli/index.ts', ...args], {
-    cwd: path.resolve(import.meta.dirname, '../..'),
+  const projectRoot = path.resolve(import.meta.dirname, '../..');
+  const tsxLoaderPath = path.join(projectRoot, 'node_modules/tsx/dist/loader.mjs');
+  return spawnSync('node', ['--import', tsxLoaderPath, path.join(projectRoot, 'src/cli/index.ts'), ...args], {
+    cwd: options.cwd ?? projectRoot,
     encoding: 'utf-8',
     input,
     env: {
       ...process.env,
       AGENT_BROWSER_STATE: '',
-      BROWSER_OPT_AUTH_STATE_DIR: authStateDir,
+      ...(options.useDefaultAuthStateDir ? {} : { BROWSER_OPT_AUTH_STATE_DIR: authStateDir }),
       PATH: `${makeTempAgentBrowserBin()}${path.delimiter}${process.env.PATH ?? ''}`,
       ...env,
     },
@@ -400,6 +407,23 @@ describe('browser-opt CLI', () => {
     expect(commands).not.toContain('auth-import');
     expect(commands).not.toContain('dashboard start');
     expect(fs.readdirSync(outputDir).some((entry) => fs.existsSync(path.join(outputDir, entry, 'report.json')))).toBe(true);
+  });
+
+  it('writes default browser-opt state and artifacts under .browser-opt', () => {
+    const projectDir = makeTempDir();
+    const commandLog = path.join(makeTempDir(), 'agent-browser.log');
+    const result = runCli([
+      'browser-opt',
+      '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。',
+    ], { AGENT_BROWSER_LOG: commandLog }, undefined, { cwd: projectDir, useDefaultAuthStateDir: true });
+
+    const canonicalProjectDir = fs.realpathSync(projectDir);
+    const statePath = path.join(canonicalProjectDir, '.browser-opt', 'states', 'browser-opt-default.json');
+    const artifactsDir = path.join(canonicalProjectDir, '.browser-opt', 'artifacts');
+    expect(result.status).toBe(0);
+    expect(fs.existsSync(statePath)).toBe(true);
+    expect(fs.readdirSync(artifactsDir).some((entry) => fs.existsSync(path.join(artifactsDir, entry, 'report.json')))).toBe(true);
+    expect(fs.readFileSync(commandLog, 'utf-8')).toContain(`state save ${statePath}`);
   });
 
   it('allows overriding the default profile explicitly', () => {

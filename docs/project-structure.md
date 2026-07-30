@@ -38,8 +38,8 @@
 
 产物：
 
-- `artifacts/browser-opt/<run-id>/report.json`
-- `artifacts/browser-opt/<run-id>/report.md`
+- `.browser-opt/artifacts/<run-id>/report.json`
+- `.browser-opt/artifacts/<run-id>/report.md`
 - `*.snapshot.json`
 - `*.png`
 - `run.log`

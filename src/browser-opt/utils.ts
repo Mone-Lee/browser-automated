@@ -12,7 +12,7 @@ import type {
   SnapshotNode,
 } from './type.js';
 
-const DEFAULT_OUTPUT_ROOT = path.join(process.cwd(), 'artifacts', 'browser-opt');
+const DEFAULT_OUTPUT_ROOT = path.join(process.cwd(), '.browser-opt', 'artifacts');
 const URL_RE = /https?:\/\/[^\s。，、，)）"'‘’“”]+/i;
 const QUOTED_VALUE_RE = /["“‘']([^"”’']+)["”’']/;
 const SELECTABLE_VERB_RE = /选择|选中|勾选|勾上|设置为|设置成|切换为|切换成|切到|改为|改成|调整为|调整成|设为|设成|置为|置成|变更为|变更成|变为|变成|select|check|toggle/i;

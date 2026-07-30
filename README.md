@@ -11,7 +11,7 @@
 
 | 能力 | 对外入口 | 主要代码 | 主要产物 |
 | --- | --- | --- | --- |
-| 自然语言入口、确定性执行网页操作 | `browser-opt` | `src/browser-opt/`、`src/core/agent.ts` | `artifacts/browser-opt/<run>/report.{json,md}`、截图、snapshot |
+| 自然语言入口、确定性执行网页操作 | `browser-opt` | `src/browser-opt/`、`src/core/agent.ts` | `.browser-opt/artifacts/<run>/report.{json,md}`、截图、snapshot |
 | 沉淀可复用 Skill / Workflow | `browser-opt save/run`、`skills/browser-opt` | `src/browser-opt/workflow/`、`skills/browser-opt` | `.browser-opt/workflows/*.json` |
 | 生成 E2E 测试代码 | `browser-e2e gen`、`browser-e2e run --auto-generate` | `src/browser-e2e/generate.ts`、`src/browser-e2e/test-reuse/playwright.ts` | `tests/generated/*.spec.ts`、`tests/generated/index.json` |
 | handoff 机制 | `browser-e2e` 执行流程内置 | `src/cli/`、`src/browser-e2e/deterministic.ts`、`src/core/agent.ts` | 同一 session 的用户接管与恢复记录 |
@@ -42,7 +42,7 @@ browser-opt "测试 https://example.com 的搜索功能。
 
 执行成功时只输出 `执行成功`；执行失败时才输出报告路径、日志路径、截图路径和失败步骤。默认模式会把常见访问、输入、点击和验证步骤转成确定性 `agent-browser` 命令；只有显式传 `--agent-chat` 时才使用旧的 `agent-browser chat` 兼容模式。
 
-`browser-opt` 的登录态复用以 state 文件为主：默认会优先加载 `.browser-automated/states/` 下已有 state，避免恢复浏览器标签；没有 state 时才使用 `--profile Default` 首次导入登录态，并在结束时保存 cookies/storage 供下次复用。交互式 CLI 运行中，如果默认 state 打开目标页后进入登录页，或流程开始后被异步鉴权踢回登录页，会在当前浏览器 session 触发 handoff，等待用户完成登录后继续同一条流程并刷新 state；不要在第一个命令还等待 handoff 时再启动第二个 `browser-opt run`。如果执行环境不能保持 stdin，命令在 handoff 处退出，应先在已打开的浏览器里完成登录，再重跑完全相同的保存流程命令；CLI 会为同一项目和同一 workflow/流程生成稳定 `--session`，避免重跑时新开随机浏览器窗口。只有非交互运行且没有 handoff 等待逻辑时，才会回退到对应 Chrome profile 重新导入并刷新默认 state。显式传 `--state <path>` 时表示用户要使用隔离 state，不会自动回退到 profile。`browser-opt` 不使用 focused browser 复用普通 Chrome 登录态，因为普通 Chrome 通常没有开放 CDP 调试端口，容易连到错误的临时浏览器。
+`browser-opt` 的登录态复用以 state 文件为主：默认会优先加载 `.browser-opt/states/` 下已有 state，避免恢复浏览器标签；没有 state 时才使用 `--profile Default` 首次导入登录态，并在结束时保存 cookies/storage 供下次复用。交互式 CLI 运行中，如果默认 state 打开目标页后进入登录页，或流程开始后被异步鉴权踢回登录页，会在当前浏览器 session 触发 handoff，等待用户完成登录后继续同一条流程并刷新 state；不要在第一个命令还等待 handoff 时再启动第二个 `browser-opt run`。如果执行环境不能保持 stdin，命令在 handoff 处退出，应先在已打开的浏览器里完成登录，再重跑完全相同的保存流程命令；CLI 会为同一项目和同一 workflow/流程生成稳定 `--session`，避免重跑时新开随机浏览器窗口。只有非交互运行且没有 handoff 等待逻辑时，才会回退到对应 Chrome profile 重新导入并刷新默认 state。显式传 `--state <path>` 时表示用户要使用隔离 state，不会自动回退到 profile。`browser-opt` 不使用 focused browser 复用普通 Chrome 登录态，因为普通 Chrome 通常没有开放 CDP 调试端口，容易连到错误的临时浏览器。
 
 `browser-opt` 默认显示并保留真实浏览器，便于观察操作流程和执行后的页面状态，但不会打开 agent-browser 的 `http://localhost:4848` 截图面板。
 

@@ -181,15 +181,15 @@ Optional runtime flags:
 
 ```bash
 /Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js "<flow>" --profile Default
-/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js "<flow>" --state ./.browser-automated/states/browser-opt-default.json
+/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js "<flow>" --state ./.browser-opt/states/browser-opt-default.json
 /Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js "<flow>" --no-live-viewport
-/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js "<flow>" --output-dir ./artifacts/browser-opt
+/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js "<flow>" --output-dir ./.browser-opt/artifacts
 /Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js "<flow>" --agent-chat
 ```
 
 Auth state reuse policy:
 
-- `browser-opt` first checks its saved auth state under `.browser-automated/states/`.
+- `browser-opt` first checks its saved auth state under `.browser-opt/states/`.
 - If a default state file exists, it loads that state first, so only cookies/storage are reused and prior Chrome tabs are not restored.
 - If the default state opens on a login screen during an interactive CLI run, keep the same command session alive and wait for the user to complete handoff; do not start a second `browser-opt run` while the first command is waiting.
 - If the execution environment cannot keep stdin attached and the command exits at handoff, rerun the exact same saved workflow command only after the user has completed login. The CLI now uses a stable `--session` for the same workflow/URL so the rerun can reuse the prior browser session instead of creating a random new one.
@@ -203,7 +203,7 @@ It shows and keeps the actual system Chrome browser by default so the user can w
 
 ## Output
 
-The CLI writes an evidence directory under `artifacts/browser-opt/` unless `--output-dir` is provided.
+The CLI writes an evidence directory under `.browser-opt/artifacts/` unless `--output-dir` is provided.
 
 Expected artifacts:
 
