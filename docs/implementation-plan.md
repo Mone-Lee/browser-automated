@@ -74,6 +74,9 @@ LLM 做语义补全与断言生成
 - 自然语言测试运行器。
 - 测试用例生成器。
 - `browser-e2e` Skill。
+- `browser-opt` Skill。
+- `browser-opt` Workflow 保存、加载、匹配、运行能力。
+- Workflow CLI 子命令：`save`、`list`、`match`、`run`。
 - 生成测试索引 `tests/generated/index.json`。
 - Playwright 测试生成目录 `tests/generated/`。
 - 基础 handoff/resume 流程说明与部分测试。
@@ -92,7 +95,8 @@ CLI 是可复用执行能力的主入口，负责参数解析、流程编排、�
 - `browser-e2e <natural-language-case>`：Skill 主入口，负责自然语言整段解析、匹配、执行、生成。
 - `browser-e2e run <url> <instruction>`：执行自然语言 E2E 流程。
 - `browser-e2e gen <url> <instruction>`：生成 Playwright Test。
-- `browser-e2e workflow save/run/list`：沉淀和复用 Workflow。
+- `browser-opt save/list/match/run`：沉淀和复用一次性自然语言 Workflow。
+- `browser-e2e workflow save/run/list`：暂不作为近期主线，E2E 侧优先复用 generated test 索引。
 - `browser-e2e trace inspect/export`：查看和导出 Action Trace。
 - `browser-e2e handoff/resume`：显式触发用户接管与恢复。
 
@@ -104,8 +108,9 @@ Skill 需要支持：
 
 - 识别“执行网页操作”请求。
 - 识别“生成 E2E 测试”请求。
-- 识别“把刚才流程保存为 Skill/Workflow”请求。
-- 优先匹配已有 generated tests 或 workflow。
+- 识别“把流程保存为 Workflow”请求。
+- `browser-opt` 优先匹配已保存 workflow，未命中时执行一次性流程。
+- `browser-e2e` 优先匹配已有 generated tests，未命中时执行或生成测试。
 - 在未命中时调用一次性执行流程。
 - 执行成功后提示或自动触发生成测试。
 
@@ -200,40 +205,47 @@ Agent Browser 打开页面并执行
 
 目标：成功执行过的流程可以被命名、索引、复用。
 
-Workflow 建议结构：
+当前 `browser-opt` Workflow 已落地为项目级 JSON 文件，默认目录为 `.browser-opt/workflows/`。结构保持克制，先服务保存、人工维护和稳定复用：
 
 ```json
 {
-  "id": "login-and-open-dashboard",
-  "name": "登录并打开仪表盘",
-  "description": "登录测试账号并验证进入 dashboard",
-  "urlPattern": "https://example.com/**",
-  "tags": ["login", "dashboard"],
-  "inputs": [
-    { "name": "username", "type": "string", "secret": false },
-    { "name": "password", "type": "string", "secret": true }
-  ],
+  "id": "示例首页验证流程",
+  "name": "示例首页验证流程",
+  "target": {
+    "url": "https://example.com"
+  },
   "steps": [
-    { "instruction": "打开登录页面" },
-    { "instruction": "输入用户名 {{username}}" },
-    { "instruction": "输入密码 {{password}}" },
-    { "instruction": "点击登录按钮" }
+    "验证页面包含 \"Example\"。",
+    "点击导航中的 More information",
+    "验证页面成功跳转"
   ],
-  "assertions": [
-    "URL 包含 /dashboard",
-    "页面显示欢迎文案"
-  ]
+  "createdAt": "2026-07-28T08:00:00.000Z",
+  "updatedAt": "2026-07-28T08:00:00.000Z"
 }
 ```
 
+已实现能力：
+
+- `browser-opt save "<名称>" --flow "<完整自然语言流程>"` 保存 Workflow。
+- `browser-opt list [--json]` 列出当前项目 Workflow。
+- `browser-opt match "<查询>" [--json]` 输出唯一命中、相似候选或未命中结果。
+- `browser-opt run "<查询>"` 或 `browser-opt run --workflow-id <id>` 执行已保存 Workflow。
+- Workflow 名称支持中文，文件名与 `id` 做安全校验。
+- 加载目录时跳过单个损坏 JSON，并输出 warning。
+- 同名 Workflow 默认拒绝覆盖，显式 `--force` 时更新并保留 `createdAt`。
+- 运行时将结构化 Workflow 渲染回现有 runner 可消费的自然语言 flow。
+- 匹配逻辑支持中文归一化、意图词清理、相似候选排序和歧义返回。
+
 验收标准：
 
-- 成功流程可以保存为 workflow。
-- 后续自然语言请求可以匹配已有 workflow。
-- workflow 支持参数化和敏感字段标记。
-- workflow 可以作为 E2E 生成的输入。
+- 成功流程可以保存为 workflow。已完成。
+- 后续自然语言请求可以匹配已有 workflow。已完成。
+- workflow 可以通过 CLI 直接执行。已完成。
+- workflow 支持 JSON 输出，供 Skill 和脚本稳定解析。已完成。
+- workflow 支持参数化和敏感字段标记。待实现。
+- workflow 可以作为 E2E 生成的输入。待实现。
 
-状态：`Planned`
+状态：`In Progress`
 
 ### 6.3 自动生成 E2E 测试代码
 
@@ -361,17 +373,19 @@ LLM 生成测试语义、命名、断言
 
 任务：
 
-- [ ] 定义 Workflow 文件格式。
-- [ ] 实现 `workflow save/run/list`。
-- [ ] 实现 workflow matcher。
+- [x] 定义 browser-opt Workflow 文件格式。
+- [x] 实现 `browser-opt save/list/match/run`。
+- [x] 实现 workflow matcher。
+- [x] 支持中文名称、稳定 ID、同名覆盖保护和无效文件诊断。
+- [x] Workflow 运行复用现有 BrowserOptRunner，并为同一 workflow 生成稳定 session。
 - [ ] 支持参数和 secret 字段。
-- [ ] Skill 中加入 workflow 优先匹配。
+- [ ] Skill 中完善 workflow 优先匹配和候选确认说明。
 - [ ] workflow 可转成 Playwright Test。
 
 验收：
 
-- 用户可以把一次流程保存为 workflow。
-- 后续类似请求无需重新探索页面即可执行。
+- 用户可以把一次流程保存为 workflow。已完成。
+- 后续类似请求无需重新探索页面即可执行。已完成唯一命中与 ID 执行；歧义候选仍需用户选择。
 
 ### M4：Trace 到 Playwright Test
 
@@ -417,10 +431,10 @@ LLM 生成测试语义、命名、断言
 | CLI 基础 | In Progress | `src/cli/`、`package.json` bin | 收敛命令职责和结果格式 |
 | Agent Browser 封装 | In Progress | `src/core/agent.ts` | 补充 trace 与结构化错误 |
 | 自然语言执行 | In Progress | `src/browser-opt/runner.ts`、`src/browser-e2e/deterministic.ts` | 统一 step result |
-| Skill 入口 | In Progress | `skills/browser-e2e/SKILL.md` | 加入 workflow 复用说明 |
+| Skill 入口 | In Progress | `skills/browser-opt/SKILL.md`、`skills/browser-e2e/SKILL.md` | 完善 workflow 候选确认和 E2E 生成提示 |
 | Playwright 生成 | In Progress | `src/browser-e2e/test-reuse/playwright.ts`、`tests/generated/` | 从 trace 生成更稳定 locator 和断言 |
-| 测试索引 | In Progress | `src/browser-e2e/test-reuse/index-store.ts`、`matcher.ts` | 扩展到 workflow index |
-| Workflow 复用 | Planned | 暂无独立模块 | 设计 schema 与 CLI |
+| 测试索引 | In Progress | `src/browser-e2e/test-reuse/index-store.ts`、`matcher.ts` | 与 workflow 复用边界保持清晰，必要时增加跨索引查询 |
+| Workflow 复用 | In Progress | `src/browser-opt/workflow/`、`browser-opt save/list/match/run`、`tests/browser-opt/workflow.test.ts` | 参数化、secret 字段、Skill 候选确认、转 Playwright Test |
 | Action Trace | Planned | 部分运行结果 | 落盘 schema 和导出命令 |
 | Handoff | In Progress | Skill/README 描述与部分测试 | 完整 session state 保存恢复 |
 | 文档 | In Progress | README、本文档 | 补充 troubleshooting 和示例 |
@@ -438,18 +452,27 @@ tests/generated/
   traces/
     <run-id>/trace.json
     <run-id>/screenshots/
-  workflows/
-    <workflow-id>.json
   sessions/
     <session-id>.json
+
+.browser-opt/
+  workflows/
+    <workflow-id>.json
+  states/
+    browser-opt-<profile>.json
+  artifacts/
+    <run-id>/report.json
+    <run-id>/report.md
 ```
 
 约定：
 
 - `tests/generated/` 放可提交的测试代码与索引。
 - `.browser-automated/traces/` 放本地运行证据，可按需忽略。
-- `.browser-automated/workflows/` 放可复用流程，是否提交由项目决定。
 - `.browser-automated/sessions/` 放临时状态，默认不提交。
+- `.browser-opt/workflows/` 放 `browser-opt` 可复用流程，是否提交由项目决定。
+- `.browser-opt/states/` 放登录态 state，默认不提交。
+- `.browser-opt/artifacts/` 放 `browser-opt` 执行报告、截图和 snapshot，可按需忽略。
 
 ## 10. 风险与应对
 
@@ -480,7 +503,7 @@ tests/generated/
 
 1. 先完成自然语言执行闭环，确保 Skill 和 CLI 都能稳定驱动浏览器完成基础流程。
 2. 再补齐 handoff 的完整状态保存与恢复，因为复杂交互是自动化能否落地的关键前提。
-3. 然后实现 Workflow 保存与匹配，减少重复自然语言探索，提升复用率。
+3. 然后完善已落地的 Workflow 复用：补参数化、secret 字段、Skill 候选确认和 E2E 生成输入。
 4. 接着完善 Trace 到 Playwright Test 的生成链路，把稳定流程沉淀为标准测试。
 5. 最后补齐工程化和文档，让 CLI + Skill 更适合团队长期使用。
 
