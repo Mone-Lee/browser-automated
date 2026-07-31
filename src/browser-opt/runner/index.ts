@@ -11,6 +11,7 @@ import type {
   BrowserOptRunResult,
   BrowserOptRunnerOptions,
   BrowserOptStepResult,
+  SnapshotEvidence,
 } from '../type.js';
 import {
   browserOptTemplate,
@@ -25,6 +26,7 @@ import {
   resumeFromHandoff,
   saveAuthenticatedHandoffState,
   saveAuthState,
+  isLoginLikeSnapshot,
   shouldTriggerLoginHandoff,
   triggerLoginHandoff,
 } from './handoff.js';
@@ -67,6 +69,7 @@ export class BrowserOptRunner {
     let fatalError: string | undefined;
     let authStateFallbackUsed = false;
     const allowAuthStateFallback = !options.handoff?.waitForUserResume;
+    const openedWithProfileImport = Boolean(options.profile && !options.statePath);
     let agent = this.agentFactory({
       sessionId: options.sessionId,
       profile: options.profile,
@@ -79,6 +82,7 @@ export class BrowserOptRunner {
     });
 
     try {
+      logAuthStateMode(logs, options);
       logs.push(`open: ${url}`);
       agent.open(url);
 
@@ -95,6 +99,10 @@ export class BrowserOptRunner {
       logs.push(`page-state: ${summarizeSnapshot(openSnapshot)}`);
       if (isAboutBlankOpen(agent, openSnapshot)) {
         throw new Error('浏览器页面未成功打开：当前会话持续停留在 about:blank，且没有可恢复的业务页或登录页。');
+      }
+
+      if (openedWithProfileImport) {
+        saveProfileImportedAuthState(agent, options.authStateSavePath, logs, openSnapshot);
       }
 
       /**
@@ -230,4 +238,34 @@ export class BrowserOptRunner {
       report,
     };
   }
+}
+
+/** 记录本轮浏览器登录态来源，便于排查默认 state 与 profile 导入是否命中。 */
+function logAuthStateMode(logs: string[], options: BrowserOptRunnerOptions): void {
+  if (options.statePath) {
+    const fallback = options.authStateFallbackProfile ? `, fallback-profile=${options.authStateFallbackProfile}` : '';
+    logs.push(`auth-state-mode: state ${options.statePath}${fallback}`);
+    return;
+  }
+  if (options.profile) {
+    const saveTarget = options.authStateSavePath ? `, save=${options.authStateSavePath}` : '';
+    logs.push(`auth-state-mode: profile-import ${options.profile}${saveTarget}`);
+  }
+}
+
+/** 从 profile 首次导入时尽早固化 state；登录页或空白页不保存，避免把无效状态写成默认值。 */
+function saveProfileImportedAuthState(
+  agent: BrowserAgent,
+  authStateSavePath: string | undefined,
+  logs: string[],
+  snapshot: SnapshotEvidence,
+): void {
+  if (!authStateSavePath) {
+    return;
+  }
+  if (isLoginLikeSnapshot(snapshot) || snapshot.nodeCount === 0) {
+    logs.push('auth-state-profile-import-save-skipped: profile 页面尚未确认处于可复用登录态。');
+    return;
+  }
+  saveAuthState(agent, authStateSavePath, logs);
 }

@@ -132,6 +132,32 @@ function extractLoggedSessions(commands: string): string[] {
     .filter((session): session is string => Boolean(session));
 }
 
+function findLatestReportJson(rootDir: string): string {
+  const reports = findReportJsonFiles(rootDir).sort();
+  const reportPath = reports.at(-1);
+  if (!reportPath) {
+    throw new Error(`No report.json found under ${rootDir}`);
+  }
+  return reportPath;
+}
+
+function findReportJsonFiles(dir: string): string[] {
+  if (!fs.existsSync(dir)) {
+    return [];
+  }
+
+  const reports: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const filePath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      reports.push(...findReportJsonFiles(filePath));
+    } else if (entry.isFile() && entry.name === 'report.json') {
+      reports.push(filePath);
+    }
+  }
+  return reports;
+}
+
 describe('browser-opt CLI', () => {
   it('saves, lists and matches a project Workflow as JSON', () => {
     const workflowDir = makeTempDir();
@@ -426,6 +452,23 @@ describe('browser-opt CLI', () => {
     expect(fs.readFileSync(commandLog, 'utf-8')).toContain(`state save ${statePath}`);
   });
 
+  it('writes default auth state after an authenticated open even if later steps fail', () => {
+    const projectDir = makeTempDir();
+    const commandLog = path.join(makeTempDir(), 'agent-browser.log');
+    const result = runCli([
+      'browser-opt',
+      '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Missing"。',
+    ], { AGENT_BROWSER_LOG: commandLog }, undefined, { cwd: projectDir, useDefaultAuthStateDir: true });
+
+    const canonicalProjectDir = fs.realpathSync(projectDir);
+    const statePath = path.join(canonicalProjectDir, '.browser-opt', 'states', 'browser-opt-default.json');
+    expect(result.status).toBe(1);
+    expect(fs.existsSync(statePath)).toBe(true);
+    expect(fs.readFileSync(commandLog, 'utf-8')).toContain(`state save ${statePath}`);
+    const reportPath = findLatestReportJson(projectDir);
+    expect(fs.readFileSync(reportPath, 'utf-8')).toContain(`auth-state-mode: profile-import Default, save=${statePath}`);
+  });
+
   it('allows overriding the default profile explicitly', () => {
     const outputDir = makeTempDir();
     const commandLog = path.join(makeTempDir(), 'agent-browser.log');
@@ -467,6 +510,7 @@ describe('browser-opt CLI', () => {
     expect(commands).not.toContain('--profile Default');
     expect(commands).not.toContain('--auto-connect');
     expect(commands).toContain('state save');
+    expect(fs.readFileSync(findLatestReportJson(outputDir), 'utf-8')).toContain(`auth-state-mode: state ${statePath}, fallback-profile=Default`);
   });
 
   it('uses interactive handoff instead of profile fallback when the default state opens on a login page', () => {
