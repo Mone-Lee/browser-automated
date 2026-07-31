@@ -105,11 +105,10 @@ export class BrowserAgent {
     const reuseRunningBrowser = options.reuseRunningBrowser ?? (this.reuseRunningBrowser && !profile && !statePath);
     const browserArgs = options.browserArgs ?? this.browserArgs;
     const useNamedSession = !profile;
-    const launchProfile = profile && args[0] === 'open' ? profile : null;
     const launchStatePath = statePath && args[0] === 'open' ? statePath : null;
 
     return [
-      ...(launchProfile ? ['--profile', launchProfile] : []),
+      ...(profile ? ['--profile', profile] : []),
       ...(this.sessionName ? ['--session-name', this.sessionName] : []),
       ...(launchStatePath ? ['--state', launchStatePath] : []),
       ...(reuseRunningBrowser ? ['--auto-connect'] : []),

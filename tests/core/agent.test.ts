@@ -120,7 +120,7 @@ describe('BrowserAgent', () => {
       );
     });
 
-    it('omits profile and session for follow-up commands after a profile launch', () => {
+    it('keeps profile on follow-up commands after a profile launch', () => {
       mockSpawnSync.mockReturnValue(makeOkResult('https://example.com/'));
 
       const agent = new BrowserAgent({ sessionId: 'test-session', profile: 'Default' });
@@ -128,7 +128,28 @@ describe('BrowserAgent', () => {
 
       expect(mockSpawnSync).toHaveBeenCalledWith(
         'agent-browser',
-        ['get', 'url'],
+        ['--profile', 'Default', 'get', 'url'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+    });
+
+    it('uses the same profile for open and snapshot commands', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult(''));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session', profile: 'Default' });
+      agent.open('https://example.com');
+      agent.snapshotJson();
+
+      expect(mockSpawnSync).toHaveBeenNthCalledWith(
+        1,
+        'agent-browser',
+        ['--profile', 'Default', 'open', 'https://example.com'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+      expect(mockSpawnSync).toHaveBeenNthCalledWith(
+        2,
+        'agent-browser',
+        ['--profile', 'Default', 'snapshot', '-i', '--json'],
         expect.objectContaining({ encoding: 'utf-8' }),
       );
     });
