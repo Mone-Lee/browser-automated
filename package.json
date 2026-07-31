@@ -49,6 +49,6 @@
     "vitest": "^4.1.4"
   },
   "dependencies": {
-    "agent-browser": "^0.26.0"
+    "agent-browser": "^0.33.1"
   }
 }
