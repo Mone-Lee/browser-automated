@@ -3,11 +3,13 @@ import { BrowserAgent } from '../../src/core/agent.js';
 
 // 监听 spawnSync，确保测试过程不会真的启动浏览器。
 vi.mock('node:child_process', () => ({
+  execFileSync: vi.fn(),
   spawnSync: vi.fn(),
 }));
 
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 
+const mockExecFileSync = vi.mocked(execFileSync);
 const mockSpawnSync = vi.mocked(spawnSync);
 
 function makeOkResult(stdout = '') {
@@ -19,6 +21,10 @@ function makeErrorResult(stderr = 'command failed', status = 1) {
 }
 
 beforeEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+  mockExecFileSync.mockReset();
+  mockExecFileSync.mockReturnValue('');
   mockSpawnSync.mockReset();
 });
 
@@ -41,6 +47,25 @@ describe('BrowserAgent', () => {
           'https://example.com',
         ],
         expect.objectContaining({ encoding: 'utf-8' }),
+      );
+    });
+
+    it('uses the latest proxy environment when running a command', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult(''));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session' });
+      vi.stubEnv('NO_PROXY', 'localhost,.created-after-agent');
+      agent.open('https://example.com');
+
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'agent-browser',
+        expect.any(Array),
+        expect.objectContaining({
+          env: expect.objectContaining({
+            NO_PROXY: 'localhost,.created-after-agent',
+            no_proxy: 'localhost,.created-after-agent',
+          }),
+        }),
       );
     });
 

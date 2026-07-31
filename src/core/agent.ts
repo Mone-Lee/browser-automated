@@ -3,6 +3,7 @@
  */
 import { spawnSync, SpawnSyncReturns } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { createAgentBrowserEnvironment } from './proxy-env.js';
 import { AgentOptions } from './types.js';
 
 const DEFAULT_TIMEOUT = 30_000;
@@ -133,7 +134,7 @@ export class BrowserAgent {
     const result: SpawnSyncReturns<string> = spawnSync(
       'agent-browser',
       this.buildGlobalArgs(args, useHeaded, Object.hasOwn(options, 'statePath') ? { statePath: options.statePath } : {}),
-      { encoding: 'utf-8', timeout: this.timeout },
+      { encoding: 'utf-8', timeout: this.timeout, env: createAgentBrowserEnvironment() },
     );
 
     if (result.error) {
@@ -160,6 +161,7 @@ export class BrowserAgent {
     return spawnSync('agent-browser', args, {
       encoding: 'utf-8',
       timeout: this.timeout,
+      env: createAgentBrowserEnvironment(),
     });
   }
 
