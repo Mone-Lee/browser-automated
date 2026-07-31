@@ -2179,6 +2179,35 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps[0].error).toContain('页面未包含文本');
   });
 
+  it('continues executing remaining steps after ordinary step failures', async () => {
+    const outputDir = makeTempDir();
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before first assertion'),
+        snapshotJson('after first assertion without target text'),
+        snapshotJson('before second assertion'),
+        snapshotJson('after second assertion with Example'),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Dashboard"。\n2. 验证页面包含 "Example"。', {
+      outputDir,
+    });
+    const reportMarkdown = fs.readFileSync(result.report.reportMarkdownPath, 'utf-8');
+
+    expect(result.passed).toBe(false);
+    expect(result.report.status).toBe('FAIL');
+    expect(result.report.steps).toHaveLength(2);
+    expect(result.report.steps[0].passed).toBe(false);
+    expect(result.report.steps[1].passed).toBe(true);
+    expect((agent.snapshotJson as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(5);
+    expect(reportMarkdown).toContain('## Failed Steps');
+    expect(reportMarkdown).toContain('1. 验证页面包含 "Dashboard"。');
+    expect(reportMarkdown).not.toContain('2. 验证页面包含 "Example"。:');
+  });
+
   it('throws a template error when no URL can be extracted', async () => {
     const runner = new BrowserOptRunner(makeFactory(buildAgent()));
 

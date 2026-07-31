@@ -539,7 +539,27 @@ describe('browser-opt CLI', () => {
     expect(result.stdout).toContain('Report JSON:');
     expect(result.stdout).toContain(outputDir);
     expect(result.stdout).toContain('FAIL 1.');
+    expect(result.stdout).toContain('Failed steps:');
+    expect(result.stdout).toContain('Reason: 页面未包含文本：Missing');
     expect(result.stdout).not.toContain('执行成功');
+  });
+
+  it('prints all failures after continuing through later steps', () => {
+    const outputDir = makeTempDir();
+    const result = runCli([
+      'browser-opt',
+      '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Missing"。\n2. 验证页面包含 "Example"。',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('Status: FAIL');
+    expect(result.stdout).toContain('Failed steps:');
+    expect(result.stdout).toContain('  - 1. 验证页面包含 "Missing"。');
+    expect(result.stdout).toContain('    Reason: 页面未包含文本：Missing');
+    expect(result.stdout).toContain('FAIL 1. 验证页面包含 "Missing"。');
+    expect(result.stdout).toContain('PASS 2. 验证页面包含 "Example"。');
   });
 
   it('keeps ordinary deterministic action failures on exit code 1', () => {

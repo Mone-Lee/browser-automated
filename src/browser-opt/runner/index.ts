@@ -185,10 +185,6 @@ export class BrowserOptRunner {
         if (result.handoffTriggered) {
           handoffTriggered = true;
         }
-
-        if (!result.passed) {
-          break;
-        }
       }
     } catch (err) {
       fatalError = err instanceof Error ? err.message : String(err);

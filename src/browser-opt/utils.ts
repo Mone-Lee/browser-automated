@@ -859,8 +859,14 @@ export function formatBrowserOptStepStatus(step: BrowserOptStepResult): 'PASS' |
   return step.passed ? 'PASS' : 'FAIL';
 }
 
+/** 汇总普通失败步骤，供报告和 CLI 在流程结束后集中展示失败原因。 */
+export function collectFailedBrowserOptSteps(report: BrowserOptReport): BrowserOptStepResult[] {
+  return report.steps.filter((step) => !step.passed && !step.handoffTriggered);
+}
+
 /** 把执行报告渲染成 Markdown，方便直接在本地阅读和附带截图证据。 */
 export function renderMarkdownReport(report: BrowserOptReport): string {
+  const failedSteps = collectFailedBrowserOptSteps(report);
   const lines = [
     `# Browser Opt Report: ${report.status}`,
     '',
@@ -872,6 +878,11 @@ export function renderMarkdownReport(report: BrowserOptReport): string {
     '',
     '## Evidence Screenshots',
     ...report.screenshots.map((screenshot) => `- ${screenshot}`),
+    '',
+    '## Failed Steps',
+    ...(failedSteps.length > 0
+      ? failedSteps.map((step) => `- ${step.index}. ${step.instruction}: ${step.error ?? step.verification ?? '未知原因'}`)
+      : ['- n/a']),
     '',
     '## Steps',
   ];

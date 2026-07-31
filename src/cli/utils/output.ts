@@ -3,7 +3,7 @@
  * 这样既能保持各命令主流程清晰，也方便未来单独调整控制台输出体验。
  */
 import type { BrowserOptRunResult } from '../../browser-opt/type.js';
-import { formatBrowserOptStepStatus } from '../../browser-opt/utils.js';
+import { collectFailedBrowserOptSteps, formatBrowserOptStepStatus } from '../../browser-opt/utils.js';
 import type { BrowserE2ETriggerResult } from '../../browser-e2e/test-reuse/types.js';
 import type { TestRunSummary } from '../../core/types.js';
 import { BROWSER_E2E_BIN_USAGE, LEGACY_CLI_USAGE } from './constants.js';
@@ -93,6 +93,16 @@ export function printBrowserOptResult(result: BrowserOptRunResult): void {
   console.log(`Report JSON: ${report.reportJsonPath}`);
   console.log(`Report Markdown: ${report.reportMarkdownPath}`);
   console.log(`Log: ${report.logPath}`);
+  const failedSteps = collectFailedBrowserOptSteps(report);
+  console.log('Failed steps:');
+  if (failedSteps.length === 0) {
+    console.log('  - n/a');
+  } else {
+    for (const step of failedSteps) {
+      console.log(`  - ${step.index}. ${step.instruction}`);
+      console.log(`    Reason: ${step.error ?? step.verification ?? '未知原因'}`);
+    }
+  }
   console.log('Evidence screenshots:');
   for (const screenshot of report.screenshots) {
     console.log(`  - ${screenshot}`);
