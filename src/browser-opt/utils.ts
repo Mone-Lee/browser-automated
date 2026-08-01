@@ -12,9 +12,24 @@ import type {
   SnapshotNode,
 } from './type.js';
 
+interface QuotedSegment {
+  value: string;
+  index: number;
+}
+
+interface ClickTarget {
+  target: string;
+  field?: string | null;
+}
+
+interface SnapshotTextLine {
+  index: number;
+  indent: number;
+  node: SnapshotNode;
+}
+
 const DEFAULT_OUTPUT_ROOT = path.join(process.cwd(), '.browser-opt', 'artifacts');
 const URL_RE = /https?:\/\/[^\s。，、，)）"'‘’“”]+/i;
-const QUOTED_VALUE_RE = /["“‘']([^"”’']+)["”’']/;
 const SELECTABLE_VERB_RE = /选择|选中|勾选|勾上|设置为|设置成|切换为|切换成|切到|改为|改成|调整为|调整成|设为|设成|置为|置成|变更为|变更成|变为|变成|select|check|toggle/i;
 
 /** 从自然语言描述中提取第一个 URL，作为 browser-opt 的起始页面。 */
@@ -99,13 +114,30 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
     };
   }
 
-  const quoted = normalized.match(QUOTED_VALUE_RE)?.[1]?.trim();
-  if (quoted && /输入|填写|填入|type|fill/i.test(normalized)) {
+  const fillVerb = normalized.match(/输入|填写|填入|type|fill/i);
+  const quoted = extractQuotedSegments(normalized);
+  if (fillVerb && quoted.length > 0) {
+    const valueSegment = quoted[quoted.length - 1];
+    const fieldSegment = quoted.find((segment) => segment.index < (fillVerb.index ?? 0));
     return {
       type: 'fill',
-      field: parseFieldName(normalized) ?? '文本',
-      value: quoted,
+      field: fieldSegment?.value ?? parseFieldName(normalized) ?? '文本',
+      value: valueSegment?.value ?? '',
     };
+  }
+
+  if (/点击|单击|click|tap|press/i.test(normalized)) {
+    const clickTarget = parseClickTarget(normalized);
+    const target = clickTarget?.target
+      ?? normalized
+        .replace(/点击|单击|click|tap|press/gi, '')
+        .replace(/[。；，,]/g, '')
+        .trim();
+    const action: Extract<DeterministicAction, { type: 'click' }> = { type: 'click', target: target || '按钮' };
+    if (clickTarget?.field) {
+      action.field = clickTarget.field;
+    }
+    return action;
   }
 
   const selectableTarget = parseSelectableTarget(normalized);
@@ -115,15 +147,6 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
       field: selectableTarget.field,
       option: selectableTarget.option,
     };
-  }
-
-  if (/点击|单击|click|tap|press/i.test(normalized)) {
-    const target = quoted
-      ?? normalized
-        .replace(/点击|单击|click|tap|press/gi, '')
-        .replace(/[。；，,]/g, '')
-        .trim();
-    return { type: 'click', target: target || '按钮' };
   }
 
   const expectedText = parseExpectedText(normalized);
@@ -207,11 +230,6 @@ function parseFieldName(instruction: string): string | null {
   return afterVerb || null;
 }
 
-interface QuotedSegment {
-  value: string;
-  index: number;
-}
-
 /** 从“字段选择选项”类语句中同时提取字段名和选项，避免把字段误当成选项。 */
 function parseSelectableTarget(instruction: string): { field: string | null; option: string } | null {
   const verb = instruction.match(SELECTABLE_VERB_RE);
@@ -245,6 +263,35 @@ function extractQuotedSegments(instruction: string): QuotedSegment[] {
   return [...matches]
     .map((match) => ({ value: match[1]?.trim() ?? '', index: match.index ?? 0 }))
     .filter((segment) => Boolean(segment.value));
+}
+
+/** 从点击语句中提取真实点击目标，多引号场景优先识别“字段下方的入口”这类入口文案。 */
+function parseClickTarget(instruction: string): ClickTarget | null {
+  const quoted = extractQuotedSegments(instruction);
+  if (quoted.length === 0) {
+    return null;
+  }
+
+  if (quoted.length === 1) {
+    return { target: quoted[0].value };
+  }
+
+  const lastQuoted = quoted[quoted.length - 1];
+  if (!lastQuoted) {
+    return quoted[0] ? { target: quoted[0].value } : null;
+  }
+
+  const lastQuotedEnd = lastQuoted.index + lastQuoted.value.length + 2;
+  const beforeLastQuoted = instruction.slice(0, lastQuoted.index);
+  const afterLastQuoted = instruction.slice(lastQuotedEnd);
+  if (
+    /(?:下方|上方|左侧|右侧|旁边|附近|内部|里面|里|中|内|显示|文案|占位|字段|区域)的?$/.test(beforeLastQuoted)
+    || /^(?:入口|按钮|控件|区域|输入区域|输入框|下拉框|下拉入口|面板|弹窗|选项)/.test(afterLastQuoted)
+  ) {
+    return { target: lastQuoted.value, field: quoted[0]?.value ?? null };
+  }
+
+  return quoted[0] ? { target: quoted[0].value } : null;
 }
 
 /** 从没有引号的选择语句中提取目标选项，作为口语化步骤的兜底。 */
@@ -308,9 +355,13 @@ export function findTextboxRef(snapshot: SnapshotEvidence, field: string): strin
 }
 
 /** 在当前快照中查找可点击元素，并按目标文案做最佳匹配。 */
-export function findClickableRef(snapshot: SnapshotEvidence, target: string): string | null {
-  const nodes = getSnapshotNodes(snapshot).filter((node) => !isTextboxRole(node.role));
-  return findBestNodeRef(nodes, target) ?? nodes[0]?.ref ?? null;
+export function findClickableRef(snapshot: SnapshotEvidence, target: string, field?: string | null): string | null {
+  const nodes = getSnapshotNodes(snapshot).filter((node) => !node.disabled && !isTextboxRole(node.role) && isClickableNode(node));
+  if (field) {
+    return findFollowingClickableRef(snapshot.text, field, target) ?? findUniqueNodeRef(nodes, target);
+  }
+
+  return findBestNodeRef(nodes, target) ?? findFollowingClickableRef(snapshot.text, target);
 }
 
 /** 查找单选或多选选项，优先点击 label，并在已选中时短路为完成。 */
@@ -374,34 +425,51 @@ function findBestNodeRef(nodes: SnapshotNode[], target: string): string | null {
   return findBestNode(nodes, target)?.ref ?? null;
 }
 
+/** 只有目标文案在可点击节点中唯一出现时才兜底，避免多个“请选择”时误点第一个。 */
+function findUniqueNodeRef(nodes: SnapshotNode[], target: string): string | null {
+  const matches = findMatchingNodes(nodes, target);
+  return matches.length === 1 ? matches[0]?.ref ?? null : null;
+}
+
 /** 在候选节点集合里返回最佳匹配节点，供需要读取选中状态的场景复用。 */
 function findBestNode(nodes: SnapshotNode[], target: string): SnapshotNode | null {
+  return findMatchingNodes(nodes, target)[0] ?? null;
+}
+
+/** 返回所有匹配目标文案的候选节点，保持 snapshot 原始顺序。 */
+function findMatchingNodes(nodes: SnapshotNode[], target: string): SnapshotNode[] {
   const normalizedTarget = normalizeMatchText(target);
   if (!normalizedTarget) {
-    return null;
+    return [];
   }
 
-  const exact = nodes.find((node) => {
+  const exact = nodes.filter((node) => {
     const label = normalizeMatchText(node.label);
     if (!label) {
       return false;
     }
     return label.includes(normalizedTarget) || normalizedTarget.includes(label);
   });
-  if (exact) {
-    return exact;
+  if (exact.length > 0) {
+    return exact.sort((a, b) => rankNodeMatch(a, normalizedTarget) - rankNodeMatch(b, normalizedTarget));
   }
 
   const targetChars = [...normalizedTarget];
-  const partial = nodes.find((node) => {
+  return nodes.filter((node) => {
     const label = normalizeMatchText(node.label);
     if (!label) {
       return false;
     }
     return targetChars.length > 1 && targetChars.every((char) => label.includes(char));
-  });
+  }).sort((a, b) => rankNodeMatch(a, normalizedTarget) - rankNodeMatch(b, normalizedTarget));
+}
 
-  return partial ?? null;
+/** 匹配多个节点时优先选更具体的短标签，避免点到包含整段弹窗文本的大容器。 */
+function rankNodeMatch(node: SnapshotNode, normalizedTarget: string): number {
+  const label = normalizeMatchText(node.label);
+  const lengthPenalty = Math.max(0, label.length - normalizedTarget.length);
+  const exactBonus = label === normalizedTarget ? -1000 : 0;
+  return exactBonus + lengthPenalty;
 }
 
 /** 把 JSON refs 和 snapshot 文本中的节点信息统一归并成可匹配的节点列表。 */
@@ -437,12 +505,93 @@ function parseSnapshotLine(line: string): SnapshotNode | null {
       role: match[1],
       label: match[2] ?? '',
       ref,
+      clickable: /(?:^|,\s*)clickable(?:,|$)/.test(match[3]) || /\sclickable(?:\s|$|\[)/.test(line),
       checked: /(?:^|,\s*)checked=true(?:,|$)/.test(match[3]),
       disabled: /(?:^|,\s*)disabled(?:,|$)/.test(match[3]),
     };
   }
 
   return null;
+}
+
+/** 文案本身不可点时，在其后续兄弟或子节点中寻找第一个可点击元素。 */
+function findFollowingClickableRef(text: string, anchorTarget: string, followingTarget?: string): string | null {
+  const normalizedAnchorTarget = normalizeMatchText(anchorTarget);
+  if (!normalizedAnchorTarget) {
+    return null;
+  }
+
+  const lines = parseSnapshotTextLines(text);
+  for (const line of lines) {
+    const label = normalizeMatchText(line.node.label);
+    if (!label || !label.includes(normalizedAnchorTarget)) {
+      continue;
+    }
+
+    const following = findFirstFollowingClickableLine(lines, line, followingTarget);
+    if (following) {
+      return following.node.ref;
+    }
+  }
+
+  return null;
+}
+
+/** 解析带缩进的 snapshot 行，供局部邻近匹配保持在同一结构块内。 */
+function parseSnapshotTextLines(text: string): SnapshotTextLine[] {
+  return text
+    .split('\n')
+    .map((line, index) => {
+      const node = parseSnapshotLine(line);
+      if (!node) {
+        return null;
+      }
+
+      return {
+        index,
+        indent: line.match(/^\s*/)?.[0].length ?? 0,
+        node,
+      };
+    })
+    .filter((line): line is SnapshotTextLine => Boolean(line));
+}
+
+/** 从目标文案之后按文本顺序查找同级或子级 clickable，越过目标结构块后停止。 */
+function findFirstFollowingClickableLine(
+  lines: SnapshotTextLine[],
+  anchor: SnapshotTextLine,
+  followingTarget?: string,
+): SnapshotTextLine | null {
+  const normalizedFollowingTarget = normalizeMatchText(followingTarget ?? '');
+  for (const line of lines) {
+    if (line.index <= anchor.index) {
+      continue;
+    }
+
+    if (line.indent < anchor.indent) {
+      break;
+    }
+
+    if (isClickableNode(line.node) && !isTextboxRole(line.node.role) && matchesOptionalTarget(line.node, normalizedFollowingTarget)) {
+      return line;
+    }
+
+    if (line.indent === anchor.indent) {
+      break;
+    }
+  }
+
+  return null;
+}
+
+/** 带上下文点击时，需要后续可点击节点匹配入口文案；未指定入口时接受第一个。 */
+function matchesOptionalTarget(node: SnapshotNode, normalizedTarget: string): boolean {
+  if (!normalizedTarget) {
+    return true;
+  }
+
+  const label = normalizeMatchText(node.label);
+  return Boolean(label) && (label.includes(normalizedTarget) || normalizedTarget.includes(label));
 }
 
 /** 以 ref 合并节点，保留 JSON refs 的基础信息和文本快照里的状态属性。 */
@@ -459,6 +608,7 @@ function mergeSnapshotNodes(nodes: SnapshotNode[]): SnapshotNode[] {
       ref: node.ref,
       role: current.role || node.role,
       label: current.label || node.label,
+      clickable: current.clickable ?? node.clickable,
       checked: current.checked ?? node.checked,
       disabled: current.disabled ?? node.disabled,
     });
@@ -470,6 +620,11 @@ function mergeSnapshotNodes(nodes: SnapshotNode[]): SnapshotNode[] {
 /** 判断某个角色是否可以视为文本输入控件。 */
 function isTextboxRole(role: string): boolean {
   return /textbox|input|searchbox|combobox|textarea/i.test(role);
+}
+
+/** 判断节点是否可直接点击，refs 缺少 clickable 时按常见交互角色保守推断。 */
+function isClickableNode(node: SnapshotNode): boolean {
+  return Boolean(node.clickable) || /button|link|menuitem|tab|option|radio|checkbox|switch|labeltext|label/i.test(node.role);
 }
 
 /** 识别 radio、checkbox 等可选择控件。 */
@@ -721,17 +876,18 @@ function parseAtLeastCount(instruction: string): number | null {
 
 /** 从自然语言断言中提取预期文本，兼容引号和“包含/显示”类说法。 */
 function parseExpectedText(instruction: string): string | null {
+  const quoted = extractQuotedSegments(instruction);
+  const lastQuoted = quoted[quoted.length - 1];
+  if (lastQuoted) {
+    return lastQuoted.value;
+  }
+
   const contains = instruction.match(/(?:包含|看到|显示|contains?|include[s]?)\s*([^。；\n]+)/i);
   if (contains?.[1]) {
     return contains[1]
       .replace(/至少\s*\d+.*$/, '')
       .replace(/^["“‘']|["”’']$/g, '')
       .trim();
-  }
-
-  const quoted = instruction.match(QUOTED_VALUE_RE);
-  if (quoted?.[1]) {
-    return quoted[1].trim();
   }
 
   return null;

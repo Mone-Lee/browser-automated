@@ -11,7 +11,7 @@ import {
   extractBrowserOptUrl,
   splitBrowserOptSteps,
 } from '../../src/browser-opt/runner/index.js';
-import { parseDeterministicAction } from '../../src/browser-opt/utils.js';
+import { findClickableRef, parseDeterministicAction } from '../../src/browser-opt/utils.js';
 import type { BrowserAgent } from '../../src/core/agent.js';
 import type { AgentOptions } from '../../src/core/types.js';
 
@@ -195,6 +195,142 @@ describe('browser-opt parsing', () => {
       type: 'assert-text',
       text: 'Dashboard',
     });
+
+    expect(parseDeterministicAction('验证页面显示已选分类“药品/OTC药品/感冒发烧”。')).toEqual({
+      type: 'assert-text',
+      text: '药品/OTC药品/感冒发烧',
+    });
+  });
+
+  it('keeps explicit click instructions as clicks when they mention selection UI', () => {
+    expect(parseDeterministicAction('点击“商品类目”字段下方的“请选择”入口，打开类目选择弹窗。')).toEqual({
+      type: 'click',
+      target: '请选择',
+      field: '商品类目',
+    });
+
+    expect(parseDeterministicAction('在类目选择弹窗中点击一级类目“药品”。')).toEqual({
+      type: 'click',
+      target: '药品',
+    });
+
+    expect(parseDeterministicAction('点击类目选择弹窗右下角的“确认”按钮。')).toEqual({
+      type: 'click',
+      target: '确认',
+    });
+  });
+
+  it('does not fall back to the first clickable node when a click target is missing', () => {
+    const snapshot = {
+      output: snapshotJson('', {
+        e1: { role: 'generic', name: '' },
+        e2: { role: 'button', name: '提交' },
+      }),
+      text: [
+        '- generic [ref=e1] clickable [onclick]',
+        '- button "提交" [ref=e2]',
+      ].join('\n'),
+      nodeCount: 2,
+    };
+
+    expect(findClickableRef(snapshot, '不存在')).toBeNull();
+    expect(findClickableRef(snapshot, '提交')).toBe('e2');
+  });
+
+  it('falls back to the first following sibling or child clickable node for label clicks', () => {
+    const siblingSnapshot = {
+      output: snapshotJson('', {
+        f1: { role: 'StaticText', name: '商品类目' },
+        e1: { role: 'generic', name: '请选择' },
+      }),
+      text: [
+        '- StaticText "商品类目" [ref=f1]',
+        '- generic "请选择" [ref=e1] clickable [cursor:pointer, onclick]',
+      ].join('\n'),
+      nodeCount: 2,
+    };
+    const childSnapshot = {
+      output: snapshotJson('', {
+        f1: { role: 'generic', name: '商品类目' },
+        e1: { role: 'generic', name: '请选择' },
+      }),
+      text: [
+        '- generic "商品类目" [ref=f1]',
+        '  - generic "请选择" [ref=e1] clickable [cursor:pointer, onclick]',
+      ].join('\n'),
+      nodeCount: 2,
+    };
+
+    expect(findClickableRef(siblingSnapshot, '商品类目')).toBe('e1');
+    expect(findClickableRef(childSnapshot, '商品类目')).toBe('e1');
+  });
+
+  it('does not cross into a later unrelated field when using following-click fallback', () => {
+    const snapshot = {
+      output: snapshotJson('', {
+        f1: { role: 'StaticText', name: '商品类目' },
+        f2: { role: 'StaticText', name: '供应商' },
+        e1: { role: 'generic', name: '请选择' },
+      }),
+      text: [
+        '- StaticText "商品类目" [ref=f1]',
+        '- StaticText "供应商" [ref=f2]',
+        '- generic "请选择" [ref=e1] clickable [cursor:pointer, onclick]',
+      ].join('\n'),
+      nodeCount: 3,
+    };
+
+    expect(findClickableRef(snapshot, '商品类目')).toBeNull();
+  });
+
+  it('uses click field context to disambiguate repeated placeholder entries', () => {
+    const snapshot = {
+      output: snapshotJson('', {
+        f1: { role: 'StaticText', name: '商品类目' },
+        e1: { role: 'generic', name: '请选择' },
+        f2: { role: 'StaticText', name: '供应商' },
+        e2: { role: 'generic', name: '请选择' },
+      }),
+      text: [
+        '- StaticText "商品类目" [ref=f1]',
+        '- generic "请选择" [ref=e1] clickable [cursor:pointer, onclick]',
+        '- StaticText "供应商" [ref=f2]',
+        '- generic "请选择" [ref=e2] clickable [cursor:pointer, onclick]',
+      ].join('\n'),
+      nodeCount: 4,
+    };
+
+    expect(findClickableRef(snapshot, '请选择', '商品类目')).toBe('e1');
+    expect(findClickableRef(snapshot, '请选择', '供应商')).toBe('e2');
+    expect(findClickableRef(snapshot, '请选择', '不存在字段')).toBeNull();
+  });
+
+  it('prefers specific clickable nodes over large containers that contain the target text', () => {
+    const snapshot = {
+      output: snapshotJson('', {
+        e1: { role: 'generic', name: '选择商品分类 最近使用 药品/OTC药品/感冒发烧 食品生鲜 药品 right' },
+        e2: { role: 'menuitemcheckbox', name: '药品 right' },
+      }),
+      text: [
+        '- generic "选择商品分类 最近使用 药品/OTC药品/感冒发烧 食品生鲜 药品 right" [ref=e1] clickable [onclick]',
+        '  - menuitemcheckbox "药品 right" [checked=false, ref=e2]',
+      ].join('\n'),
+      nodeCount: 2,
+    };
+
+    expect(findClickableRef(snapshot, '药品')).toBe('e2');
+  });
+
+  it('does not return disabled click targets', () => {
+    const snapshot = {
+      output: snapshotJson('', {
+        e1: { role: 'button', name: '确 认' },
+      }),
+      text: '- button "确 认" [disabled, ref=e1]',
+      nodeCount: 1,
+    };
+
+    expect(findClickableRef(snapshot, '确认')).toBeNull();
   });
 });
 

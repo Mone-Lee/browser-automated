@@ -91,6 +91,7 @@ export interface SnapshotNode {
   ref: string;
   role: string;
   label: string;
+  clickable?: boolean;
   checked?: boolean;
   disabled?: boolean;
 }
@@ -98,7 +99,7 @@ export interface SnapshotNode {
 export type DeterministicAction =
   | { type: 'open'; url: string }
   | { type: 'fill'; field: string; value: string }
-  | { type: 'click'; target: string }
+  | { type: 'click'; target: string; field?: string | null }
   | { type: 'select-option'; field: string | null; option: string }
   | { type: 'upload'; field: string; source: string }
   | { type: 'handoff'; message: string }
