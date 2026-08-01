@@ -335,6 +335,66 @@ describe('browser-opt parsing', () => {
 });
 
 describe('BrowserOptRunner', () => {
+  it('uses DOM fallback for field-scoped clicks when snapshot omits the field label', async () => {
+    const outputDir = makeTempDir();
+    const snapshotText = [
+      '- generic "请选择" [ref=e104] clickable [cursor:pointer, onclick]',
+      '- generic "请选择" [ref=e108] clickable [cursor:pointer]',
+      '  - generic "请选择" [ref=e110] clickable [onclick]',
+      '    - combobox "* 供应商 :" [expanded=false, required, ref=e111]',
+    ].join('\n');
+    const refs = {
+      e104: { role: 'generic', name: '请选择' },
+      e108: { role: 'generic', name: '请选择' },
+      e110: { role: 'generic', name: '请选择' },
+      e111: { role: 'combobox', name: '* 供应商 :' },
+    };
+    const evaluate = vi.fn(() => JSON.stringify({ found: true, clicked: true, targetText: '请选择' }));
+    const agent = buildAgent({
+      evaluate,
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(snapshotText, refs),
+        snapshotJson('after category dialog opened', refs),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 点击“商品类目”字段下方的“请选择”入口，打开类目选择弹窗。', {
+      outputDir,
+    });
+
+    expect(result.passed).toBe(true);
+    expect(evaluate).toHaveBeenCalledTimes(1);
+    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect((agent.waitMs as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(300);
+    expect(result.report.steps[0].actionOutput).toContain('click dom 商品类目 -> 请选择');
+  });
+
+  it('uses DOM fallback for field inputs when snapshot omits the textbox ref', async () => {
+    const outputDir = makeTempDir();
+    const evaluate = vi.fn(() => JSON.stringify({ found: true, filled: true, targetText: '商品标题' }));
+    const agent = buildAgent({
+      evaluate,
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('- StaticText "商品标题"', {}),
+        snapshotJson('商品标题 芝麻丸礼盒', {}),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 在“商品标题”输入“芝麻丸礼盒”。', {
+      outputDir,
+    });
+
+    expect(result.passed).toBe(true);
+    expect(evaluate).toHaveBeenCalledTimes(1);
+    expect((agent.fill as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect((agent.waitMs as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(300);
+    expect(result.report.steps[0].actionOutput).toContain('fill dom 商品标题 "芝麻丸礼盒"');
+  });
+
   it('runs open, snapshot, screenshot, chat, re-snapshot, screenshot and writes reports', async () => {
     const outputDir = makeTempDir();
     const agent = buildAgent({

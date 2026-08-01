@@ -5,6 +5,7 @@ import type { BrowserAgent } from '../../../../core/agent.js';
 import type { DeterministicAction, SnapshotEvidence } from '../../../type.js';
 import { findTextboxRef } from '../../../utils.js';
 import { buildLoginHandoffActionOutput, isLoginLikeSnapshot } from '../../handoff.js';
+import { fillFieldScopedDomTarget } from './dom-action.js';
 
 /** 执行输入动作，登录页阻塞时转为 handoff，避免误报找不到业务字段。 */
 export function executeFillAction(
@@ -20,6 +21,12 @@ export function executeFillAction(
         `当前页面仍在登录页，无法继续填写“${action.field}”，请先完成登录后再继续自动化。`,
       );
     }
+
+    const domOutput = fillFieldScopedDomTarget(agent, action.field, action.value);
+    if (domOutput) {
+      return domOutput;
+    }
+
     throw new Error(`无法找到输入框：${action.field}`);
   }
 
