@@ -2,17 +2,17 @@
 
 ## 1. 项目目标
 
-本项目面向日常开发中的浏览器自动化场景：用户用自然语言描述网页操作流程，系统自动操作页面，并能将成功流程沉淀为可复用的 Skill、Workflow 或标准 E2E 测试代码。
+本项目面向日常开发中的浏览器自动化场景：用户用自然语言描述网页操作流程，系统自动操作页面，并能将成功流程沉淀为可复用的 Workflow 或标准 E2E 测试代码。
 
 最终输出形态为：
 
-- `browser-opt` CLI / Skill：提供一次性自然语言浏览器控制与证据报告。
-- `browser-e2e` CLI / Skill：提供 E2E 测试执行、复用和 Playwright 测试生成。
+- `browser-opt` CLI：提供一次性自然语言浏览器控制、证据报告和 Workflow 复用。
+- `browser-e2e` CLI：提供 Playwright 测试生成、复用和执行。
 
 项目拆解为 3 个核心目标：
 
 1. 自然语言执行网页操作。
-2. 沉淀可复用 Skill / Workflow。
+2. 沉淀可复用 Workflow。
 3. 自动生成 E2E 测试代码。
 
 ## 2. 技术路线
@@ -32,7 +32,7 @@
 ```text
 自然语言任务
   ↓
-Skill 识别并调用 CLI
+CLI 解析并调度任务
   ↓
 Agent Browser 执行
   ↓
@@ -44,7 +44,7 @@ LLM 做语义补全与断言生成
   ↓
 输出标准 Playwright Test
   ↓
-注册到可复用 Skill / Workflow 索引
+注册到可复用 Workflow 或测试索引
 ```
 
 ## 3. 产品边界
@@ -52,7 +52,7 @@ LLM 做语义补全与断言生成
 ### 3.1 应该支持
 
 - 用自然语言描述单次网页操作并执行。
-- 用自然语言描述完整 E2E 测试目标并执行。
+- 保存、匹配并复用一次性成功 Workflow。
 - 优先复用已有 Playwright 测试，未命中时回退到一次性浏览器自动化。
 - 将一次性成功流程沉淀为可复用 Workflow 或 Playwright Test。
 - 遇到 CAPTCHA、MFA、OAuth、复杂拖拽、复杂人机交互时触发 handoff，由用户接管后恢复自动化。
@@ -71,15 +71,13 @@ LLM 做语义补全与断言生成
 
 - `browser-opt` 与 `browser-e2e` CLI 入口，`browser-automated` 仅作为历史兼容入口。
 - `BrowserAgent` 对 `agent-browser` CLI 的 TypeScript 封装。
-- 自然语言测试运行器。
+- `browser-opt` 自然语言执行运行器。
 - 测试用例生成器。
-- `browser-e2e` Skill。
-- `browser-opt` Skill。
 - `browser-opt` Workflow 保存、加载、匹配、运行能力。
 - Workflow CLI 子命令：`save`、`list`、`match`、`run`。
 - 生成测试索引 `tests/generated/index.json`。
 - Playwright 测试生成目录 `tests/generated/`。
-- 基础 handoff/resume 流程说明与部分测试。
+- handoff/resume 完整闭环、trace 记录与模拟测试。
 
 后续规划应在现有能力上收敛目标，不重复建设新的自动化框架。
 
@@ -92,29 +90,26 @@ CLI 是可复用执行能力的主入口，负责参数解析、流程编排、�
 目标命令：
 
 - `browser-opt <natural-language-flow>`：执行一次性自然语言网页操作，并输出证据报告。
-- `browser-e2e <natural-language-case>`：Skill 主入口，负责自然语言整段解析、匹配、执行、生成。
-- `browser-e2e run <url> <instruction>`：执行自然语言 E2E 流程。
+- `browser-e2e <natural-language-case>`：测试生成入口，负责自然语言整段解析、匹配、生成和执行。
 - `browser-e2e gen <url> <instruction>`：生成 Playwright Test。
 - `browser-opt save/list/match/run`：沉淀和复用一次性自然语言 Workflow。
-- `browser-e2e workflow save/run/list`：暂不作为近期主线，E2E 侧优先复用 generated test 索引。
 - `browser-e2e trace inspect/export`：查看和导出 Action Trace。
 - `browser-e2e handoff/resume`：显式触发用户接管与恢复。
 
-### 5.2 Skill 层
+### 5.2 Workflow 复用层
 
-Skill 是自然语言入口，负责判断用户意图并调用 CLI，不直接承载复杂业务逻辑。
+Workflow 复用层负责保存、索引、匹配和运行可重复的自然语言流程，不直接承载浏览器底层操作逻辑。
 
-Skill 需要支持：
+Workflow 复用层需要支持：
 
-- 识别“执行网页操作”请求。
-- 识别“生成 E2E 测试”请求。
-- 识别“把流程保存为 Workflow”请求。
-- `browser-opt` 优先匹配已保存 workflow，未命中时执行一次性流程。
-- `browser-e2e` 优先匹配已有 generated tests，未命中时执行或生成测试。
-- 在未命中时调用一次性执行流程。
-- 执行成功后提示或自动触发生成测试。
+- 保存一次性成功流程。
+- 按自然语言查询匹配已保存 workflow。
+- 唯一命中时直接复用 workflow。
+- 歧义命中时返回候选，交由调用方确认。
+- 未命中时回退到 `browser-opt` 一次性执行。
+- 输出稳定 JSON，方便 CLI、脚本和后续生成链路消费。
 
-Skill 输出应保持可执行、可追踪、可复用，避免只停留在自然语言建议。
+Workflow 输出应保持可执行、可追踪、可复用，避免只停留在自然语言建议。
 
 ### 5.3 Agent Browser 执行层
 
@@ -174,16 +169,14 @@ Trace 产物用于：
 
 ### 6.1 自然语言执行网页操作
 
-目标：用户给出 URL 和自然语言指令后，CLI/Skill 能完成一次网页操作。
+目标：用户给出 URL 和自然语言指令后，`browser-opt` 能完成一次网页操作。
 
 流程：
 
 ```text
 用户输入自然语言
   ↓
-Skill 判断为操作任务
-  ↓
-调用 browser-opt 或 browser-e2e
+browser-opt 解析自然语言流程
   ↓
 Agent Browser 打开页面并执行
   ↓
@@ -199,9 +192,9 @@ Agent Browser 打开页面并执行
 - 失败时能返回可理解的失败原因。
 - 支持可见浏览器观察长流程执行。
 
-状态：`In Progress`
+状态：`Done`
 
-### 6.2 沉淀可复用 Skill / Workflow
+### 6.2 沉淀可复用 Workflow
 
 目标：成功执行过的流程可以被命名、索引、复用。
 
@@ -241,7 +234,7 @@ Agent Browser 打开页面并执行
 - 成功流程可以保存为 workflow。已完成。
 - 后续自然语言请求可以匹配已有 workflow。已完成。
 - workflow 可以通过 CLI 直接执行。已完成。
-- workflow 支持 JSON 输出，供 Skill 和脚本稳定解析。已完成。
+- workflow 支持 JSON 输出，供 CLI 和脚本稳定解析。已完成。
 - workflow 支持参数化和敏感字段标记。待实现。
 - workflow 可以作为 E2E 生成的输入。待实现。
 
@@ -274,7 +267,7 @@ LLM 生成测试语义、命名、断言
 - 生成代码可通过 TypeScript 编译。
 - 生成测试可被 Playwright Test 执行。
 - 测试文件命名稳定，避免重复生成同名文件。
-- `index.json` 能被 Skill 匹配逻辑使用。
+- `index.json` 能被 CLI 匹配逻辑使用。
 - 生成断言不只检查“没有报错”，必须绑定 URL、文本、可见元素或业务状态。
 
 状态：`In Progress`
@@ -326,27 +319,27 @@ LLM 生成测试语义、命名、断言
 - 用户完成后可从同一 session 恢复。
 - 恢复后不会重复执行已经完成的步骤。
 - handoff 过程会写入 trace。
-- CLI 和 Skill 都能清楚提示用户当前需要做什么。
+- CLI 能清楚提示用户当前需要做什么。
 
-状态：`In Progress`
+状态：`Done`
 
 ## 7. 里程碑
 
 ### M1：自然语言执行闭环
 
-目标：稳定完成一次性网页操作和自然语言 E2E 执行。
+目标：稳定完成 `browser-opt` 一次性自然语言网页操作。
 
 任务：
 
-- [ ] 明确 `chat`、`e2e`、`browser-e2e` 的职责边界。
-- [ ] 统一执行结果数据结构。
-- [ ] 为每一步写入 Action Trace。
-- [ ] 对失败动作输出结构化错误。
-- [ ] 补充常见操作的单元测试。
+- [x] 明确 `browser-opt` 作为自然语言执行闭环入口。
+- [x] 统一执行结果数据结构。
+- [x] 为每一步写入 Action Trace。
+- [x] 对失败动作输出结构化错误。
+- [x] 补充常见操作的单元测试。
 
 验收：
 
-- 用户可以通过 Skill 或 CLI 让浏览器完成一个 3 到 5 步自然语言流程。
+- 用户可以通过 `browser-opt` 让浏览器完成一个 3 到 5 步自然语言流程。已完成。
 - 失败时可以根据 trace 复盘。
 
 ### M2：Handoff 完整闭环
@@ -355,19 +348,19 @@ LLM 生成测试语义、命名、断言
 
 任务：
 
-- [ ] 定义 handoff session state schema。
-- [ ] 实现自动触发策略。
-- [ ] 实现显式 `handoff/resume` CLI。
-- [ ] 记录 handoff trace。
-- [ ] 恢复后跳过已完成步骤。
-- [ ] 为 CAPTCHA/MFA/OAuth 场景补充模拟测试。
+- [x] 定义 handoff session state schema。
+- [x] 实现自动触发策略。
+- [x] 实现显式 `handoff/resume` CLI。
+- [x] 记录 handoff trace。
+- [x] 恢复后跳过已完成步骤。
+- [x] 为 CAPTCHA/MFA/OAuth 场景补充模拟测试。
 
 验收：
 
-- 遇到复杂交互时能稳定打开可见浏览器。
-- 用户完成后自动化能继续执行剩余步骤。
+- 遇到复杂交互时能稳定打开可见浏览器。已完成。
+- 用户完成后自动化能继续执行剩余步骤。已完成。
 
-### M3：Workflow / Skill 复用
+### M3：Workflow 复用
 
 目标：自然语言流程可以沉淀、匹配、参数化复用。
 
@@ -379,7 +372,6 @@ LLM 生成测试语义、命名、断言
 - [x] 支持中文名称、稳定 ID、同名覆盖保护和无效文件诊断。
 - [x] Workflow 运行复用现有 BrowserOptRunner，并为同一 workflow 生成稳定 session。
 - [ ] 支持参数和 secret 字段。
-- [ ] Skill 中完善 workflow 优先匹配和候选确认说明。
 - [ ] workflow 可转成 Playwright Test。
 
 验收：
@@ -408,11 +400,11 @@ LLM 生成测试语义、命名、断言
 
 ### M5：工程化与文档
 
-目标：让 CLI + Skill 可被日常开发稳定使用。
+目标：让 CLI 可被日常开发稳定使用。
 
 任务：
 
-- [ ] README 对齐最终 CLI + Skill 形态。
+- [ ] README 对齐最终 CLI 形态。
 - [ ] 补充使用示例。
 - [ ] 补充错误排查文档。
 - [ ] 补充 CI 示例。
@@ -430,13 +422,12 @@ LLM 生成测试语义、命名、断言
 | --- | --- | --- | --- |
 | CLI 基础 | In Progress | `src/cli/`、`package.json` bin | 收敛命令职责和结果格式 |
 | Agent Browser 封装 | In Progress | `src/core/agent.ts` | 补充 trace 与结构化错误 |
-| 自然语言执行 | In Progress | `src/browser-opt/runner.ts`、`src/browser-e2e/deterministic.ts` | 统一 step result |
-| Skill 入口 | In Progress | `skills/browser-opt/SKILL.md`、`skills/browser-e2e/SKILL.md` | 完善 workflow 候选确认和 E2E 生成提示 |
+| 自然语言执行 | Done | `src/browser-opt/runner.ts` | `browser-opt` 执行闭环已完成 |
 | Playwright 生成 | In Progress | `src/browser-e2e/test-reuse/playwright.ts`、`tests/generated/` | 从 trace 生成更稳定 locator 和断言 |
 | 测试索引 | In Progress | `src/browser-e2e/test-reuse/index-store.ts`、`matcher.ts` | 与 workflow 复用边界保持清晰，必要时增加跨索引查询 |
-| Workflow 复用 | In Progress | `src/browser-opt/workflow/`、`browser-opt save/list/match/run`、`tests/browser-opt/workflow.test.ts` | 参数化、secret 字段、Skill 候选确认、转 Playwright Test |
+| Workflow 复用 | In Progress | `src/browser-opt/workflow/`、`browser-opt save/list/match/run`、`tests/browser-opt/workflow.test.ts` | 参数化、secret 字段、转 Playwright Test |
 | Action Trace | Planned | 部分运行结果 | 落盘 schema 和导出命令 |
-| Handoff | In Progress | Skill/README 描述与部分测试 | 完整 session state 保存恢复 |
+| Handoff | Done | session state、handoff/resume CLI、trace 流程与模拟测试 | 闭环已完成，后续按场景补充回归用例 |
 | 文档 | In Progress | README、本文档 | 补充 troubleshooting 和示例 |
 
 ## 9. 数据与目录规划
@@ -489,8 +480,8 @@ tests/generated/
 
 项目阶段性完成需要满足：
 
-- 用户可以通过 Skill 触发自然语言浏览器自动化。
-- 用户可以通过 Skill 触发 E2E 测试生成。
+- 用户可以通过 `browser-opt` 触发自然语言浏览器自动化。
+- 用户可以通过 `browser-e2e gen` 触发 E2E 测试生成。
 - CLI 可独立执行同等能力，适合脚本化和 CI。
 - 成功执行流程会产生可复盘 Action Trace。
 - 成功流程可以保存为 Workflow 或生成 Playwright Test。
@@ -501,10 +492,10 @@ tests/generated/
 
 推荐优先级：
 
-1. 先完成自然语言执行闭环，确保 Skill 和 CLI 都能稳定驱动浏览器完成基础流程。
-2. 再补齐 handoff 的完整状态保存与恢复，因为复杂交互是自动化能否落地的关键前提。
-3. 然后完善已落地的 Workflow 复用：补参数化、secret 字段、Skill 候选确认和 E2E 生成输入。
+1. 自然语言执行闭环已完成，当前以 `browser-opt` 作为稳定入口。
+2. Handoff 的完整状态保存与恢复已完成，后续只按真实场景补充回归用例。
+3. 然后完善已落地的 Workflow 复用：补参数化、secret 字段和 E2E 生成输入。
 4. 接着完善 Trace 到 Playwright Test 的生成链路，把稳定流程沉淀为标准测试。
-5. 最后补齐工程化和文档，让 CLI + Skill 更适合团队长期使用。
+5. 最后补齐工程化和文档，让 CLI 更适合团队长期使用。
 
-这样可以保证实施顺序与真实落地阻塞点一致，并持续贴近项目最终形态：用 Skill 触发，用 CLI 执行，用 Agent Browser 完成操作，用 Playwright 沉淀测试。
+这样可以保证实施顺序与真实落地阻塞点一致，并持续贴近项目最终形态：用 CLI 触发和执行，用 Agent Browser 完成操作，用 Workflow 复用稳定流程，用 Playwright 沉淀测试。
