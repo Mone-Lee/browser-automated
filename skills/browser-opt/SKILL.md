@@ -53,6 +53,12 @@ Every execution must follow these rules:
 - Prefer deterministic commands and element refs over natural-language `chat`.
 - Final report must include `PASS` or `FAIL`, evidence screenshot paths, and detailed logs.
 
+## Interactive handoff execution
+
+Run `browser-opt` exactly once and keep its returned process session id. Poll progress through the same process session. When the CLI prints a handoff prompt, ask the user to finish the manual action. After the user replies `done`, send `done\n` to that same process session and continue polling it.
+
+The project-level `handoff` and `resume` functions own the pause/resume protocol. Never start a second `browser-opt run` to simulate resume.
+
 ## Saved workflows
 
 Reusable flows are stored as JSON files under the calling project's
@@ -191,10 +197,9 @@ Auth state reuse policy:
 
 - `browser-opt` first checks its saved auth state under `.browser-opt/states/`.
 - If a default state file exists, it loads that state first, so only cookies/storage are reused and prior Chrome tabs are not restored.
-- If the default state opens on a login screen during an interactive CLI run, keep the same command session alive and wait for the user to complete handoff; do not start a second `browser-opt run` while the first command is waiting.
-- If the execution environment cannot keep stdin attached and the command exits at handoff, rerun the exact same saved workflow command only after the user has completed login. The CLI now uses a stable `--session` for the same workflow/URL so the rerun can reuse the prior browser session instead of creating a random new one.
-- In non-interactive runs without a handoff wait hook, if the default state opens on a login screen, or the page asynchronously redirects to login before/during a step, `browser-opt` falls back to the selected Chrome profile once and saves refreshed cookies/storage back to the default state file.
-- If no default state file exists, it starts once with `--profile Default` and saves cookies/storage for later runs.
+- If the default state opens on a login screen or later redirects there during an interactive CLI run, keep the same browser window and command session alive for handoff. Do not open a profile fallback window or start a second `browser-opt run` for resume.
+- A programmatic run without an interactive handoff callback may replace an invalid state window once with the selected profile.
+- If no default state file exists, the single main agent opens the target directly with `--profile Default` and saves state from that same window. Do not create a separate profile importer.
 - Pass `--profile <name>` to choose a different Chrome profile for first import and default-state fallback.
 - Pass `--state <path>` to use a custom state file without automatic profile fallback.
 - Do not rely on focused-browser reuse for login import: ordinary Chrome is usually not CDP-accessible, and auto-connect can attach to the wrong temporary browser.

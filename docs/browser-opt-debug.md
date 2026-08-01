@@ -90,17 +90,17 @@ Skill 会先匹配当前项目中的 Workflow。名称精确命中或唯一候�
 
 ## 登录态与 handoff
 
-`browser-opt` 默认优先使用当前项目 `.browser-opt/states/` 下保存的 state 文件，只复用 cookies/storage，不恢复历史 Chrome 标签页。首次没有 state 时，才用 `--profile Default` 导入登录态，并在流程结束后保存 state。
+`browser-opt` 默认优先使用当前项目 `.browser-opt/states/` 下保存的 state 文件，只复用 cookies/storage，不恢复历史 Chrome 标签页。首次没有 state 时，唯一主 agent 直接使用 `--profile Default` 打开目标页并保存 state，不会先开一个导入窗口再切换窗口。
 
-当已有 state 打开目标页面后被拦到登录页时，交互式 CLI 不会立刻新开 profile fallback 窗口，而是保留当前 session 进入 handoff：
+当已有默认 state 打开目标页面后被拦到登录页时，CLI 保留当前 state 窗口并直接进入 handoff，不再切换到可能先显示 `about:blank` 的 profile fallback 窗口：
 
 1. 在可见浏览器里手动完成登录、验证码、OAuth 或 MFA。
 2. 回到终端输入 `done`、`ok`、`继续` 或 `完成`。
 3. `browser-opt` 恢复同一 session，等待页面离开登录态后保存新的 state，再继续后续步骤。
 
-如果 Codex 或其他执行环境不能保持 stdin，命令可能在 handoff 处以 `HANDOFF` 退出。此时不要马上启动第二个流程去抢同一登录窗口；先在已经打开的浏览器里完成登录，再重跑完全相同的保存流程命令。CLI 会为同一项目和同一 workflow/流程生成稳定 `--session`，重跑时可以继续使用之前的浏览器 session。需要手动固定会话时，可以显式传 `--session <id>`。
+handoff 后应把 `done` 写回同一个进程 session，不要重新执行 workflow。需要手动固定浏览器会话标识时，可以显式传 `--session <id>`，但稳定 session id 不能替代原进程的 handoff/resume 控制。
 
-只有在非交互运行且没有 handoff 等待逻辑时，默认 state 失效才会回退到 `--profile <name>` 对应的 Chrome profile，重新导入登录态并刷新 state。显式传 `--state <path>` 表示使用隔离 state，不会自动回退到 profile。
+只有没有人工恢复回调的程序化调用才允许一次 profile 回退；交互式 CLI 不创建替代窗口。显式传 `--state <path>` 表示使用隔离 state，不会自动回退到 profile。
 
 ## 修改后的生效规则
 
@@ -178,4 +178,4 @@ ls ./.browser-opt/artifacts/smoke
 - 直接跑 `node dist/cli/browser-opt.js ...`：触发真实 `agent-browser`，但不测试 Codex Skill 自动发现。
 - 在 Codex 中按 `skills/browser-opt/SKILL.md` 要求执行：测试 Agent 遵守 Skill 文档以及真实 `agent-browser` 调用。
 - 重开 Codex 后输入 `/browser-opt ...`：测试完整的 Skill 发现、触发、执行链路。
-- 登录态失效并看到 handoff：优先在当前浏览器和当前命令里完成登录后继续；如果命令已经退出，再完成登录并重跑同一个保存流程命令。
+- 登录态失效并看到 handoff：在当前浏览器里完成登录，并通过原终端会话向同一个进程输入 `done`；不要重跑保存流程命令。
