@@ -62,6 +62,7 @@ export class BrowserAgent {
   private readonly sessionName: string | null;
   private readonly timeout: number;
   private readonly headed: boolean;
+  private readonly forceHeadless: boolean;
   private readonly openLiveDashboard: boolean;
   private readonly profile: string | null;
   private readonly statePath: string | null;
@@ -75,6 +76,7 @@ export class BrowserAgent {
     this.sessionName = options.sessionName ?? null;
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT;
     this.headed = options.headed ?? options.liveViewport ?? false;
+    this.forceHeadless = options.headless ?? false;
     this.openLiveDashboard = options.openLiveDashboard ?? true;
     this.profile = options.profile ?? null;
     this.statePath = options.statePath ?? null;
@@ -105,17 +107,19 @@ export class BrowserAgent {
     const statePath = Object.hasOwn(options, 'statePath') ? options.statePath ?? null : this.statePath;
     const reuseRunningBrowser = options.reuseRunningBrowser ?? (this.reuseRunningBrowser && !profile && !statePath);
     const browserArgs = options.browserArgs ?? this.browserArgs;
+    const isBrowserLaunch = args[0] === 'open' && !this.browserOpened;
+    const hasBrowserLaunch = args[0] === 'open' || this.browserOpened;
     const useNamedSession = !profile;
-    const launchStatePath = statePath && args[0] === 'open' ? statePath : null;
 
     return [
+      // profile 模式不使用 session id，后续命令必须持续携带 profile 才能命中同一浏览器会话。
       ...(profile ? ['--profile', profile] : []),
       ...(this.sessionName ? ['--session-name', this.sessionName] : []),
-      ...(launchStatePath ? ['--state', launchStatePath] : []),
+      ...(statePath && isBrowserLaunch ? ['--state', statePath] : []),
       ...(reuseRunningBrowser ? ['--auto-connect'] : []),
       ...(useNamedSession ? ['--session', this.sessionId] : []),
-      ...(useHeaded ? ['--headed'] : []),
-      ...((args[0] === 'open' || this.browserOpened) && browserArgs.length > 0
+      ...(useHeaded ? ['--headed'] : this.forceHeadless ? ['--headed', 'false'] : []),
+      ...(hasBrowserLaunch && browserArgs.length > 0
         ? ['--args', browserArgs.join(',')]
         : []),
       ...args,
@@ -256,19 +260,6 @@ export class BrowserAgent {
       categories,
       evidence,
     };
-  }
-
-  private isUnsupportedCommandError(err: unknown, command: string): boolean {
-    const message = err instanceof Error ? err.message : String(err);
-    return message.includes(`Unknown command: ${command}`);
-  }
-
-  private currentUrlOrBlank(): string {
-    try {
-      return this.getUrl() || 'about:blank';
-    } catch {
-      return 'about:blank';
-    }
   }
 
   /** 打开指定 URL。 */
@@ -430,48 +421,18 @@ export class BrowserAgent {
     return result.stdout ?? '';
   }
 
-  /** 将控制权交给真实的有头浏览器，便于用户手动接管。 */
+  /** 记录项目级人工接管状态；暂停与恢复由上层控制，不向 agent-browser 发送伪命令。 */
   handoff(message: string): string {
-    try {
-      return this.run(['handoff', message]);
-    } catch (err) {
-      if (!this.isUnsupportedCommandError(err, 'handoff')) {
-        throw err;
-      }
-
-      const url = this.currentUrlOrBlank();
-      if (this.headed) {
-        return [
-          'HANDOFF_FALLBACK: reusing the current visible browser for manual interaction.',
-          `Session: ${this.sessionId}`,
-          `URL: ${url}`,
-          `Reason: ${message}`,
-        ].join('\n');
-      }
-
-      this.ensureLiveViewport();
-      return [
-        'HANDOFF_FALLBACK: enabled the live viewport for manual interaction without reopening the page.',
-        `Session: ${this.sessionId}`,
-        `URL: ${url}`,
-        `Reason: ${message}`,
-      ]
-        .filter(Boolean)
-        .join('\n');
-    }
+    return [
+      'HANDOFF: reusing the current browser session for manual interaction.',
+      `Session: ${this.sessionId}`,
+      `Reason: ${message}`,
+    ].join('\n');
   }
 
-  /** 在用户接管完成后恢复自动化。 */
+  /** 标记项目级人工接管结束；后续自动化直接复用当前浏览器 session。 */
   resume(): string {
-    try {
-      return this.run(['resume']);
-    } catch (err) {
-      if (!this.isUnsupportedCommandError(err, 'resume')) {
-        throw err;
-      }
-
-      return `RESUME_FALLBACK: continuing session ${this.sessionId} without an explicit resume command.`;
-    }
+    return `RESUME: continuing browser session ${this.sessionId}.`;
   }
 
   /** 关闭浏览器会话；这里吞掉异常，保证清理阶段尽量顺利完成。 */
