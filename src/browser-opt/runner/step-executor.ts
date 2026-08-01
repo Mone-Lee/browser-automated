@@ -54,9 +54,7 @@ export async function executeStep(
     const fallbackAgent = options.retryAuthStateFallback?.();
     if (fallbackAgent) {
       logs.push(`auth-state-fallback-retry: 步骤 ${index} 执行前检测到登录页跳转`);
-      return executeStep(fallbackAgent, outputDir, index, instruction, {
-        ...options,
-      });
+      return executeStep(fallbackAgent, outputDir, index, instruction, options);
     }
 
     const handoff = triggerLoginHandoff(agent, logs, `步骤 ${index} 执行前检测到登录页跳转`);
@@ -140,9 +138,7 @@ export async function executeStep(
       const fallbackAgent = options.retryAuthStateFallback?.();
       if (fallbackAgent) {
         logs.push(`auth-state-fallback-retry: ${verification}`);
-        return executeStep(fallbackAgent, outputDir, index, instruction, {
-          ...options,
-        });
+        return executeStep(fallbackAgent, outputDir, index, instruction, options);
       }
     }
 
@@ -273,9 +269,7 @@ export async function executeStep(
       const fallbackAgent = options.retryAuthStateFallback?.();
       if (fallbackAgent) {
         logs.push(`auth-state-fallback-retry: 步骤 ${index} 验证时检测到登录页跳转`);
-        return executeStep(fallbackAgent, outputDir, index, instruction, {
-          ...options,
-        });
+        return executeStep(fallbackAgent, outputDir, index, instruction, options);
       }
       const handoff = triggerLoginHandoff(agent, logs, `步骤 ${index} 验证时检测到登录页跳转`);
       const resumed = await resumeFromHandoff(agent, logs, handoff, options.handoff);

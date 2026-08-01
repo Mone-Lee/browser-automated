@@ -64,6 +64,10 @@ for (let i = 0; i < args.length; i++) {
     i += 1;
     continue;
   }
+  if (arg === '--headed' && args[i + 1] === 'false') {
+    i += 1;
+    continue;
+  }
   if (!arg.startsWith('--')) {
     commandIndex = i;
     break;
@@ -92,6 +96,9 @@ if (command === 'open') {
     : process.env.AGENT_BROWSER_LIVE_CREATE_SNAPSHOT
       ? { e2: { role: 'textbox', name: '直播间名称' } }
     : { e1: { role: 'heading', name: 'Example' } };
+  if (loginSnapshot && process.env.AGENT_BROWSER_RESUME_MARKER) {
+    fs.writeFileSync(process.env.AGENT_BROWSER_RESUME_MARKER, 'manual-login-completed');
+  }
   process.stdout.write(JSON.stringify({ success: true, data: { snapshot: snapshotText, refs: snapshotRefs } }));
 } else if (command === 'screenshot') {
   const target = args[args.length - 1];
@@ -427,8 +434,10 @@ describe('browser-opt CLI', () => {
     expect(commands).not.toContain('--auto-connect');
     expect(commands).not.toContain('--state ');
     expect(commands).toContain('open https://example.com');
-    expect(commands).toContain('--profile Default');
-    expect(commands).toContain('--headed open https://example.com');
+    expect(commands.trim().split('\n').every((command) => command.startsWith('--profile Default '))).toBe(true);
+    expect(commands).toContain('--profile Default --headed open https://example.com');
+    expect(commands.split('\n').filter((command) => /\bopen https:\/\/example\.com\b/.test(command))).toHaveLength(1);
+    expect(commands).not.toContain('close');
     expect(commands).toContain('browser-opt-default.json');
     expect(commands).not.toContain('auth-import');
     expect(commands).not.toContain('dashboard start');
@@ -513,7 +522,7 @@ describe('browser-opt CLI', () => {
     expect(fs.readFileSync(findLatestReportJson(outputDir), 'utf-8')).toContain(`auth-state-mode: state ${statePath}, fallback-profile=Default`);
   });
 
-  it('uses interactive handoff instead of profile fallback when the default state opens on a login page', () => {
+  it('keeps the state window for interactive login instead of opening a profile fallback', () => {
     const outputDir = makeTempDir();
     const commandLog = path.join(makeTempDir(), 'agent-browser.log');
     const resumeMarker = path.join(makeTempDir(), 'resume-marker');
@@ -540,8 +549,9 @@ describe('browser-opt CLI', () => {
     expect(commands.match(new RegExp(`--state ${statePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g')) ?? []).toHaveLength(1);
     expect(commands).not.toContain('--profile Default');
     expect(commands).not.toContain('close');
-    expect(commands).toContain('handoff');
-    expect(commands).toContain('resume');
+    expect(commands).not.toContain('handoff');
+    expect(commands).not.toContain('resume');
+    expect(commands).not.toContain(`state load ${statePath}`);
     expect(commands.split('\n').filter((command) => /\bopen https:\/\/example\.com\b/.test(command))).toHaveLength(1);
     expect(commands).toContain(`state save ${statePath}`);
   });
@@ -648,8 +658,8 @@ describe('browser-opt CLI', () => {
     expect(result.stdout).not.toContain('Status: FAIL');
     expect(result.stdout).toContain('初始化打开目标页面后检测到登录页跳转');
     const commands = fs.readFileSync(commandLog, 'utf-8');
-    expect(commands).toContain('handoff');
-    expect(commands).toContain('resume');
+    expect(commands).not.toContain('handoff');
+    expect(commands).not.toContain('resume');
     expect(commands.split('\n').filter((command) => /\bopen https:\/\/example\.com\/live\/create\b/.test(command))).toHaveLength(1);
     expect(commands).toContain('fill @e2 安选公开直播自动化');
     expect(commands).toContain('state save');

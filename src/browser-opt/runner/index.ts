@@ -69,7 +69,8 @@ export class BrowserOptRunner {
     let fatalError: string | undefined;
     let authStateFallbackUsed = false;
     const allowAuthStateFallback = !options.handoff?.waitForUserResume;
-    const openedWithProfileImport = Boolean(options.profile && !options.statePath);
+    logAuthStateMode(logs, options);
+    const openedWithProfile = Boolean(options.profile && !options.statePath);
     let agent = this.agentFactory({
       sessionId: options.sessionId,
       profile: options.profile,
@@ -82,7 +83,6 @@ export class BrowserOptRunner {
     });
 
     try {
-      logAuthStateMode(logs, options);
       logs.push(`open: ${url}`);
       agent.open(url);
 
@@ -97,30 +97,16 @@ export class BrowserOptRunner {
       logs.push(`snapshot: ${openSnapshotPath}`);
       logs.push(`screenshot: ${openScreenshotPath}`);
       logs.push(`page-state: ${summarizeSnapshot(openSnapshot)}`);
-      if (isAboutBlankOpen(agent, openSnapshot)) {
-        throw new Error('浏览器页面未成功打开：当前会话持续停留在 about:blank，且没有可恢复的业务页或登录页。');
-      }
 
-      if (openedWithProfileImport) {
-        saveProfileImportedAuthState(agent, options.authStateSavePath, logs, openSnapshot);
-      }
-
-      /**
-       * state 已存在但运行中被登录页拦截时，最多回退一次到对应 profile 重新导入。
-       * 普通 Chrome 不一定开放 CDP 调试端口，因此这里不走 focused-browser 复用。
-       */
+      /** state 失效时只允许切换一次 profile 窗口，后续自动化与 handoff 固定复用该窗口。 */
       const retryAuthStateFallback = (): BrowserAgent | null => {
-        const canFallbackAuthState = options.statePath && options.authStateFallbackProfile;
-        if (!allowAuthStateFallback || !canFallbackAuthState || authStateFallbackUsed) {
+        if (!allowAuthStateFallback || !options.statePath || !options.authStateFallbackProfile || authStateFallbackUsed) {
           return null;
         }
 
         authStateFallbackUsed = true;
-        logs.push(`auth-state-fallback: state 登录态疑似失效，改用 profile ${options.authStateFallbackProfile} 重新导入。`);
-        const previousAgent = agent;
-        const fallbackSnapshotPath = path.join(outputDir, '00-profile-fallback.snapshot.json');
-        const fallbackScreenshotPath = path.join(outputDir, '00-profile-fallback.png');
-        previousAgent.close();
+        logs.push(`auth-state-fallback: state 登录态疑似失效，切换到 profile ${options.authStateFallbackProfile}。`);
+        agent.close();
         const fallbackAgent = this.agentFactory({
           profile: options.authStateFallbackProfile,
           sessionName: options.sessionName,
@@ -134,6 +120,8 @@ export class BrowserOptRunner {
         try {
           logs.push(`fallback-open: ${url}`);
           fallbackAgent.open(url);
+          const fallbackSnapshotPath = path.join(outputDir, '00-profile-fallback.snapshot.json');
+          const fallbackScreenshotPath = path.join(outputDir, '00-profile-fallback.png');
           const fallbackSnapshot = captureSettledSnapshot(fallbackAgent, fallbackSnapshotPath, logs, {
             reloadAfterBlank: true,
             targetUrl: url,
@@ -144,24 +132,35 @@ export class BrowserOptRunner {
           logs.push(`fallback-screenshot: ${fallbackScreenshotPath}`);
           logs.push(`fallback-page-state: ${summarizeSnapshot(fallbackSnapshot)}`);
           openSnapshot = fallbackSnapshot;
-          if (isAboutBlankOpen(fallbackAgent, fallbackSnapshot)) {
-            logs.push('auth-state-fallback-blank: profile 候选页停留在 about:blank，保留候选窗口供排查。');
-            return fallbackAgent;
+          if (!isAboutBlankOpen(fallbackAgent, fallbackSnapshot)
+            && !shouldTriggerLoginHandoff(flow, url, fallbackSnapshot)
+            && options.authStateSavePath) {
+            saveAuthState(fallbackAgent, options.authStateSavePath, logs);
           }
+          return fallbackAgent;
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          logs.push(`auth-state-fallback-failed: profile 候选启动失败，保留候选窗口供排查：${message}`);
+          logs.push(`auth-state-fallback-failed: ${message}`);
           return fallbackAgent;
         }
-
-        if (!shouldTriggerLoginHandoff(flow, url, openSnapshot) && options.authStateSavePath) {
-          saveAuthState(agent, options.authStateSavePath, logs);
-        }
-        return agent;
       };
+
+      if (isAboutBlankOpen(agent, openSnapshot)) {
+        retryAuthStateFallback();
+      }
+      if (isAboutBlankOpen(agent, openSnapshot)) {
+        throw new Error('浏览器页面未成功打开：当前会话持续停留在 about:blank，且没有可恢复的业务页或登录页。');
+      }
+
+      if (openedWithProfile) {
+        saveProfileAuthState(agent, options.authStateSavePath, logs, openSnapshot);
+      }
 
       if (shouldTriggerLoginHandoff(flow, url, openSnapshot)) {
         retryAuthStateFallback();
+      }
+      if (isAboutBlankOpen(agent, openSnapshot)) {
+        throw new Error('profile fallback 打开目标页面后仍停留在 about:blank。');
       }
 
       if (shouldTriggerLoginHandoff(flow, url, openSnapshot)) {
@@ -253,8 +252,8 @@ function logAuthStateMode(logs: string[], options: BrowserOptRunnerOptions): voi
   }
 }
 
-/** 从 profile 首次导入时尽早固化 state；登录页或空白页不保存，避免把无效状态写成默认值。 */
-function saveProfileImportedAuthState(
+/** profile 作为唯一主 agent 首次打开后固化 state；登录页或空白页不保存无效状态。 */
+function saveProfileAuthState(
   agent: BrowserAgent,
   authStateSavePath: string | undefined,
   logs: string[],
@@ -264,7 +263,7 @@ function saveProfileImportedAuthState(
     return;
   }
   if (isLoginLikeSnapshot(snapshot) || snapshot.nodeCount === 0) {
-    logs.push('auth-state-profile-import-save-skipped: profile 页面尚未确认处于可复用登录态。');
+    logs.push('auth-state-profile-save-skipped: profile 页面尚未确认处于可复用登录态。');
     return;
   }
   saveAuthState(agent, authStateSavePath, logs);

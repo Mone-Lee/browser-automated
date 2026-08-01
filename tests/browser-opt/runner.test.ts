@@ -454,12 +454,11 @@ describe('BrowserOptRunner', () => {
     expect((agent.close as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
   });
 
-  it('falls back to the profile when a saved auth state opens on the login page', async () => {
+  it('uses the profile as the only visible agent when no state exists', async () => {
     const outputDir = makeTempDir();
     const authStatePath = path.join(makeTempDir(), 'auth-state.json');
     const agent = buildAgent({
       snapshots: [
-        snapshotJson('登录远方的梦想直播平台', { e1: { role: 'textbox', name: '请输入手机号' } }),
         snapshotJson('open snapshot', { e1: { role: 'heading', name: 'Example' } }),
         snapshotJson('before snapshot', { e1: { role: 'heading', name: 'Example' } }),
         snapshotJson('after snapshot with Example', { e1: { role: 'heading', name: 'Example' } }),
@@ -470,37 +469,48 @@ describe('BrowserOptRunner', () => {
 
     const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。', {
       outputDir,
-      statePath: authStatePath,
+      profile: 'Default',
       authStateSavePath: authStatePath,
-      authStateFallbackProfile: 'Default',
     });
 
     expect(result.passed).toBe(true);
-    expect(capturedOptions[0]).toEqual(expect.objectContaining({ statePath: authStatePath }));
-    expect(capturedOptions[1]).toEqual(expect.objectContaining({ profile: 'Default' }));
-    expect(capturedOptions[1]).not.toHaveProperty('statePath');
-    expect((agent.close as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
-    expect((agent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(2);
-    expect((agent.stateSave as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(2);
-    expect(result.report.logs.join('\n')).toContain('auth-state-fallback: state 登录态疑似失效，改用 profile Default 重新导入。');
+    expect(capturedOptions).toHaveLength(1);
+    expect(capturedOptions[0]).toEqual(expect.objectContaining({ profile: 'Default', liveViewport: true }));
+    expect(capturedOptions[0].statePath).toBeUndefined();
+    expect((agent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((agent.close as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect((agent.stateSave as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(authStatePath);
   });
 
-  it('falls back before handoff when auth redirects to login after the initial open snapshot', async () => {
+  it('allows exactly one profile fallback agent when the default state is invalid', async () => {
     const outputDir = makeTempDir();
     const authStatePath = path.join(makeTempDir(), 'auth-state.json');
-    const agent = buildAgent({
+    const blankSnapshot = {
+      raw: JSON.stringify({ success: true, data: { origin: 'about:blank', refs: {}, snapshot: '(no interactive elements)' } }),
+      data: { success: true, data: { origin: 'about:blank', refs: {}, snapshot: '(no interactive elements)' } },
+    };
+    const stateAgent = buildAgent({
+      snapshots: Array.from({ length: 12 }, () => blankSnapshot),
+      getUrl: () => 'about:blank',
+      getTabs: () => [
+        { active: true, tabId: 't1', title: 'about:blank', type: 'page', url: 'about:blank' },
+      ],
+    });
+    const profileAgent = buildAgent({
       snapshots: [
-        snapshotJson('创建直播页', { e1: { role: 'heading', name: '创建直播' } }),
-        snapshotJson('登录远方的梦想直播平台', { e2: { role: 'textbox', name: '请输入手机号' } }),
-        snapshotJson('创建直播页', { e3: { role: 'textbox', name: '直播间名称' } }),
-        snapshotJson('创建直播页', { e3: { role: 'textbox', name: '直播间名称' } }),
-        snapshotJson('after 安选公开直播自动化', { e3: { role: 'textbox', name: '直播间名称' } }),
+        snapshotJson('open snapshot', { e1: { role: 'heading', name: 'Example' } }),
+        snapshotJson('before snapshot', { e1: { role: 'heading', name: 'Example' } }),
+        snapshotJson('after snapshot with Example', { e1: { role: 'heading', name: 'Example' } }),
       ],
     });
     const capturedOptions: AgentOptions[] = [];
-    const runner = new BrowserOptRunner(makeFactory(agent, capturedOptions));
+    const agents = [stateAgent, profileAgent];
+    const runner = new BrowserOptRunner((options) => {
+      capturedOptions.push(options ?? {});
+      return agents.shift() ?? profileAgent;
+    });
 
-    const result = await runner.run('执行创建安选公开直播流程：https://test-live.ifengqun.com/live/create?time=2\n1. 直播间名称输入“安选公开直播自动化”', {
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。', {
       outputDir,
       statePath: authStatePath,
       authStateSavePath: authStatePath,
@@ -508,14 +518,19 @@ describe('BrowserOptRunner', () => {
     });
 
     expect(result.passed).toBe(true);
-    expect(capturedOptions[1]).toEqual(expect.objectContaining({ profile: 'Default' }));
-    expect((agent.handoff as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
-    expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e3', '安选公开直播自动化');
-    expect((agent.stateSave as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(authStatePath);
-    expect(result.report.logs.join('\n')).toContain('auth-state-fallback: state 登录态疑似失效，改用 profile Default 重新导入。');
+    expect(capturedOptions).toHaveLength(2);
+    expect(capturedOptions[0]).toEqual(expect.objectContaining({ statePath: authStatePath }));
+    expect(capturedOptions[1]).toEqual(expect.objectContaining({ profile: 'Default', liveViewport: true }));
+    expect(capturedOptions[1]).not.toHaveProperty('statePath');
+    expect(capturedOptions[1]).not.toHaveProperty('headless');
+    expect((stateAgent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((stateAgent.close as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((profileAgent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((profileAgent.close as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(result.report.logs.join('\n')).toContain('auth-state-fallback: state 登录态疑似失效，切换到 profile Default。');
   });
 
-  it('uses the current state window for interactive login handoff instead of opening a profile fallback', async () => {
+  it('keeps the current state agent for interactive login handoff', async () => {
     const outputDir = makeTempDir();
     const authStatePath = path.join(makeTempDir(), 'auth-state.json');
     const agent = buildAgent({
@@ -554,7 +569,7 @@ describe('BrowserOptRunner', () => {
     expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e2', '安选公开直播自动化');
   });
 
-  it('closes the invalid state window and keeps the profile candidate when it remains blank', async () => {
+  it('keeps the current state agent waiting for handoff without creating a fallback agent', async () => {
     const outputDir = makeTempDir();
     const authStatePath = path.join(makeTempDir(), 'auth-state.json');
     const originalAgent = buildAgent({
@@ -563,72 +578,22 @@ describe('BrowserOptRunner', () => {
       ],
       getUrl: () => 'https://test-live.ifengqun.com/login',
     });
-    const blankSnapshot = {
-      raw: JSON.stringify({ success: true, data: { origin: 'about:blank', refs: {}, snapshot: '(no interactive elements)' } }),
-      data: { success: true, data: { origin: 'about:blank', refs: {}, snapshot: '(no interactive elements)' } },
-    };
-    const fallbackAgent = buildAgent({
-      snapshots: Array.from({ length: 12 }, () => blankSnapshot),
-      getUrl: () => 'about:blank',
-      getTabs: () => [
-        { active: true, tabId: 't1', title: 'about:blank', type: 'page', url: 'about:blank' },
-      ],
-    });
-    const agents = [originalAgent, fallbackAgent];
-    const runner = new BrowserOptRunner(() => agents.shift() ?? fallbackAgent);
+    const capturedOptions: AgentOptions[] = [];
+    const runner = new BrowserOptRunner(makeFactory(originalAgent, capturedOptions));
 
     const result = await runner.run('测试 https://test-live.ifengqun.com/live/create?time=2。\n\n目标：\n1. 验证页面包含 "创建直播"。', {
       outputDir,
       statePath: authStatePath,
       authStateSavePath: authStatePath,
-      authStateFallbackProfile: 'Default',
-    });
-
-    expect(result.report.status).toBe('FAIL');
-    expect((originalAgent.close as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
-    expect((originalAgent.handoff as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
-    expect((fallbackAgent.close as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
-    expect((fallbackAgent.handoff as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
-    expect(result.report.screenshots).toEqual([
-      path.join(result.report.outputDir, '00-open.png'),
-      path.join(result.report.outputDir, '00-profile-fallback.png'),
-      path.join(result.report.outputDir, '01-before.png'),
-      path.join(result.report.outputDir, '01-after.png'),
-    ]);
-    expect(result.report.logs.join('\n')).toContain(
-      'auth-state-fallback-blank: profile 候选页停留在 about:blank，保留候选窗口供排查。',
-    );
-  });
-
-  it('waits for handoff in the profile candidate when the candidate opens the login page', async () => {
-    const outputDir = makeTempDir();
-    const authStatePath = path.join(makeTempDir(), 'auth-state.json');
-    const loginSnapshot = snapshotJson('登录远方的梦想直播平台', {
-      e1: { role: 'textbox', name: '请输入手机号' },
-    });
-    const originalAgent = buildAgent({
-      snapshots: [loginSnapshot],
-      getUrl: () => 'https://test-live.ifengqun.com/login',
-    });
-    const fallbackAgent = buildAgent({
-      snapshots: [loginSnapshot],
-      getUrl: () => 'https://test-live.ifengqun.com/login',
-    });
-    const agents = [originalAgent, fallbackAgent];
-    const runner = new BrowserOptRunner(() => agents.shift() ?? fallbackAgent);
-
-    const result = await runner.run('测试 https://test-live.ifengqun.com/live/create?time=2。\n\n目标：\n1. 验证页面包含 "创建直播"。', {
-      outputDir,
-      statePath: authStatePath,
-      authStateSavePath: authStatePath,
-      authStateFallbackProfile: 'Default',
     });
 
     expect(result.report.status).toBe('HANDOFF');
-    expect((originalAgent.close as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
-    expect((originalAgent.handoff as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
-    expect((fallbackAgent.close as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
-    expect((fallbackAgent.handoff as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect(capturedOptions).toHaveLength(1);
+    expect((originalAgent.close as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect((originalAgent.handoff as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((originalAgent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect(result.report.screenshots).toEqual([path.join(result.report.outputDir, '00-open.png')]);
+    expect(result.report.logs.join('\n')).not.toContain('profile');
   });
 
   it('executes field input steps with deterministic fill commands by default', async () => {
@@ -2103,6 +2068,45 @@ describe('BrowserOptRunner', () => {
       '上传“商品白底图”后页面进入图片裁剪或确认上传流程。请在浏览器中完成裁剪、确认上传，然后继续当前 browser-opt 流程。',
     );
     expect((agent.fill as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+  });
+
+  it('continues later automation in the same window after upload handoff resumes', async () => {
+    const outputDir = makeTempDir();
+    const fetchMock = vi.fn(async () => new Response('image-bytes', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const waitForUserResume = vi.fn(async () => {});
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before upload', { e3: { role: 'file', name: '商品白底图' } }),
+        snapshotJson('82243689cae75e27b3867a5cbdd4292b.png 待处理 裁切 保存并上传', {
+          e4: { role: 'button', name: '裁切' },
+          e5: { role: 'button', name: '保存并上传' },
+        }),
+        snapshotJson('after resume with 商品白底图预览', { e3: { role: 'file', name: '商品白底图' } }),
+        snapshotJson('before title', { e6: { role: 'textbox', name: '商品标题' } }),
+        snapshotJson('after 芝麻丸礼盒', { e6: { role: 'textbox', name: '商品标题' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/goods/create。\n\n目标：\n1. 自动上传“商品白底图”，图片来源 URL 为“https://stantic.ifengqun.com/front/fq-ecmiddle-sys/upload/82243689cae75e27b3867a5cbdd4292b.png”。\n2. 商品标题输入“芝麻丸礼盒”。',
+      {
+        outputDir,
+        handoff: {
+          waitForUserResume,
+        },
+      },
+    );
+
+    expect(result.passed).toBe(true);
+    expect((agent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((agent.handoff as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((agent.resume as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect(waitForUserResume).toHaveBeenCalledTimes(1);
+    expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e6', '芝麻丸礼盒');
+    expect(result.report.steps).toHaveLength(2);
   });
 
   it('waits briefly after upload for a delayed image crop workflow before continuing', async () => {

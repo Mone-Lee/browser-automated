@@ -282,8 +282,8 @@ interface BrowserOptAuthState {
 /**
  * 登录态复用策略：
  * 1. 默认 state 存在时优先加载，避免每次从完整 Chrome profile 启动。
- * 2. 默认 state 不存在时用 profile 首次导入，并把 cookies/storage 保存成 state。
- * 3. 默认 state 失效时交互 CLI 优先 handoff；非交互 fallback 只允许自动选择的默认 state 使用 profile。
+ * 2. 默认 state 不存在时由唯一主 agent 使用 profile 打开，并把 cookies/storage 保存成 state。
+ * 3. 默认 state 失效时由交互式 handoff 复用当前窗口，避免额外 profile 空白窗口。
  * 4. 显式 --state 保持隔离语义，不自动回退到 profile。
  */
 function resolveBrowserOptAuthState(flags: Record<string, string | boolean>, profile: string): BrowserOptAuthState {
@@ -310,7 +310,7 @@ function defaultBrowserOptStatePath(profile: string): string {
   return path.join(stateDir, `browser-opt-${stateName}.json`);
 }
 
-/** 为同一项目里的同一流程生成稳定 session，避免 handoff 后重跑时新建随机浏览器窗口。 */
+/** 为同一项目里的同一流程生成稳定 session，便于不同入口一致标识浏览器会话。 */
 function resolveBrowserOptSessionId(flags: Record<string, string | boolean>, identity: string): string {
   const configuredSession = getStringFlag(flags, 'session')?.trim();
   if (configuredSession) {

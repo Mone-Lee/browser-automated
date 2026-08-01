@@ -142,8 +142,8 @@ export function saveAuthenticatedHandoffState(
   saveAuthState(agent, authStateSavePath, logs);
 }
 
-/** 保存 cookies 与 storage，失败只记录日志，避免覆盖原本流程的 PASS/FAIL 结论。 */
-export function saveAuthState(agent: BrowserAgent, authStateSavePath: string, logs: string[]): void {
+/** 保存 cookies 与 storage，失败只记录日志，并返回是否成功供 profile 导入流程判断。 */
+export function saveAuthState(agent: BrowserAgent, authStateSavePath: string, logs: string[]): boolean {
   try {
     fs.mkdirSync(path.dirname(authStateSavePath), { recursive: true });
     const saveOutput = agent.stateSave(authStateSavePath);
@@ -151,9 +151,11 @@ export function saveAuthState(agent: BrowserAgent, authStateSavePath: string, lo
     if (saveOutput.trim()) {
       logs.push(`auth-state-save-output: ${saveOutput.trim()}`);
     }
+    return true;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logs.push(`auth-state-save-failed: ${message}`);
+    return false;
   }
 }
 
