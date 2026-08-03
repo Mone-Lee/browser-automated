@@ -10,6 +10,21 @@ This skill is the deterministic browser execution entrypoint. It is intentionall
 
 By default, the calling AI is responsible for understanding the page from `snapshot --json`; `agent-browser` only executes deterministic commands such as `open`, `fill @ref`, `click @ref`, screenshots, and waits. Do not use `agent-browser chat` unless the user explicitly asks for the legacy chat mode or passes `--agent-chat`.
 
+Natural-language steps that explicitly ask to open developer tools are mapped to
+CDP's experimental `Target.openDevTools` command. This opens native DevTools for
+the active target in the same Chrome window; do not use `agent-browser inspect`,
+which opens a separate DevTools frontend URL. If the current Chrome version does
+not support `Target.openDevTools`, report the failure instead of falling back to
+the separate frontend. Supported expressions include `打开开发者工具`,
+`启动 DevTools`, `调起 Chrome DevTools`, and `inspect current page`:
+
+```text
+/browser-opt 测试 https://example.com 的页面调试流程。
+
+目标：
+1. 打开开发者工具。
+```
+
 ## Image upload examples
 
 For test environments, describe upload steps as automatic URL uploads. `browser-opt` downloads the remote image into the run evidence directory and calls `agent-browser upload` with the local file path:

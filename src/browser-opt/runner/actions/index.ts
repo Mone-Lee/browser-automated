@@ -28,6 +28,10 @@ export async function executeDeterministicInstruction(
     return executeOpenAction(agent, action, options);
   }
 
+  if (action.type === 'inspect') {
+    return agent.inspect();
+  }
+
   if (action.type === 'fill') {
     return executeFillAction(agent, action, snapshot);
   }

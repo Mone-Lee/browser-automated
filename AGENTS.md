@@ -23,3 +23,9 @@
 
 - 文件内使用的 `interface`、`type` 等 TypeScript 类型声明，应集中放在文件顶部、所有 import 下方，或者提取到专门的类型声明文件中。
 - 不要把类型声明散落在函数之间。
+
+## Git 提交规范
+
+- 生成 `git commit` 时，提交信息统一使用 Conventional Commits 格式。
+- 默认结构为 `type(scope): subject`；当改动不需要 `scope` 时，使用 `type: subject`。
+- `subject` 使用简洁明确的短句，优先描述行为变化或提交目的，不写空泛说明。

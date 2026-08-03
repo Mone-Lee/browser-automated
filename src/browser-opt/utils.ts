@@ -102,6 +102,10 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
     return { type: 'open', url };
   }
 
+  if (isInspectInstruction(normalized)) {
+    return { type: 'inspect' };
+  }
+
   if (/handoff|人工|手动|操作人员/.test(normalized) && /上传|选择.*(?:图片|文件|封面)/.test(normalized)) {
     return { type: 'handoff', message: normalized };
   }
@@ -155,6 +159,16 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
   }
 
   return null;
+}
+
+/** 识别明确要求打开当前页面开发者工具的中英文表达，避免把普通“检查页面”误判为 inspect。 */
+function isInspectInstruction(instruction: string): boolean {
+  if (/^inspect(?:\s+(?:the\s+)?(?:current\s+)?page)?[。.!！]?$/i.test(instruction)) {
+    return true;
+  }
+
+  return /开发者工具|开发人员工具|(?:chrome\s*)?devtools/i.test(instruction)
+    && /打开|启动|调起|唤起|显示|open|launch|start/i.test(instruction);
 }
 
 /** 将 CLI 或上层封装传入的字面量换行还原，避免 "\\n2." 被当作字段名。 */

@@ -34,6 +34,26 @@ export interface BrowserTabInfo {
   url: string;
 }
 
+interface CdpResponse<TResult> {
+  id: number;
+  result?: TResult;
+  error?: { code: number; message: string };
+}
+
+interface CdpTargetInfo {
+  targetId: string;
+  type: string;
+  url: string;
+}
+
+interface CdpTargetListResult {
+  targetInfos: CdpTargetInfo[];
+}
+
+interface CdpOpenDevToolsResult {
+  targetId: string;
+}
+
 function parseJsonOutput(raw: string): AgentBrowserJsonResult {
   try {
     return {
@@ -265,6 +285,79 @@ export class BrowserAgent {
   /** 打开指定 URL。 */
   open(url: string): string {
     return this.run(['open', url]);
+  }
+
+  /** 通过当前浏览器的 CDP 连接，在活动页面所在 Chrome 窗口中打开原生 DevTools。 */
+  async inspect(): Promise<string> {
+    const currentUrl = this.getUrl();
+    const cdpUrl = this.run(['get', 'cdp-url']).trim();
+    const socket = new WebSocket(cdpUrl);
+
+    try {
+      await this.waitForWebSocketOpen(socket);
+      const targetList = await this.sendCdpCommand<CdpTargetListResult>(socket, 1, 'Target.getTargets');
+      const target = targetList.targetInfos.find((candidate) => (
+        candidate.type === 'page' && candidate.url === currentUrl
+      ));
+      if (!target) {
+        throw new Error(`无法在 CDP target 列表中定位当前页面：${currentUrl}`);
+      }
+
+      const opened = await this.sendCdpCommand<CdpOpenDevToolsResult>(socket, 2, 'Target.openDevTools', {
+        targetId: target.targetId,
+      });
+      return `Chrome 原生 DevTools 已打开：${opened.targetId}`;
+    } finally {
+      socket.close();
+    }
+  }
+
+  /** 等待 CDP WebSocket 建立连接，并在 agent 超时时间内给出明确失败。 */
+  private waitForWebSocketOpen(socket: WebSocket): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('连接 Chrome DevTools Protocol 超时')), this.timeout);
+      socket.addEventListener('open', () => {
+        clearTimeout(timer);
+        resolve();
+      }, { once: true });
+      socket.addEventListener('error', () => {
+        clearTimeout(timer);
+        reject(new Error('无法连接 Chrome DevTools Protocol'));
+      }, { once: true });
+    });
+  }
+
+  /** 发送单条 CDP 指令并校验协议响应，避免实验性能力失败时仍报告成功。 */
+  private sendCdpCommand<TResult>(
+    socket: WebSocket,
+    id: number,
+    method: string,
+    params?: Record<string, unknown>,
+  ): Promise<TResult> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`CDP 指令超时：${method}`)), this.timeout);
+      const handleMessage = (event: MessageEvent) => {
+        const response = JSON.parse(String(event.data)) as CdpResponse<TResult>;
+        if (response.id !== id) {
+          return;
+        }
+
+        clearTimeout(timer);
+        socket.removeEventListener('message', handleMessage);
+        if (response.error) {
+          reject(new Error(`CDP ${method} 失败：${response.error.message}`));
+          return;
+        }
+        if (!response.result) {
+          reject(new Error(`CDP ${method} 未返回结果`));
+          return;
+        }
+        resolve(response.result);
+      };
+
+      socket.addEventListener('message', handleMessage);
+      socket.send(JSON.stringify({ id, method, ...(params ? { params } : {}) }));
+    });
   }
 
   /** 刷新当前页面，用于处理 SPA 首次进入后卡在半初始化状态的场景。 */

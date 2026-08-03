@@ -22,6 +22,7 @@ function makeErrorResult(stderr = 'command failed', status = 1) {
 
 beforeEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
   mockExecFileSync.mockReset();
   mockExecFileSync.mockReturnValue('');
@@ -29,6 +30,58 @@ beforeEach(() => {
 });
 
 describe('BrowserAgent', () => {
+  describe('inspect()', () => {
+    it('opens native DevTools for the active page through CDP', async () => {
+      const sentMessages: Array<{ id: number; method: string; params?: Record<string, string> }> = [];
+      class MockWebSocket {
+        private readonly listeners = new Map<string, Set<(event: { data?: string }) => void>>();
+
+        constructor(public readonly url: string) {
+          queueMicrotask(() => this.emit('open', {}));
+        }
+
+        addEventListener(type: string, listener: (event: { data?: string }) => void): void {
+          const listeners = this.listeners.get(type) ?? new Set();
+          listeners.add(listener);
+          this.listeners.set(type, listeners);
+        }
+
+        removeEventListener(type: string, listener: (event: { data?: string }) => void): void {
+          this.listeners.get(type)?.delete(listener);
+        }
+
+        send(payload: string): void {
+          const message = JSON.parse(payload) as { id: number; method: string; params?: Record<string, string> };
+          sentMessages.push(message);
+          const result = message.method === 'Target.getTargets'
+            ? { targetInfos: [{ targetId: 'page-target', type: 'page', url: 'https://example.com/' }] }
+            : { targetId: 'devtools-target' };
+          queueMicrotask(() => this.emit('message', { data: JSON.stringify({ id: message.id, result }) }));
+        }
+
+        close(): void {}
+
+        private emit(type: string, event: { data?: string }): void {
+          for (const listener of this.listeners.get(type) ?? []) {
+            listener(event);
+          }
+        }
+      }
+
+      vi.stubGlobal('WebSocket', MockWebSocket);
+      mockSpawnSync
+        .mockReturnValueOnce(makeOkResult('https://example.com/\n'))
+        .mockReturnValueOnce(makeOkResult('ws://127.0.0.1:9222/devtools/browser/test'));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session' });
+      await expect(agent.inspect()).resolves.toBe('Chrome 原生 DevTools 已打开：devtools-target');
+      expect(sentMessages).toEqual([
+        { id: 1, method: 'Target.getTargets' },
+        { id: 2, method: 'Target.openDevTools', params: { targetId: 'page-target' } },
+      ]);
+    });
+  });
+
   describe('open()', () => {
     it('calls agent-browser open with the url and session flag', () => {
       mockSpawnSync.mockReturnValue(makeOkResult(''));

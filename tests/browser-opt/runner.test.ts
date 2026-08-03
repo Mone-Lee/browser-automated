@@ -59,6 +59,7 @@ function buildAgent(options: {
 
   return {
     open: vi.fn(() => 'opened'),
+    inspect: vi.fn(() => 'DevTools opened'),
     reload: vi.fn(() => 'reloaded'),
     getSessionId: vi.fn(() => 'browser-opt-test-session'),
     getUrl: vi.fn(options.getUrl ?? (() => 'https://example.com')),
@@ -96,6 +97,13 @@ function makeFactory(agent: BrowserAgent, capturedOptions: AgentOptions[] = []) 
 describe('browser-opt parsing', () => {
   it('extracts URL from natural-language flow', () => {
     expect(extractBrowserOptUrl('测试 https://example.com 的搜索功能')).toBe('https://example.com');
+  });
+
+  it('recognizes natural-language requests to open DevTools', () => {
+    expect(parseDeterministicAction('打开开发者工具')).toEqual({ type: 'inspect' });
+    expect(parseDeterministicAction('请调起 Chrome DevTools。')).toEqual({ type: 'inspect' });
+    expect(parseDeterministicAction('inspect current page')).toEqual({ type: 'inspect' });
+    expect(parseDeterministicAction('检查当前页面')).toBeNull();
   });
 
   it('splits numbered target steps', () => {
@@ -335,6 +343,26 @@ describe('browser-opt parsing', () => {
 });
 
 describe('BrowserOptRunner', () => {
+  it('opens DevTools when requested through a natural-language step', async () => {
+    const outputDir = makeTempDir();
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before inspect'),
+        snapshotJson('after inspect'),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 打开开发者工具。', {
+      outputDir,
+    });
+
+    expect(result.passed).toBe(true);
+    expect((agent.inspect as ReturnType<typeof vi.fn>)).toHaveBeenCalledOnce();
+    expect(result.report.steps[0].actionOutput).toBe('DevTools opened');
+  });
+
   it('uses DOM fallback for field-scoped clicks when snapshot omits the field label', async () => {
     const outputDir = makeTempDir();
     const snapshotText = [
