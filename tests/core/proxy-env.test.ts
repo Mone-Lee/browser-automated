@@ -7,7 +7,7 @@ import {
   mergeNoProxyEntries,
   parseMacOSProxyExceptions,
   parseWindowsProxyExceptions,
-} from '../../src/core/proxy-env.js';
+} from '../../packages/browser-core/dist/proxy-env.js';
 
 vi.mock('node:child_process', () => ({
   execFileSync: vi.fn(),

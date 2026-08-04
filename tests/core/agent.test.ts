@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { BrowserAgent } from '../../src/core/agent.js';
+import { BrowserAgent } from '../../packages/browser-core/dist/agent.js';
 
 // 监听 spawnSync，确保测试过程不会真的启动浏览器。
 vi.mock('node:child_process', () => ({
@@ -736,9 +736,8 @@ describe('BrowserAgent', () => {
   describe('tabs', () => {
     it('lists tabs and switches by stable tab id', () => {
       mockSpawnSync
-        .mockReturnValueOnce({
-          status: 0,
-          stdout: JSON.stringify({
+        .mockReturnValueOnce(makeOkResult(
+          JSON.stringify({
             success: true,
             data: {
               tabs: [
@@ -746,9 +745,8 @@ describe('BrowserAgent', () => {
               ],
             },
           }),
-          stderr: '',
-        })
-        .mockReturnValueOnce({ status: 0, stdout: 'switched', stderr: '' });
+        ))
+        .mockReturnValueOnce(makeOkResult('switched'));
       const agent = new BrowserAgent({ sessionId: 'test-session' });
 
       expect(agent.getTabs()).toEqual([

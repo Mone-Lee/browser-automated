@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "ignoreDeprecations": "6.0",
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@browser-automated/browser-core": ["packages/browser-core/src/index.ts"],
+      "@browser-automated/browser-core/agent": ["packages/browser-core/src/agent.ts"],
+      "@browser-automated/browser-core/proxy-env": ["packages/browser-core/src/proxy-env.ts"]
+    }
+  }
+}
