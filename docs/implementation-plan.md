@@ -77,9 +77,11 @@ LLM 做语义补全与断言生成
 - Workflow CLI 子命令：`save`、`list`、`match`、`run`。
 - 生成测试索引 `tests/generated/index.json`。
 - Playwright 测试生成目录 `tests/generated/`。
-- handoff/resume 完整闭环、trace 记录与模拟测试。
+- `browser-opt` 的逐步骤证据报告：snapshot、截图、日志和 `report.json`/`report.md`。
+- handoff/resume 完整闭环与模拟测试。
+- `browser-e2e` 的自然语言步骤生成、Playwright spec 写入、索引更新与已生成用例复用。
 
-后续规划应在现有能力上收敛目标，不重复建设新的自动化框架。
+通用 Action Trace schema、独立 trace 持久化与 `trace inspect/export` 命令尚未实现；后续规划应在现有能力上收敛目标，不重复建设新的自动化框架。
 
 ## 5. 目标架构
 
@@ -93,8 +95,8 @@ CLI 是可复用执行能力的主入口，负责参数解析、流程编排、�
 - `browser-e2e <natural-language-case>`：测试生成入口，负责自然语言整段解析、匹配、生成和执行。
 - `browser-e2e gen <url> <instruction>`：生成 Playwright Test。
 - `browser-opt save/list/match/run`：沉淀和复用一次性自然语言 Workflow。
-- `browser-e2e trace inspect/export`：查看和导出 Action Trace。
-- `browser-e2e handoff/resume`：显式触发用户接管与恢复。
+- `browser-e2e trace inspect/export`：查看和导出 Action Trace（规划中）。
+- `browser-e2e handoff/resume`：显式触发用户接管与恢复（规划中；当前由执行命令内联编排）。
 
 ### 5.2 Workflow 复用层
 
@@ -235,10 +237,8 @@ Agent Browser 打开页面并执行
 - 后续自然语言请求可以匹配已有 workflow。已完成。
 - workflow 可以通过 CLI 直接执行。已完成。
 - workflow 支持 JSON 输出，供 CLI 和脚本稳定解析。已完成。
-- workflow 支持参数化和敏感字段标记。待实现。
-- workflow 可以作为 E2E 生成的输入。待实现。
 
-状态：`In Progress`
+状态：`Done`
 
 ### 6.3 自动生成 E2E 测试代码
 
@@ -264,11 +264,12 @@ LLM 生成测试语义、命名、断言
 
 验收标准：
 
-- 生成代码可通过 TypeScript 编译。
-- 生成测试可被 Playwright Test 执行。
-- 测试文件命名稳定，避免重复生成同名文件。
-- `index.json` 能被 CLI 匹配逻辑使用。
-- 生成断言不只检查“没有报错”，必须绑定 URL、文本、可见元素或业务状态。
+- 已能从 URL 和编号自然语言步骤生成 Playwright spec，并写入 `tests/generated/*.spec.ts`。
+- 已能更新 `index.json`，供 CLI 匹配和复用已生成用例。
+- 已具备单个生成 spec 的 Playwright 执行入口。
+- 尚未在生成完成后自动执行 TypeScript 或 Playwright 校验。
+- 尚未基于成功 Action Trace 校准 locator；当前使用运行时 snapshot 与启发式定位。
+- 断言目前覆盖可解析的 URL 和文本场景，尚未保证每个生成用例都有业务断言。
 
 状态：`In Progress`
 
@@ -318,7 +319,7 @@ LLM 生成测试语义、命名、断言
 - 能从失败步骤进入 handoff。
 - 用户完成后可从同一 session 恢复。
 - 恢复后不会重复执行已经完成的步骤。
-- handoff 过程会写入 trace。
+- handoff 过程会写入步骤证据与运行日志。
 - CLI 能清楚提示用户当前需要做什么。
 
 状态：`Done`
@@ -333,14 +334,15 @@ LLM 生成测试语义、命名、断言
 
 - [x] 明确 `browser-opt` 作为自然语言执行闭环入口。
 - [x] 统一执行结果数据结构。
-- [x] 为每一步写入 Action Trace。
+- [x] 为每一步落盘 snapshot、截图、日志与结构化报告。
 - [x] 对失败动作输出结构化错误。
 - [x] 补充常见操作的单元测试。
+- [ ] 定义跨 `browser-opt` 与 `browser-e2e` 复用的 Action Trace schema。
 
 验收：
 
 - 用户可以通过 `browser-opt` 让浏览器完成一个 3 到 5 步自然语言流程。已完成。
-- 失败时可以根据 trace 复盘。
+- 失败时可以根据报告、snapshot、截图和日志复盘。
 
 ### M2：Handoff 完整闭环
 
@@ -351,7 +353,7 @@ LLM 生成测试语义、命名、断言
 - [x] 定义 handoff session state schema。
 - [x] 实现自动触发策略。
 - [x] 实现显式 `handoff/resume` CLI。
-- [x] 记录 handoff trace。
+- [x] 记录 handoff 的步骤证据和运行日志。
 - [x] 恢复后跳过已完成步骤。
 - [x] 为 CAPTCHA/MFA/OAuth 场景补充模拟测试。
 
@@ -371,8 +373,6 @@ LLM 生成测试语义、命名、断言
 - [x] 实现 workflow matcher。
 - [x] 支持中文名称、稳定 ID、同名覆盖保护和无效文件诊断。
 - [x] Workflow 运行复用现有 BrowserOptRunner，并为同一 workflow 生成稳定 session。
-- [ ] 支持参数和 secret 字段。
-- [ ] workflow 可转成 Playwright Test。
 
 验收：
 
@@ -387,11 +387,12 @@ LLM 生成测试语义、命名、断言
 
 - [ ] 设计并实现 Action Trace schema。
 - [ ] 实现 trace 持久化目录。
-- [ ] 从 trace 生成 Playwright 操作序列。
-- [ ] 生成基础断言。
-- [ ] 写入 `tests/generated/*.spec.ts`。
-- [ ] 更新 `tests/generated/index.json`。
-- [ ] 生成后执行 typecheck 或 Playwright 校验。
+- [ ] 从成功 trace 生成 Playwright 操作序列。
+- [x] 从编号自然语言步骤生成基础 Playwright 操作序列。
+- [x] 生成可解析的 URL、文本基础断言。
+- [x] 写入 `tests/generated/*.spec.ts`。
+- [x] 更新 `tests/generated/index.json`。
+- [ ] 生成后自动执行 typecheck 或 Playwright 校验。
 
 验收：
 
@@ -404,12 +405,13 @@ LLM 生成测试语义、命名、断言
 
 任务：
 
-- [ ] README 对齐最终 CLI 形态。
-- [ ] 补充使用示例。
-- [ ] 补充错误排查文档。
+- [x] README 对齐当前 CLI 形态。
+- [x] 补充 `browser-opt`、Workflow 与 `browser-e2e` 使用示例。
+- [x] 补充 `browser-opt` 安装、登录态与调试说明。
 - [ ] 补充 CI 示例。
-- [ ] 明确生成文件目录和 git ignore 策略。
-- [ ] 统一日志、trace、截图的落盘位置。
+- [ ] 明确生成文件与本地运行产物的 git ignore 策略。
+- [x] 明确 `browser-opt` 报告、截图、snapshot 与 Workflow 的落盘位置。
+- [ ] 统一 Action Trace、`browser-e2e` 运行证据与截图的落盘位置。
 
 验收：
 
@@ -420,40 +422,48 @@ LLM 生成测试语义、命名、断言
 
 | 模块 | 状态 | 当前产物 | 下一步 |
 | --- | --- | --- | --- |
-| CLI 基础 | In Progress | `src/cli/`、`package.json` bin | 收敛命令职责和结果格式 |
-| Agent Browser 封装 | In Progress | `src/core/agent.ts` | 补充 trace 与结构化错误 |
+| CLI 基础 | Done | `src/cli/`、`package.json` bin | 已提供 `browser-opt`、`browser-e2e` 与历史兼容入口；后续按 trace 能力扩展命令 |
+| Agent Browser 封装 | In Progress | `src/core/agent.ts` | 已提供 session、截图与 handoff；补充通用 trace 输出 |
 | 自然语言执行 | Done | `src/browser-opt/runner.ts` | `browser-opt` 执行闭环已完成 |
-| Playwright 生成 | In Progress | `src/browser-e2e/test-reuse/playwright.ts`、`tests/generated/` | 从 trace 生成更稳定 locator 和断言 |
-| 测试索引 | In Progress | `src/browser-e2e/test-reuse/index-store.ts`、`matcher.ts` | 与 workflow 复用边界保持清晰，必要时增加跨索引查询 |
-| Workflow 复用 | In Progress | `src/browser-opt/workflow/`、`browser-opt save/list/match/run`、`tests/browser-opt/workflow.test.ts` | 参数化、secret 字段、转 Playwright Test |
-| Action Trace | Planned | 部分运行结果 | 落盘 schema 和导出命令 |
-| Handoff | Done | session state、handoff/resume CLI、trace 流程与模拟测试 | 闭环已完成，后续按场景补充回归用例 |
+| Playwright 生成 | In Progress | `src/browser-e2e/generate.ts`、`src/browser-e2e/test-reuse/playwright.ts`、`tests/generated/` | 接入成功 trace、校准稳定 locator 与强制校验 |
+| 测试索引 | Done | `src/browser-e2e/test-reuse/index-store.ts`、`matcher.ts` | 已支持生成后更新、自然语言匹配和执行；后续视需要增加跨索引查询 |
+| Workflow 复用 | Done | `src/browser-opt/workflow/`、`browser-opt save/list/match/run`、`tests/browser-opt/workflow.test.ts` | 已闭环 Workflow 文件生成，后续支持转成 E2E 测试用例 |
+| Action Trace | Planned | `browser-opt` 的逐步骤报告与证据文件 | 定义通用 schema、落盘目录和 inspect/export 命令 |
+| Handoff | Done | session state、handoff/resume CLI、步骤证据与模拟测试 | 闭环已完成，后续按场景补充回归用例 |
 | 文档 | In Progress | README、本文档 | 补充 troubleshooting 和示例 |
 
 ## 9. 数据与目录规划
 
-建议目录：
+当前已落盘的目录：
 
 ```text
 tests/generated/
   *.spec.ts
   index.json
 
+.browser-opt/
+  workflows/
+    <workflow-id>.json
+  states/
+    browser-opt-<profile>.json
+  handoffs/
+    <run-id>/run.json
+    <run-id>/output.log
+    <run-id>/resume.signal
+  artifacts/
+    <run-id>/report.json
+    <run-id>/report.md
+```
+
+`browser-opt` 已使用 `.browser-opt/` 下的目录；`tests/generated/` 也已用于生成 spec 与索引。以下 `.browser-automated/` 目录仍是通用 Action Trace 方案的规划，尚未由代码创建：
+
+```text
 .browser-automated/
   traces/
     <run-id>/trace.json
     <run-id>/screenshots/
   sessions/
     <session-id>.json
-
-.browser-opt/
-  workflows/
-    <workflow-id>.json
-  states/
-    browser-opt-<profile>.json
-  artifacts/
-    <run-id>/report.json
-    <run-id>/report.md
 ```
 
 约定：
@@ -463,6 +473,7 @@ tests/generated/
 - `.browser-automated/sessions/` 放临时状态，默认不提交。
 - `.browser-opt/workflows/` 放 `browser-opt` 可复用流程，是否提交由项目决定。
 - `.browser-opt/states/` 放登录态 state，默认不提交。
+- `.browser-opt/handoffs/` 放后台 Workflow 的跨会话控制文件。每次 `browser-opt start` 创建一个 `<run-id>` 目录：`run.json` 记录进程、Workflow 与路径元数据，`output.log` 保存后台输出，`resume.signal` 由 `browser-opt resume --run-id <run-id>` 写入一次性恢复信号。该目录仅用于运行中或近期任务恢复，默认不提交。
 - `.browser-opt/artifacts/` 放 `browser-opt` 执行报告、截图和 snapshot，可按需忽略。
 
 ## 10. 风险与应对
@@ -483,7 +494,7 @@ tests/generated/
 - 用户可以通过 `browser-opt` 触发自然语言浏览器自动化。
 - 用户可以通过 `browser-e2e gen` 触发 E2E 测试生成。
 - CLI 可独立执行同等能力，适合脚本化和 CI。
-- 成功执行流程会产生可复盘 Action Trace。
+- 成功执行流程会产生可复盘的通用 Action Trace。
 - 成功流程可以保存为 Workflow 或生成 Playwright Test。
 - 生成测试可运行、可索引、可复用。
 - 遇到复杂交互时可以 handoff 给用户，并恢复后续自动化。
@@ -494,8 +505,8 @@ tests/generated/
 
 1. 自然语言执行闭环已完成，当前以 `browser-opt` 作为稳定入口。
 2. Handoff 的完整状态保存与恢复已完成，后续只按真实场景补充回归用例。
-3. 然后完善已落地的 Workflow 复用：补参数化、secret 字段和 E2E 生成输入。
-4. 接着完善 Trace 到 Playwright Test 的生成链路，把稳定流程沉淀为标准测试。
-5. 最后补齐工程化和文档，让 CLI 更适合团队长期使用。
+3. 先定义并持久化通用 Action Trace，复用现有 `browser-opt` 逐步骤证据，补齐导出和脱敏能力。
+4. 接着将成功 Trace 接入 Playwright 生成链路，校准 locator、补强断言，并在生成后自动校验。
+5. 最后补齐 CI、git ignore 策略和面向团队的排障文档。
 
 这样可以保证实施顺序与真实落地阻塞点一致，并持续贴近项目最终形态：用 CLI 触发和执行，用 Agent Browser 完成操作，用 Workflow 复用稳定流程，用 Playwright 沉淀测试。
