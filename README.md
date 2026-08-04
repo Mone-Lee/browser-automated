@@ -42,7 +42,7 @@ browser-opt "测试 https://example.com 的搜索功能。
 
 执行成功时只输出 `执行成功`；执行失败时才输出报告路径、日志路径、截图路径和失败步骤。默认模式会把常见访问、输入、点击和验证步骤转成确定性 `agent-browser` 命令；只有显式传 `--agent-chat` 时才使用旧的 `agent-browser chat` 兼容模式。
 
-`browser-opt` 的登录态复用以 state 文件为主：默认会优先加载 `.browser-opt/states/` 下已有 state，避免恢复浏览器标签；没有 state 时，唯一主 agent 直接使用 `--profile Default` 打开目标页并保存 state，不再经过额外导入窗口。交互式 CLI 遇到默认 state 失效时会保留当前窗口进入 handoff，不再打开 profile fallback 空白窗口；完成登录后必须把 `done` 写回同一个进程 session，不要通过第二次 `browser-opt run` 恢复。只有没有人工恢复回调的程序化调用才允许一次 profile fallback。显式传 `--state <path>` 时表示用户要使用隔离 state，不会自动回退到 profile。`browser-opt` 不使用 focused browser 复用普通 Chrome 登录态，因为普通 Chrome 通常没有开放 CDP 调试端口，容易连到错误的临时浏览器。
+`browser-opt` 的登录态复用以 state 文件为主：默认会优先加载 `.browser-opt/states/` 下已有 state，避免恢复浏览器标签；没有 state 时，唯一主 agent 直接使用 `--profile Default` 打开目标页并保存 state。交互式 CLI 遇到默认 state 失效时，会关闭 state 窗口并切换到所选 Chrome Profile 的可见实例，再从该实例进入 handoff，以便人工使用 Chrome 密码管理器。终端直接运行时可输入 `done` 恢复；Codex 执行已保存 Workflow 时使用 `start` 返回的稳定 `runId`，后续通过 `resume --run-id` 恢复原 runner，不依赖会跨 turn 失效的 PTY session，也不要启动第二次 `run`。显式传 `--state <path>` 时表示用户要使用隔离 state，不会自动回退到 profile。`browser-opt` 不使用 focused browser 复用普通 Chrome 登录态，因为普通 Chrome 通常没有开放 CDP 调试端口，容易连到错误的临时浏览器。
 
 `browser-opt` 默认显示并保留真实浏览器，便于观察操作流程和执行后的页面状态，但不会打开 agent-browser 的 `http://localhost:4848` 截图面板。
 

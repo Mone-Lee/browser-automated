@@ -70,9 +70,21 @@ Every execution must follow these rules:
 
 ## Interactive handoff execution
 
-Run `browser-opt` exactly once and keep its returned process session id. Poll progress through the same process session. When the CLI prints a handoff prompt, ask the user to finish the manual action. After the user replies `done`, send `done\n` to that same process session and continue polling it.
+For saved workflows, start the browser run as a detached task and keep the returned stable `runId`. Do not keep an `exec_command` or PTY session id as the recovery handle; Codex may discard that process handle when the handoff response ends the current turn.
 
-The project-level `handoff` and `resume` functions own the pause/resume protocol. Never start a second `browser-opt run` to simulate resume.
+```bash
+/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js start --workflow-id "<matched.id>" --json
+/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js status --run-id "<runId>" --json
+```
+
+Poll `status` until it returns `PASS`, `FAIL`, or `HANDOFF`. When it returns `HANDOFF`, ask the user to finish the manual action and end the current turn normally. After the user replies `done`, restore the original runner and browser with:
+
+```bash
+/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js resume --run-id "<runId>" --json
+/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js status --run-id "<runId>" --json
+```
+
+The detached task still executes `browser-opt run` exactly once. `status` is read-only and `resume` only sends a one-time signal to that original process. Never start a second `run` or `start` command to simulate resume.
 
 ## Saved workflows
 
@@ -140,7 +152,7 @@ Do not treat it as a new one-shot flow. First run:
 
 Handle the JSON result as follows:
 
-- `matched`: run `/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js run --workflow-id "<matched.id>"`.
+- `matched`: run `/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js start --workflow-id "<matched.id>" --json`, retain its `runId`, and follow the interactive handoff execution protocol above.
 - `ambiguous`: do not rely on the CLI's human-readable stdout as the user-facing
   choice list, and do not ask through a modal/input tool that may render Markdown
   as plain text. Parse `match --json`, then ask in a normal assistant message.
@@ -212,8 +224,9 @@ Auth state reuse policy:
 
 - `browser-opt` first checks its saved auth state under `.browser-opt/states/`.
 - If a default state file exists, it loads that state first, so only cookies/storage are reused and prior Chrome tabs are not restored.
-- If the default state opens on a login screen or later redirects there during an interactive CLI run, keep the same browser window and command session alive for handoff. Do not open a profile fallback window or start a second `browser-opt run` for resume.
-- A programmatic run without an interactive handoff callback may replace an invalid state window once with the selected profile.
+- If the default state opens on a login screen or later redirects there, close the state window and replace it once with the selected Chrome profile before entering handoff. Keep that profile window and the original `browser-opt` runner alive for resume so the operator can use Chrome's password manager.
+- Saved workflows keep the original runner alive as a detached task and use `runId` for handoff recovery across Codex turns; an `exec_command` session id is never a durable recovery handle.
+- Programmatic runs use the same one-time profile fallback when the default state is invalid.
 - If no default state file exists, the single main agent opens the target directly with `--profile Default` and saves state from that same window. Do not create a separate profile importer.
 - Pass `--profile <name>` to choose a different Chrome profile for first import and default-state fallback.
 - Pass `--state <path>` to use a custom state file without automatic profile fallback.
