@@ -125,11 +125,27 @@ function ensureNpmPublishPreflight(dryRun) {
   try {
     const npmUser = runCapture(`npm whoami --registry=${NPMJS_REGISTRY}`);
     console.log(`\nPublish preflight passed. npmjs user: ${npmUser}`);
+  } catch {
+    console.warn('\nRelease preflight failed: npmjs authentication is missing or expired.');
+    console.warn(`Starting interactive login: npm login --registry=${NPMJS_REGISTRY}`);
+
+    try {
+      run(`npm login --registry=${NPMJS_REGISTRY}`);
+      const npmUser = runCapture(`npm whoami --registry=${NPMJS_REGISTRY}`);
+      console.log(`\nPublish preflight passed after login. npmjs user: ${npmUser}`);
+    } catch {
+      console.error('\nRelease preflight failed: npmjs authentication is still unavailable after login.');
+      console.error(`Please verify manually: npm whoami --registry=${NPMJS_REGISTRY}`);
+      process.exit(1);
+    }
+  }
+
+  try {
     runCapture(`npm ping --registry=${NPMJS_REGISTRY}`);
     console.log(`Publish preflight passed. npmjs registry reachable: ${NPMJS_REGISTRY}`);
   } catch {
-    console.error('\nRelease preflight failed: npmjs authentication or registry access is unavailable.');
-    console.error(`Please run: npm login --registry=${NPMJS_REGISTRY}`);
+    console.error('\nRelease preflight failed: npmjs registry is not reachable from current network.');
+    console.error(`Please check proxy/network and retry: npm ping --registry=${NPMJS_REGISTRY}`);
     process.exit(1);
   }
 }
