@@ -17,6 +17,10 @@
     "./proxy-env": {
       "import": "./dist/proxy-env.js",
       "types": "./dist/proxy-env.d.ts"
+    },
+    "./skill-install": {
+      "import": "./dist/skill-install.js",
+      "types": "./dist/skill-install.d.ts"
     }
   },
   "files": [

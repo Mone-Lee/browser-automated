@@ -93,6 +93,9 @@ Reusable flows are stored as JSON files under the calling project's
 calling project's current working directory, not from this skill or package directory.
 
 Install the published CLI and this Skill with `npx --yes browser-opt setup`.
+By default it installs to the shared Agent Skills directory, similar to
+`npx skills add`. Use `--agent codex` for the Codex-specific skills directory,
+or `--skills-dir <dir>` for another agent root.
 Use this command prefix for every `browser-opt` invocation:
 
 ```bash

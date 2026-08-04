@@ -9,6 +9,7 @@ export const HANDOFF_DONE_ANSWERS = ['done', 'ok', '继续', '完成'] as const;
 
 export const BROWSER_E2E_SKILL_USAGE = `使用方式：
       browser-e2e <自然语言测试描述>
+      browser-e2e setup [--with-deps] [--skip-skill] [--agent agents|codex] [--skills-dir <目录>]
 
 示例：
   browser-e2e 测试网站 https://example.com/login 的登录功能。\n\n目标：\n1. 打开登录页面。\n2. 输入用户名 "testuser" 和密码 "password123"。\n3. 点击登录按钮。\n4. 验证是否跳转到仪表盘页面（URL 包含 /dashboard 或看到欢迎文字）。`;

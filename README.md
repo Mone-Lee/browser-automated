@@ -28,7 +28,31 @@ npx --yes browser-opt setup --with-deps
 npx --yes browser-e2e setup --with-deps
 ```
 
-`setup` 默认分别安装到 `${CODEX_HOME:-~/.codex}/skills/browser-opt` 和 `${CODEX_HOME:-~/.codex}/skills/browser-e2e`。若只需要 CLI，可传 `--skip-skill`。
+`setup` 默认分别安装到通用 Agent Skills 目录 `~/.agents/skills/browser-opt` 和 `~/.agents/skills/browser-e2e`，语义接近 `npx skills add`：支持该目录约定的 Agent 都可以发现。若要安装到 Codex 专用目录，可传 `--agent codex`；若要写入其他 Agent 的 skills 根目录，可传 `--skills-dir <目录>`；若只需要 CLI，可传 `--skip-skill`。
+
+常见 Agent 安装示例：
+
+```bash
+# Claude Code
+npx --yes browser-opt setup --skills-dir ~/.claude/skills
+npx --yes browser-e2e setup --skills-dir ~/.claude/skills
+
+# Codex
+npx --yes browser-opt setup --agent codex
+npx --yes browser-e2e setup --agent codex
+
+# GitHub Copilot
+npx --yes browser-opt setup --skills-dir ~/.copilot/skills
+npx --yes browser-e2e setup --skills-dir ~/.copilot/skills
+
+# Gemini
+npx --yes browser-opt setup --skills-dir ~/.gemini/skills
+npx --yes browser-e2e setup --skills-dir ~/.gemini/skills
+
+# Qoder
+npx --yes browser-opt setup --skills-dir ~/.qoder/skills
+npx --yes browser-e2e setup --skills-dir ~/.qoder/skills
+```
 
 需要 Node.js 24 或更高版本。
 

@@ -5,17 +5,22 @@
  */
 import { cmdBrowserE2E, cmdE2E, cmdE2EGen } from './commands/browser-e2e.js';
 import { setupBrowserE2E } from './commands/setup.js';
+import { getBooleanFlag, getStringFlag, parseCliArgs } from './utils/args.js';
 
 async function main(): Promise<void> {
   const [subcommand, ...rest] = process.argv.slice(2);
 
   switch (subcommand) {
-    case 'setup':
+    case 'setup': {
+      const parsed = parseCliArgs(rest);
       setupBrowserE2E({
-        installSystemDependencies: rest.includes('--with-deps'),
-        installSkill: !rest.includes('--skip-skill'),
+        installSystemDependencies: getBooleanFlag(parsed.flags, 'with-deps'),
+        installSkill: !getBooleanFlag(parsed.flags, 'skip-skill'),
+        agent: getStringFlag(parsed.flags, 'agent'),
+        skillsDir: getStringFlag(parsed.flags, 'skills-dir'),
       });
       return;
+    }
     case 'run':
       await cmdE2E(rest);
       return;

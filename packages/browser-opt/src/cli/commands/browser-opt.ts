@@ -66,6 +66,8 @@ export async function cmdBrowserOpt(args: string[]): Promise<void> {
     setupBrowserOpt({
       installSystemDependencies: getBooleanFlag(parsed.flags, 'with-deps'),
       installSkill: !getBooleanFlag(parsed.flags, 'skip-skill'),
+      agent: getStringFlag(parsed.flags, 'agent'),
+      skillsDir: getStringFlag(parsed.flags, 'skills-dir'),
     });
     return;
   }

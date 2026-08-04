@@ -1,5 +1,5 @@
 /**
- * 验证 browser-opt setup 能一次安装浏览器运行时与随包发布的 Codex Skill。
+ * 验证 browser-opt setup 能一次安装浏览器运行时与随包发布的 Agent Skill。
  * 测试使用桩 agent-browser，避免下载真实浏览器或修改用户目录。
  */
 import { spawnSync } from 'node:child_process';
@@ -27,21 +27,40 @@ function createAgentBrowserStub(logPath: string): string {
 }
 
 describe('browser-opt setup', () => {
-  it('installs agent-browser and the bundled Skill with one command', () => {
+  it('installs agent-browser and the bundled Skill into the shared Agent directory by default', () => {
+    const projectRoot = path.resolve(import.meta.dirname, '../..');
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-opt-home-'));
+    const commandLog = path.join(home, 'agent-browser.log');
+    temporaryDirectories.push(home);
+    const binDirectory = createAgentBrowserStub(commandLog);
+    const result = spawnSync('node', [path.join(projectRoot, 'packages/browser-opt/dist/cli/browser-opt.js'), 'setup', '--with-deps'], {
+      cwd: projectRoot,
+      encoding: 'utf-8',
+      env: { ...process.env, HOME: home, PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ''}` },
+    });
+
+    expect(result.status).toBe(0);
+    expect(fs.readFileSync(commandLog, 'utf-8')).toBe('install --with-deps');
+    expect(fs.existsSync(path.join(home, '.agents/skills/browser-opt/SKILL.md'))).toBe(true);
+    expect(result.stdout).toContain('已安装 Agent Skill');
+    expect(result.stdout).toContain('browser-opt 已就绪');
+  });
+
+  it('can install the bundled Skill into Codex explicitly', () => {
     const projectRoot = path.resolve(import.meta.dirname, '../..');
     const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-opt-codex-home-'));
     const commandLog = path.join(codexHome, 'agent-browser.log');
     temporaryDirectories.push(codexHome);
     const binDirectory = createAgentBrowserStub(commandLog);
-    const result = spawnSync('node', [path.join(projectRoot, 'packages/browser-opt/dist/cli/browser-opt.js'), 'setup', '--with-deps'], {
+    const result = spawnSync('node', [path.join(projectRoot, 'packages/browser-opt/dist/cli/browser-opt.js'), 'setup', '--agent', 'codex'], {
       cwd: projectRoot,
       encoding: 'utf-8',
       env: { ...process.env, CODEX_HOME: codexHome, PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ''}` },
     });
 
     expect(result.status).toBe(0);
-    expect(fs.readFileSync(commandLog, 'utf-8')).toBe('install --with-deps');
+    expect(fs.readFileSync(commandLog, 'utf-8')).toBe('install');
     expect(fs.existsSync(path.join(codexHome, 'skills/browser-opt/SKILL.md'))).toBe(true);
-    expect(result.stdout).toContain('browser-opt 已就绪');
+    expect(result.stdout).toContain('已安装 Codex Skill');
   });
 });

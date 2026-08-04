@@ -1,19 +1,21 @@
 /**
- * 安装 browser-e2e 运行所需的浏览器与 Codex Skill，使调用方只需执行一次 setup。
+ * 安装 browser-e2e 运行所需的浏览器与 Agent Skill，使调用方只需执行一次 setup。
  * 该命令只在用户显式调用时写入本机目录，不影响普通测试匹配和执行流程。
  */
+import { resolveSkillInstallTarget } from '@browser-automated/browser-core/skill-install';
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
-import { homedir } from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 interface BrowserE2ESetupOptions {
   installSystemDependencies: boolean;
   installSkill: boolean;
+  agent?: string;
+  skillsDir?: string;
 }
 
-/** 执行 agent-browser 安装，并在需要时把 browser-e2e Skill 放到 Codex 的用户级目录。 */
+/** 执行 agent-browser 安装，并在需要时把 browser-e2e Skill 放到目标 Agent 的用户级目录。 */
 export function setupBrowserE2E(options: BrowserE2ESetupOptions): void {
   const installArgs = ['install', ...(options.installSystemDependencies ? ['--with-deps'] : [])];
   const result = spawnSync('agent-browser', installArgs, { stdio: 'inherit' });
@@ -25,9 +27,12 @@ export function setupBrowserE2E(options: BrowserE2ESetupOptions): void {
   }
 
   if (options.installSkill) {
-    const targetDir = path.join(process.env.CODEX_HOME?.trim() || path.join(homedir(), '.codex'), 'skills', 'browser-e2e');
+    const { label, targetDir } = resolveSkillInstallTarget('browser-e2e', {
+      agent: options.agent,
+      skillsDir: options.skillsDir,
+    });
     fs.cpSync(resolveBundledSkillDir(), targetDir, { recursive: true, force: true });
-    console.log(`已安装 Codex Skill：${targetDir}`);
+    console.log(`已安装 ${label}：${targetDir}`);
   }
   console.log('browser-e2e 已就绪。');
 }

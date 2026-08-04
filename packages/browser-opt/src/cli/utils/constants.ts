@@ -9,7 +9,7 @@ export const HANDOFF_DONE_ANSWERS = ['done', 'ok', '继续', '完成'] as const;
 
 export const BROWSER_OPT_USAGE = `使用方式：
   npx browser-opt <自然语言流程> [--profile <name>] [--state <path>] [--session <id>] [--no-live-viewport] [--output-dir <dir>] [--agent-chat]
-  npx browser-opt setup [--with-deps] [--skip-skill]
+  npx browser-opt setup [--with-deps] [--skip-skill] [--agent agents|codex] [--skills-dir <目录>]
   npx browser-opt save "<名称>" --flow "<完整流程>" [--workflow-dir <目录>] [--force]
   npx browser-opt run "<查询语句>" [--workflow-dir <目录>]
   npx browser-opt run --workflow-id "<ID>" [--workflow-dir <目录>]

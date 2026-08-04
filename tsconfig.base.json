@@ -16,7 +16,8 @@
     "paths": {
       "@browser-automated/browser-core": ["packages/browser-core/src/index.ts"],
       "@browser-automated/browser-core/agent": ["packages/browser-core/src/agent.ts"],
-      "@browser-automated/browser-core/proxy-env": ["packages/browser-core/src/proxy-env.ts"]
+      "@browser-automated/browser-core/proxy-env": ["packages/browser-core/src/proxy-env.ts"],
+      "@browser-automated/browser-core/skill-install": ["packages/browser-core/src/skill-install.ts"]
     }
   }
 }
