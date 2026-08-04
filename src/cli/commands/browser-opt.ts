@@ -7,7 +7,8 @@ import {
   browserOptTemplate,
   extractBrowserOptUrl,
 } from '../../browser-opt/runner/index.js';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import {
   findBrowserOptWorkflowById,
   loadBrowserOptWorkflows,
@@ -35,12 +36,25 @@ import {
 import { BROWSER_OPT_USAGE, HANDOFF_DONE_ANSWERS, LIVE_VIEWPORT_DASHBOARD_URL } from '../utils/constants.js';
 import { printBrowserOptResult } from '../utils/output.js';
 
+interface BrowserOptDetachedRun {
+  runId: string;
+  pid: number;
+  workflowId: string;
+  signalPath: string;
+  outputPath: string;
+  startedAt: string;
+}
+
+type BrowserOptDetachedRunStatus = 'RUNNING' | 'HANDOFF' | 'PASS' | 'FAIL';
+
 const BROWSER_OPT_EXIT_CODE_FAILURE = 1;
 const BROWSER_OPT_EXIT_CODE_HANDOFF = 2;
 const BROWSER_OPT_EXIT_CODE_AMBIGUOUS = 3;
 const BROWSER_OPT_EXIT_CODE_NOT_FOUND = 4;
 const DEFAULT_BROWSER_PROFILE = 'Default';
 const DEFAULT_AUTH_STATE_DIR = '.browser-opt/states';
+const DEFAULT_HANDOFF_RUN_DIR = '.browser-opt/handoffs';
+const HANDOFF_SIGNAL_POLL_INTERVAL_MS = 250;
 
 export async function cmdBrowserOpt(args: string[]): Promise<void> {
   const parsed = parseCliArgs(args);
@@ -61,6 +75,18 @@ export async function cmdBrowserOpt(args: string[]): Promise<void> {
   }
   if (subcommand === 'run' && (!isImmediateFlow || getStringFlag(parsed.flags, 'workflow-id'))) {
     await runWorkflowCommand(parsed.positionals.slice(1).join(' '), parsed.flags);
+    return;
+  }
+  if (subcommand === 'start' && !isImmediateFlow) {
+    startWorkflowCommand(parsed.positionals.slice(1).join(' '), parsed.flags);
+    return;
+  }
+  if (subcommand === 'status' && !isImmediateFlow) {
+    statusWorkflowCommand(parsed.flags);
+    return;
+  }
+  if (subcommand === 'resume' && !isImmediateFlow) {
+    resumeWorkflowCommand(parsed.flags);
     return;
   }
 
@@ -84,6 +110,7 @@ async function executeBrowserOptFlow(
   const authState = resolveBrowserOptAuthState(flags, requestedProfile);
   const outputDir = getStringFlag(flags, 'output-dir');
   const useAgentChat = getBooleanFlag(flags, 'agent-chat');
+  const handoffSignalPath = getStringFlag(flags, 'handoff-signal');
 
   const runner = new BrowserOptRunner();
   const runnerOptions: BrowserOptRunnerOptions = {
@@ -95,7 +122,7 @@ async function executeBrowserOptFlow(
     liveViewport,
     outputDir,
     useAgentChat,
-    handoff: createBrowserOptHandoffOptions(liveViewport),
+    handoff: createBrowserOptHandoffOptions(liveViewport, handoffSignalPath),
   };
   const result = await runner.run(text, runnerOptions);
 
@@ -198,6 +225,182 @@ async function runWorkflowCommand(query: string, flags: Record<string, string | 
   await executeBrowserOptFlow(renderBrowserOptWorkflowFlow(result.matched.workflow), flags, result.matched.workflow.id);
 }
 
+/** 后台启动可跨 Codex turn 恢复的 Workflow，handoff 期间不依赖临时 PTY 会话。 */
+function startWorkflowCommand(query: string, flags: Record<string, string | boolean>): void {
+  const loaded = loadBrowserOptWorkflows(getStringFlag(flags, 'workflow-dir'));
+  printWorkflowWarnings(loaded.warnings);
+  const workflow = resolveWorkflowForExecution(query, flags, loaded.workflows);
+  const runId = randomUUID();
+  const runDir = path.resolve(process.cwd(), DEFAULT_HANDOFF_RUN_DIR, runId);
+  const signalPath = path.join(runDir, 'resume.signal');
+  const outputPath = path.join(runDir, 'output.log');
+  const metadataPath = path.join(runDir, 'run.json');
+  fs.mkdirSync(runDir, { recursive: true });
+
+  const outputFd = fs.openSync(outputPath, 'a');
+  const child = spawn(process.execPath, buildDetachedWorkflowArgs(workflow.id, signalPath, flags), {
+    detached: true,
+    stdio: ['ignore', outputFd, outputFd],
+    env: {
+      ...process.env,
+      BROWSER_OPT_HANDOFF_RUN_ID: runId,
+    },
+  });
+  fs.closeSync(outputFd);
+  if (!child.pid) {
+    throw new Error('无法启动后台 browser-opt Workflow。');
+  }
+  child.unref();
+
+  const metadata: BrowserOptDetachedRun = {
+    runId,
+    pid: child.pid,
+    workflowId: workflow.id,
+    signalPath,
+    outputPath,
+    startedAt: new Date().toISOString(),
+  };
+  fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+  printDetachedRun(metadata, 'RUNNING', getBooleanFlag(flags, 'json'));
+}
+
+/** 查询后台 Workflow 的稳定状态，并返回最近输出供 Skill 识别 handoff 与最终报告。 */
+function statusWorkflowCommand(flags: Record<string, string | boolean>): void {
+  const metadata = loadDetachedRun(flags);
+  const output = readDetachedRunOutput(metadata.outputPath);
+  const status = resolveDetachedRunStatus(metadata.pid, output);
+  printDetachedRun(metadata, status, getBooleanFlag(flags, 'json'), output);
+}
+
+/** 向后台 Workflow 写入一次性恢复信号，原 runner 会在同一浏览器实例中继续。 */
+function resumeWorkflowCommand(flags: Record<string, string | boolean>): void {
+  const metadata = loadDetachedRun(flags);
+  fs.mkdirSync(path.dirname(metadata.signalPath), { recursive: true });
+  fs.writeFileSync(metadata.signalPath, 'done\n');
+  if (getBooleanFlag(flags, 'json')) {
+    console.log(JSON.stringify({ status: 'RESUME_REQUESTED', ...metadata }, null, 2));
+    return;
+  }
+  console.log(`已发送恢复信号：${metadata.runId}`);
+}
+
+/** start 与 run 共用 Workflow 唯一匹配规则，避免后台入口选择不同的流程。 */
+function resolveWorkflowForExecution(
+  query: string,
+  flags: Record<string, string | boolean>,
+  workflows: BrowserOptWorkflow[],
+): BrowserOptWorkflow {
+  const workflowId = getStringFlag(flags, 'workflow-id');
+  if (workflowId) {
+    const workflow = findBrowserOptWorkflowById(workflowId, workflows);
+    if (workflow) {
+      return workflow;
+    }
+    throw new Error(`未找到 Workflow ID：${workflowId}`);
+  }
+  if (!query.trim()) {
+    throw new Error('使用方式：npx browser-opt start "<查询语句>" [--workflow-dir <目录>]');
+  }
+
+  const result = matchBrowserOptWorkflows(query, workflows);
+  if (result.status !== 'matched' || !result.matched) {
+    throw new Error(result.status === 'ambiguous' ? 'Workflow 匹配结果不唯一，请使用 --workflow-id。' : '未找到匹配的 Workflow。');
+  }
+  return result.matched.workflow;
+}
+
+/** 复用当前 Node/tsx 入口启动子进程，并只透传会影响 Workflow 执行的参数。 */
+function buildDetachedWorkflowArgs(
+  workflowId: string,
+  signalPath: string,
+  flags: Record<string, string | boolean>,
+): string[] {
+  const executableName = path.basename(process.argv[1] ?? '');
+  const commandPrefix = executableName.startsWith('browser-opt') ? [] : ['browser-opt'];
+  const childArgs = [
+    ...process.execArgv,
+    process.argv[1] ?? '',
+    ...commandPrefix,
+    'run',
+    '--workflow-id',
+    workflowId,
+    '--handoff-signal',
+    signalPath,
+  ];
+  const excludedFlags = new Set(['workflow-id', 'json', 'run-id', 'handoff-signal']);
+  for (const [key, value] of Object.entries(flags)) {
+    if (excludedFlags.has(key)) {
+      continue;
+    }
+    childArgs.push(`--${key}`);
+    if (typeof value === 'string') {
+      childArgs.push(value);
+    }
+  }
+  return childArgs;
+}
+
+/** 从固定控制目录读取后台任务元数据，runId 是跨 turn 的唯一恢复凭据。 */
+function loadDetachedRun(flags: Record<string, string | boolean>): BrowserOptDetachedRun {
+  const runId = getStringFlag(flags, 'run-id')?.trim();
+  if (!runId) {
+    throw new Error('缺少 --run-id。');
+  }
+  const metadataPath = path.resolve(process.cwd(), DEFAULT_HANDOFF_RUN_DIR, runId, 'run.json');
+  const parsed = JSON.parse(fs.readFileSync(metadataPath, 'utf-8')) as BrowserOptDetachedRun;
+  if (parsed.runId !== runId) {
+    throw new Error(`后台 Workflow 元数据与 runId 不一致：${runId}`);
+  }
+  return parsed;
+}
+
+/** 后台输出只返回尾部，既保留最新 handoff/报告信息，也避免历史日志无限增长。 */
+function readDetachedRunOutput(outputPath: string): string {
+  if (!fs.existsSync(outputPath)) {
+    return '';
+  }
+  return fs.readFileSync(outputPath, 'utf-8').slice(-12_000);
+}
+
+/** 结合进程存活状态与 CLI 输出判断当前阶段。 */
+function resolveDetachedRunStatus(pid: number, output: string): BrowserOptDetachedRunStatus {
+  if (isProcessRunning(pid)) {
+    const handoffIndex = output.lastIndexOf('=== Browser Opt Handoff ===');
+    const resumedIndex = output.lastIndexOf('人工操作完成，恢复 browser-opt 自动化执行。');
+    return handoffIndex > resumedIndex ? 'HANDOFF' : 'RUNNING';
+  }
+  return output.includes('执行成功') ? 'PASS' : 'FAIL';
+}
+
+/** 只探测后台进程是否仍存在，不发送信号或改变运行状态。 */
+function isProcessRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 人类输出与 JSON 输出共享同一组后台任务字段。 */
+function printDetachedRun(
+  metadata: BrowserOptDetachedRun,
+  status: BrowserOptDetachedRunStatus,
+  json: boolean,
+  output = '',
+): void {
+  if (json) {
+    console.log(JSON.stringify({ status, ...metadata, output }, null, 2));
+    return;
+  }
+  console.log(`Status: ${status}`);
+  console.log(`Run ID: ${metadata.runId}`);
+  console.log(`Output: ${metadata.outputPath}`);
+  if (output.trim()) {
+    console.log(output.trim());
+  }
+}
+
 /** JSON 输出收敛为候选元数据，避免匹配阶段把完整自动化正文回显给调用方。 */
 function toWorkflowMatchOutput(result: BrowserOptWorkflowMatchResult, warnings: string[]) {
   const compact = (workflow: BrowserOptWorkflow, score?: number) => ({
@@ -283,7 +486,7 @@ interface BrowserOptAuthState {
  * 登录态复用策略：
  * 1. 默认 state 存在时优先加载，避免每次从完整 Chrome profile 启动。
  * 2. 默认 state 不存在时由唯一主 agent 使用 profile 打开，并把 cookies/storage 保存成 state。
- * 3. 默认 state 失效时由交互式 handoff 复用当前窗口，避免额外 profile 空白窗口。
+ * 3. 默认 state 失效时切换到 profile 窗口，让交互式 handoff 可使用 Chrome 密码管理器。
  * 4. 显式 --state 保持隔离语义，不自动回退到 profile。
  */
 function resolveBrowserOptAuthState(flags: Record<string, string | boolean>, profile: string): BrowserOptAuthState {
@@ -342,8 +545,8 @@ function isDoneAnswer(input: string): boolean {
   return HANDOFF_DONE_ANSWERS.includes(value as (typeof HANDOFF_DONE_ANSWERS)[number]);
 }
 
-/** browser-opt 默认进入 handoff 后等待用户完成操作，再恢复同一个浏览器会话继续执行。 */
-function createBrowserOptHandoffOptions(liveViewport: boolean) {
+/** browser-opt 默认等待终端输入；后台 Workflow 改用信号文件跨 turn 恢复同一个会话。 */
+function createBrowserOptHandoffOptions(liveViewport: boolean, handoffSignalPath?: string) {
   return {
     onHandoffRequired: async (context: BrowserOptHandoffContext) => {
       console.log('\n=== Browser Opt Handoff ===');
@@ -354,13 +557,20 @@ function createBrowserOptHandoffOptions(liveViewport: boolean) {
       if (liveViewport) {
         console.log(`Live viewport: ${LIVE_VIEWPORT_DASHBOARD_URL}`);
       }
-      console.log('已打开可视浏览器，请手动完成登录。');
-      console.log('完成后请在这里输入 done（或 ok / 继续 / 完成）以恢复自动化。');
+      console.log('已打开可视浏览器，请手动完成页面要求的操作。');
+      if (handoffSignalPath) {
+        const runId = process.env.BROWSER_OPT_HANDOFF_RUN_ID;
+        console.log(`完成后请恢复后台任务${runId ? ` ${runId}` : ''}，自动化会继续复用当前浏览器。`);
+      } else {
+        console.log('完成后请在这里输入 done（或 ok / 继续 / 完成）以恢复自动化。');
+      }
       if (context.output.trim()) {
         console.log(context.output.trim());
       }
     },
-    waitForUserResume: waitForBrowserOptHandoffDone,
+    waitForUserResume: handoffSignalPath
+      ? () => waitForBrowserOptHandoffSignal(handoffSignalPath)
+      : waitForBrowserOptHandoffDone,
     onHandoffCompleted: async () => {
       console.log('人工操作完成，恢复 browser-opt 自动化执行。\n');
     },
@@ -375,5 +585,22 @@ async function waitForBrowserOptHandoffDone(): Promise<void> {
       return;
     }
     console.log('未识别输入，请输入 done / ok / 继续 / 完成。');
+  }
+}
+
+/** 后台任务轮询一次性信号文件，消费后删除以支持同一 Workflow 多次 handoff。 */
+async function waitForBrowserOptHandoffSignal(signalPath: string): Promise<void> {
+  const resolvedSignalPath = path.resolve(signalPath);
+  fs.mkdirSync(path.dirname(resolvedSignalPath), { recursive: true });
+  fs.rmSync(resolvedSignalPath, { force: true });
+  while (true) {
+    if (fs.existsSync(resolvedSignalPath)) {
+      const answer = fs.readFileSync(resolvedSignalPath, 'utf-8');
+      if (isDoneAnswer(answer)) {
+        fs.rmSync(resolvedSignalPath, { force: true });
+        return;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, HANDOFF_SIGNAL_POLL_INTERVAL_MS));
   }
 }

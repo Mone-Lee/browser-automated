@@ -97,7 +97,11 @@ if (command === 'open') {
       ? { e2: { role: 'textbox', name: '直播间名称' } }
     : { e1: { role: 'heading', name: 'Example' } };
   if (loginSnapshot && process.env.AGENT_BROWSER_RESUME_MARKER) {
-    fs.writeFileSync(process.env.AGENT_BROWSER_RESUME_MARKER, 'manual-login-completed');
+    if (process.env.AGENT_BROWSER_COMPLETE_LOGIN_AFTER_PROFILE_SNAPSHOT) {
+      if (!stateOpened) fs.writeFileSync(process.env.AGENT_BROWSER_RESUME_MARKER, 'manual-login-completed');
+    } else {
+      fs.writeFileSync(process.env.AGENT_BROWSER_RESUME_MARKER, 'manual-login-completed');
+    }
   }
   process.stdout.write(JSON.stringify({ success: true, data: { snapshot: snapshotText, refs: snapshotRefs } }));
 } else if (command === 'screenshot') {
@@ -146,6 +150,30 @@ function findLatestReportJson(rootDir: string): string {
     throw new Error(`No report.json found under ${rootDir}`);
   }
   return reportPath;
+}
+
+/** 轮询后台 Workflow 状态，模拟 Codex 在不同 turn 中通过 runId 重新连接。 */
+async function waitForDetachedRunStatus(
+  cwd: string,
+  runId: string,
+  expectedStatus: string,
+): Promise<Record<string, unknown>> {
+  let lastStatus: Record<string, unknown> = {};
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const result = runCli([
+      'browser-opt',
+      'status',
+      '--run-id',
+      runId,
+      '--json',
+    ], {}, undefined, { cwd });
+    lastStatus = JSON.parse(result.stdout) as Record<string, unknown>;
+    if (lastStatus.status === expectedStatus) {
+      return lastStatus;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`后台 Workflow 未进入状态：${expectedStatus}\n${JSON.stringify(lastStatus, null, 2)}`);
 }
 
 function findReportJsonFiles(dir: string): string[] {
@@ -228,6 +256,51 @@ describe('browser-opt CLI', () => {
     expect(result.status).toBe(0);
     expect(result.stdout.trim()).toBe('执行成功');
   });
+
+  it('resumes a detached Workflow handoff by run id across CLI processes', async () => {
+    const projectDir = makeTempDir();
+    const workflowDir = path.join(projectDir, '.browser-opt', 'workflows');
+    const saved = runCli([
+      'browser-opt',
+      'save',
+      '跨会话接管流程',
+      '--flow',
+      '测试 https://example.com。\\n1. handoff 给操作人员：请手动选择“商品白底图”的本地真实图片，并在确认完成后恢复自动化。',
+      '--workflow-dir',
+      workflowDir,
+    ], {}, undefined, { cwd: projectDir });
+    expect(saved.status).toBe(0);
+
+    const started = runCli([
+      'browser-opt',
+      'start',
+      '--workflow-id',
+      '跨会话接管流程',
+      '--workflow-dir',
+      workflowDir,
+      '--json',
+    ], {}, undefined, { cwd: projectDir });
+    expect(started.status).toBe(0);
+    const startedRun = JSON.parse(started.stdout) as { runId: string; status: string };
+    expect(startedRun.status).toBe('RUNNING');
+
+    const handoff = await waitForDetachedRunStatus(projectDir, startedRun.runId, 'HANDOFF');
+    expect(String(handoff.output)).toContain('请手动选择“商品白底图”');
+
+    const resumed = runCli([
+      'browser-opt',
+      'resume',
+      '--run-id',
+      startedRun.runId,
+      '--json',
+    ], {}, undefined, { cwd: projectDir });
+    expect(resumed.status).toBe(0);
+    expect(JSON.parse(resumed.stdout).status).toBe('RESUME_REQUESTED');
+
+    const completed = await waitForDetachedRunStatus(projectDir, startedRun.runId, 'PASS');
+    expect(String(completed.output)).toContain('人工操作完成，恢复 browser-opt 自动化执行。');
+    expect(String(completed.output)).toContain('执行成功');
+  }, 20_000);
 
   it('reuses a stable browser session when rerunning the same saved Workflow', () => {
     const workflowDir = makeTempDir();
@@ -522,7 +595,7 @@ describe('browser-opt CLI', () => {
     expect(fs.readFileSync(findLatestReportJson(outputDir), 'utf-8')).toContain(`auth-state-mode: state ${statePath}, fallback-profile=Default`);
   });
 
-  it('keeps the state window for interactive login instead of opening a profile fallback', () => {
+  it('replaces an invalid default state window with the selected profile', () => {
     const outputDir = makeTempDir();
     const commandLog = path.join(makeTempDir(), 'agent-browser.log');
     const resumeMarker = path.join(makeTempDir(), 'resume-marker');
@@ -538,7 +611,7 @@ describe('browser-opt CLI', () => {
     ], {
       AGENT_BROWSER_LOG: commandLog,
       AGENT_BROWSER_LOGIN_SNAPSHOT: '1',
-      AGENT_BROWSER_LOGIN_SNAPSHOT_STATE_ONLY: '1',
+      AGENT_BROWSER_COMPLETE_LOGIN_AFTER_PROFILE_SNAPSHOT: '1',
       AGENT_BROWSER_RESUME_MARKER: resumeMarker,
       AGENT_BROWSER_STATE_OPEN_MARKER: stateOpenMarker,
       BROWSER_OPT_AUTH_STATE_DIR: stateDir,
@@ -547,12 +620,12 @@ describe('browser-opt CLI', () => {
     expect(result.status).toBe(0);
     const commands = fs.readFileSync(commandLog, 'utf-8');
     expect(commands.match(new RegExp(`--state ${statePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g')) ?? []).toHaveLength(1);
-    expect(commands).not.toContain('--profile Default');
-    expect(commands).not.toContain('close');
+    expect(commands).toContain('--profile Default');
+    expect(commands).toContain('close');
     expect(commands).not.toContain('handoff');
     expect(commands).not.toContain('resume');
     expect(commands).not.toContain(`state load ${statePath}`);
-    expect(commands.split('\n').filter((command) => /\bopen https:\/\/example\.com\b/.test(command))).toHaveLength(1);
+    expect(commands.split('\n').filter((command) => /\bopen https:\/\/example\.com\b/.test(command))).toHaveLength(2);
     expect(commands).toContain(`state save ${statePath}`);
   });
 

@@ -18,6 +18,9 @@ export const BROWSER_OPT_USAGE = `使用方式：
   npx browser-opt save "<名称>" --flow "<完整流程>" [--workflow-dir <目录>] [--force]
   npx browser-opt run "<查询语句>" [--workflow-dir <目录>]
   npx browser-opt run --workflow-id "<ID>" [--workflow-dir <目录>]
+  npx browser-opt start --workflow-id "<ID>" [--workflow-dir <目录>] [--json]
+  npx browser-opt status --run-id "<ID>" [--json]
+  npx browser-opt resume --run-id "<ID>" [--json]
   npx browser-opt list [--workflow-dir <目录>] [--json]
   npx browser-opt match "<查询语句>" [--workflow-dir <目录>] [--json]`;
 
