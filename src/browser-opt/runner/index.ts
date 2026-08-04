@@ -16,6 +16,7 @@ import type {
 import {
   browserOptTemplate,
   extractBrowserOptUrl,
+  findTextboxRef,
   renderMarkdownReport,
   resolveOutputDir,
   splitBrowserOptSteps,
@@ -68,7 +69,6 @@ export class BrowserOptRunner {
     let handoffTriggered = false;
     let fatalError: string | undefined;
     let authStateFallbackUsed = false;
-    const allowAuthStateFallback = !options.handoff?.waitForUserResume;
     logAuthStateMode(logs, options);
     const openedWithProfile = Boolean(options.profile && !options.statePath);
     let agent = this.agentFactory({
@@ -100,7 +100,7 @@ export class BrowserOptRunner {
 
       /** state 失效时只允许切换一次 profile 窗口，后续自动化与 handoff 固定复用该窗口。 */
       const retryAuthStateFallback = (): BrowserAgent | null => {
-        if (!allowAuthStateFallback || !options.statePath || !options.authStateFallbackProfile || authStateFallbackUsed) {
+        if (!options.statePath || !options.authStateFallbackProfile || authStateFallbackUsed) {
           return null;
         }
 
@@ -132,6 +132,7 @@ export class BrowserOptRunner {
           logs.push(`fallback-screenshot: ${fallbackScreenshotPath}`);
           logs.push(`fallback-page-state: ${summarizeSnapshot(fallbackSnapshot)}`);
           openSnapshot = fallbackSnapshot;
+          revealProfileLoginSuggestions(fallbackAgent, fallbackSnapshot, logs);
           if (!isAboutBlankOpen(fallbackAgent, fallbackSnapshot)
             && !shouldTriggerLoginHandoff(flow, url, fallbackSnapshot)
             && options.authStateSavePath) {
@@ -267,4 +268,29 @@ function saveProfileAuthState(
     return;
   }
   saveAuthState(agent, authStateSavePath, logs);
+}
+
+/** profile 登录页进入 handoff 前聚焦凭据输入框，让 Chrome 展开已保存的账号密码候选。 */
+function revealProfileLoginSuggestions(agent: BrowserAgent, snapshot: SnapshotEvidence, logs: string[]): void {
+  if (!isLoginLikeSnapshot(snapshot)) {
+    return;
+  }
+
+  const credentialFields = ['账号', '手机号', '用户名', '邮箱', 'email', 'username', '密码', 'password'];
+  const ref = credentialFields
+    .map((field) => findTextboxRef(snapshot, field))
+    .find((candidate): candidate is string => Boolean(candidate))
+    ?? findTextboxRef(snapshot, '输入框');
+  if (!ref) {
+    logs.push('profile-password-suggestions-skipped: 登录页未找到可聚焦的账号或密码输入框。');
+    return;
+  }
+
+  try {
+    agent.click(ref);
+    logs.push(`profile-password-suggestions: 已聚焦登录输入框 @${ref}，等待 Chrome 展开已保存的账号密码候选。`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logs.push(`profile-password-suggestions-failed: ${message}`);
+  }
 }

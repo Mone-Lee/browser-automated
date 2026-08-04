@@ -558,10 +558,15 @@ describe('BrowserOptRunner', () => {
     expect(result.report.logs.join('\n')).toContain('auth-state-fallback: state 登录态疑似失效，切换到 profile Default。');
   });
 
-  it('keeps the current state agent for interactive login handoff', async () => {
+  it('switches interactive login handoff to the fallback profile agent', async () => {
     const outputDir = makeTempDir();
     const authStatePath = path.join(makeTempDir(), 'auth-state.json');
-    const agent = buildAgent({
+    const stateAgent = buildAgent({
+      snapshots: [
+        snapshotJson('登录远方的梦想直播平台', { e1: { role: 'textbox', name: '请输入手机号' } }),
+      ],
+    });
+    const profileAgent = buildAgent({
       snapshots: [
         snapshotJson('登录远方的梦想直播平台', { e1: { role: 'textbox', name: '请输入手机号' } }),
         snapshotJson('创建直播页', { e2: { role: 'textbox', name: '直播间名称' } }),
@@ -573,7 +578,11 @@ describe('BrowserOptRunner', () => {
     });
     const capturedOptions: AgentOptions[] = [];
     const waitForUserResume = vi.fn(async () => {});
-    const runner = new BrowserOptRunner(makeFactory(agent, capturedOptions));
+    const agents = [stateAgent, profileAgent];
+    const runner = new BrowserOptRunner((options) => {
+      capturedOptions.push(options ?? {});
+      return agents.shift() ?? profileAgent;
+    });
 
     const result = await runner.run('执行创建安选公开直播流程：\n1. 访问 https://test-live.ifengqun.com/live/create?time=2\n2. 直播间名称输入“安选公开直播自动化”', {
       outputDir,
@@ -586,15 +595,20 @@ describe('BrowserOptRunner', () => {
     });
 
     expect(result.passed).toBe(true);
-    expect(capturedOptions).toHaveLength(1);
+    expect(capturedOptions).toHaveLength(2);
     expect(capturedOptions[0]).toEqual(expect.objectContaining({ statePath: authStatePath }));
-    expect((agent.close as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
-    expect((agent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
-    expect((agent.handoff as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
-    expect((agent.resume as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect(capturedOptions[1]).toEqual(expect.objectContaining({ profile: 'Default', liveViewport: true }));
+    expect(capturedOptions[1]).not.toHaveProperty('statePath');
+    expect((stateAgent.close as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((stateAgent.handoff as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect((profileAgent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((profileAgent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e1');
+    expect((profileAgent.handoff as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((profileAgent.resume as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
     expect(waitForUserResume).toHaveBeenCalledTimes(1);
-    expect(result.report.logs.join('\n')).not.toContain('auth-state-fallback');
-    expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e2', '安选公开直播自动化');
+    expect(result.report.logs.join('\n')).toContain('auth-state-fallback: state 登录态疑似失效，切换到 profile Default。');
+    expect(result.report.logs.join('\n')).toContain('profile-password-suggestions: 已聚焦登录输入框 @e1');
+    expect((profileAgent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e2', '安选公开直播自动化');
   });
 
   it('keeps the current state agent waiting for handoff without creating a fallback agent', async () => {
