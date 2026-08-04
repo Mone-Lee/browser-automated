@@ -1,0 +1,35 @@
+{
+  "name": "browser-e2e",
+  "version": "1.0.0",
+  "description": "自然语言驱动的 E2E 测试匹配、执行与 Playwright 生成 CLI",
+  "type": "module",
+  "main": "dist/browser-e2e/index.js",
+  "types": "dist/browser-e2e/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/browser-e2e/index.js",
+      "types": "./dist/browser-e2e/index.d.ts"
+    }
+  },
+  "bin": {
+    "browser-e2e": "dist/cli/browser-e2e.js"
+  },
+  "files": [
+    "dist",
+    "skills/browser-e2e"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@browser-automated/browser-core": "1.0.0",
+    "agent-browser": "^0.33.1"
+  }
+}

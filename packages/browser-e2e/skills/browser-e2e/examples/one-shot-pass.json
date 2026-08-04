@@ -1,0 +1,11 @@
+{
+  "url": "https://example.com",
+  "instruction": "Open pricing page and navigate to contact",
+  "assertion": "The contact page should be visible",
+  "autoGenerate": true,
+  "generatedName": "pricing to contact",
+  "tags": [
+    "marketing",
+    "navigation"
+  ]
+}

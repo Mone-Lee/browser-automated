@@ -5,7 +5,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import type { TestCase } from '../../core/types.js';
+import type { TestCase } from '@browser-automated/browser-core';
 import type { CodeExecutionResult, GeneratedTestMeta } from './types.js';
 
 export interface GeneratePlaywrightSpecOptions {

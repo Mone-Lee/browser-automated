@@ -1,0 +1,48 @@
+/**
+ * 验证 browser-e2e setup 能一次安装浏览器运行时与随包发布的 Codex Skill。
+ * 测试使用桩 agent-browser，避免下载真实浏览器或修改用户目录。
+ */
+import { spawnSync } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+
+const temporaryDirectories: string[] = [];
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+/** 创建可记录安装参数的 agent-browser 桩命令。 */
+function createAgentBrowserStub(logPath: string): string {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-e2e-setup-bin-'));
+  temporaryDirectories.push(directory);
+  const commandPath = path.join(directory, 'agent-browser');
+  fs.writeFileSync(commandPath, `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(logPath)}, process.argv.slice(2).join(' '));\n`);
+  fs.chmodSync(commandPath, 0o755);
+  return directory;
+}
+
+describe('browser-e2e setup', () => {
+  it('installs agent-browser and the bundled Skill with one command', () => {
+    const projectRoot = path.resolve(import.meta.dirname, '../..');
+    const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-e2e-codex-home-'));
+    const commandLog = path.join(codexHome, 'agent-browser.log');
+    temporaryDirectories.push(codexHome);
+    const binDirectory = createAgentBrowserStub(commandLog);
+
+    const result = spawnSync('node', [path.join(projectRoot, 'packages/browser-e2e/dist/cli/browser-e2e.js'), 'setup', '--with-deps'], {
+      cwd: projectRoot,
+      encoding: 'utf-8',
+      env: { ...process.env, CODEX_HOME: codexHome, PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ''}` },
+    });
+
+    expect(result.status).toBe(0);
+    expect(fs.readFileSync(commandLog, 'utf-8')).toBe('install --with-deps');
+    expect(fs.existsSync(path.join(codexHome, 'skills/browser-e2e/SKILL.md'))).toBe(true);
+    expect(result.stdout).toContain('browser-e2e 已就绪');
+  });
+});

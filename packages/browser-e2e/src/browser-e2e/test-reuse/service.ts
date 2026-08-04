@@ -1,10 +1,10 @@
 /**
  * browser-e2e 的测试复用编排层，串联测试匹配、一次性执行、handoff 和代码生成。
  */
-import { BrowserAgent } from '../../core/agent.js';
+import { BrowserAgent } from '@browser-automated/browser-core/agent';
 import { executeDeterministicScenarioWithHandoff } from '../deterministic.js';
 import { TestCaseGenerator } from '../generate.js';
-import type { TestResult } from '../../core/types.js';
+import type { TestResult } from '@browser-automated/browser-core';
 import { loadGeneratedTestIndex, upsertGeneratedTestMeta } from './index-store.js';
 import { findMatches } from './matcher.js';
 import {

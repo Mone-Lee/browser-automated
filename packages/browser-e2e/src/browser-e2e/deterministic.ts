@@ -1,8 +1,8 @@
 /**
  * 将自然语言 E2E 步骤解析为确定性浏览器动作，并负责失败重试与 handoff 恢复。
  */
-import type { BrowserAgent } from '../core/agent.js';
-import type { StepResult, TestStep } from '../core/types.js';
+import type { BrowserAgent } from '@browser-automated/browser-core/agent';
+import type { StepResult, TestStep } from '@browser-automated/browser-core';
 
 interface SnapshotNode {
   kind: 'textbox' | 'button' | 'link' | 'generic';
