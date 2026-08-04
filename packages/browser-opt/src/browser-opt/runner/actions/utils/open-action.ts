@@ -1,7 +1,7 @@
 /**
  * browser-opt 打开页面动作执行器，负责处理重复打开跳过和实际 open 命令下发。
  */
-import type { BrowserAgent } from '../../../../core/agent.js';
+import type { BrowserAgent } from '@browser-automated/browser-core/agent';
 import type { DeterministicAction, DeterministicExecutionOptions } from '../../../type.js';
 import { normalizeUrlForCompare } from '../../evidence.js';
 

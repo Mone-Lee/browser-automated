@@ -10,10 +10,10 @@ import {
   BrowserOptRunner,
   extractBrowserOptUrl,
   splitBrowserOptSteps,
-} from '../../src/browser-opt/runner/index.js';
-import { findClickableRef, parseDeterministicAction } from '../../src/browser-opt/utils.js';
-import type { BrowserAgent } from '../../src/core/agent.js';
-import type { AgentOptions } from '../../src/core/types.js';
+} from '../../packages/browser-opt/dist/browser-opt/runner/index.js';
+import { findClickableRef, parseDeterministicAction } from '../../packages/browser-opt/dist/browser-opt/utils.js';
+import type { BrowserAgent } from '@browser-automated/browser-core/agent';
+import type { AgentOptions } from '@browser-automated/browser-core';
 
 const tempDirs: string[] = [];
 

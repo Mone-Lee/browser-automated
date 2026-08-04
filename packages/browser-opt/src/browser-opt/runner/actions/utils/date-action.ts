@@ -1,7 +1,7 @@
 /**
  * browser-opt 日期选择动作工具，负责 DatePicker 类控件的日期归一化、填充、面板兜底和结果确认。
  */
-import type { BrowserAgent } from '../../../../core/agent.js';
+import type { BrowserAgent } from '@browser-automated/browser-core/agent';
 import type { DeterministicAction, SnapshotEvidence } from '../../../type.js';
 import { findTextboxRef } from '../../../utils.js';
 import { captureTransientSnapshot } from '../../evidence.js';

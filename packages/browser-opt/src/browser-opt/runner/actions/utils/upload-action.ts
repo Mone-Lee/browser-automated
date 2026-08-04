@@ -3,7 +3,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { BrowserAgent } from '../../../../core/agent.js';
+import type { BrowserAgent } from '@browser-automated/browser-core/agent';
 import type { DeterministicAction, SnapshotEvidence, DeterministicExecutionOptions } from '../../../type.js';
 import { findUploadRef } from '../../../utils.js';
 import { captureTransientSnapshot } from '../../evidence.js';

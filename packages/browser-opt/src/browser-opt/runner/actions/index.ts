@@ -1,7 +1,7 @@
 /**
  * browser-opt 确定性动作执行器，负责解析自然语言动作并分发到对应 action handler。
  */
-import type { BrowserAgent } from '../../../core/agent.js';
+import type { BrowserAgent } from '@browser-automated/browser-core/agent';
 import type { DeterministicAction, SnapshotEvidence, DeterministicExecutionOptions } from '../../type.js';
 import { parseDeterministicAction } from '../../utils.js';
 import { executeClickAction } from './utils/click-action.js';

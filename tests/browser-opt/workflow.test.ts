@@ -13,8 +13,8 @@ import {
   resolveBrowserOptWorkflowDir,
   safeWorkflowId,
   saveBrowserOptWorkflow,
-} from '../../src/browser-opt/workflow/index.js';
-import type { BrowserOptWorkflow } from '../../src/browser-opt/workflow/type.js';
+} from '../../packages/browser-opt/dist/browser-opt/workflow/index.js';
+import type { BrowserOptWorkflow } from '../../packages/browser-opt/dist/browser-opt/workflow/type.js';
 
 const tempDirs: string[] = [];
 

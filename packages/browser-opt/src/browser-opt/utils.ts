@@ -3,7 +3,7 @@
  * 节点匹配、验证判断和报告渲染等无状态逻辑，让 runner 只负责执行编排。
  */
 import * as path from 'node:path';
-import type { AgentBrowserJsonResult } from '../core/agent.js';
+import type { AgentBrowserJsonResult } from '@browser-automated/browser-core/agent';
 import type {
   BrowserOptReport,
   BrowserOptStepResult,

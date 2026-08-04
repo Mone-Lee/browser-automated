@@ -1,7 +1,7 @@
 /**
  * browser-opt 选项选择动作执行器，负责下拉、单选、复选和 switch 的确定性选择流程。
  */
-import type { BrowserAgent } from '../../../../core/agent.js';
+import type { BrowserAgent } from '@browser-automated/browser-core/agent';
 import type { DeterministicAction, SnapshotEvidence, DeterministicExecutionOptions } from '../../../type.js';
 import {
   findSelectableFieldRef,

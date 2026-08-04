@@ -6,8 +6,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { printBrowserOptResult } from '../../src/cli/utils/output.js';
-import type { BrowserOptRunResult } from '../../src/browser-opt/type.js';
+import { printBrowserOptResult } from '../../packages/browser-opt/dist/cli/utils/output.js';
+import type { BrowserOptRunResult } from '../../packages/browser-opt/dist/browser-opt/type.js';
 
 const tempDirs: string[] = [];
 
@@ -32,8 +32,7 @@ interface RunCliOptions {
 function runCli(args: string[], env: Record<string, string> = {}, input?: string, options: RunCliOptions = {}) {
   const authStateDir = makeTempDir();
   const projectRoot = path.resolve(import.meta.dirname, '../..');
-  const tsxLoaderPath = path.join(projectRoot, 'node_modules/tsx/dist/loader.mjs');
-  return spawnSync('node', ['--import', tsxLoaderPath, path.join(projectRoot, 'src/cli/index.ts'), ...args], {
+  return spawnSync('node', [path.join(projectRoot, 'packages/browser-opt/dist/cli/browser-opt.js'), ...args.slice(1)], {
     cwd: options.cwd ?? projectRoot,
     encoding: 'utf-8',
     input,

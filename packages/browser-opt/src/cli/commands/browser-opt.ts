@@ -35,6 +35,7 @@ import {
 } from '../utils/args.js';
 import { BROWSER_OPT_USAGE, HANDOFF_DONE_ANSWERS, LIVE_VIEWPORT_DASHBOARD_URL } from '../utils/constants.js';
 import { printBrowserOptResult } from '../utils/output.js';
+import { setupBrowserOpt } from './setup.js';
 
 interface BrowserOptDetachedRun {
   runId: string;
@@ -61,6 +62,13 @@ export async function cmdBrowserOpt(args: string[]): Promise<void> {
   const [subcommand] = parsed.positionals;
   const positionalText = parsed.positionals.join(' ').trim();
   const isImmediateFlow = Boolean(extractBrowserOptUrl(positionalText));
+  if (subcommand === 'setup' && !isImmediateFlow) {
+    setupBrowserOpt({
+      installSystemDependencies: getBooleanFlag(parsed.flags, 'with-deps'),
+      installSkill: !getBooleanFlag(parsed.flags, 'skip-skill'),
+    });
+    return;
+  }
   if (subcommand === 'save' && (!isImmediateFlow || getStringFlag(parsed.flags, 'flow'))) {
     saveWorkflowCommand(parsed.positionals.slice(1).join(' '), parsed.flags);
     return;

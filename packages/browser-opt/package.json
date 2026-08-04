@@ -1,0 +1,35 @@
+{
+  "name": "browser-opt",
+  "version": "1.0.0",
+  "description": "带证据报告的自然语言浏览器工作流 CLI",
+  "type": "module",
+  "main": "dist/browser-opt/index.js",
+  "types": "dist/browser-opt/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/browser-opt/index.js",
+      "types": "./dist/browser-opt/index.d.ts"
+    }
+  },
+  "bin": {
+    "browser-opt": "dist/cli/browser-opt.js"
+  },
+  "files": [
+    "dist",
+    "skills/browser-opt"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@browser-automated/browser-core": "1.0.0",
+    "agent-browser": "^0.33.1"
+  }
+}

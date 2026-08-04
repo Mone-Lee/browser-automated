@@ -4,7 +4,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { BrowserAgent } from '../../core/agent.js';
+import type { BrowserAgent } from '@browser-automated/browser-core/agent';
 import type { BrowserOptHandoffContext, BrowserOptHandoffOptions, SnapshotEvidence } from '../type.js';
 import { captureTransientSnapshot, normalizeUrlForCompare } from './evidence.js';
 

@@ -1,0 +1,75 @@
+{
+  "name": "browser-opt",
+  "version": "0.2.0",
+  "description": "Run immediate or project-saved natural-language browser workflows with simplified PASS/FAIL results",
+  "triggers": [
+    "browser-opt",
+    "natural language browser flow",
+    "execute browser flow",
+    "自然语言执行浏览器流程",
+    "执行已保存的浏览器流程",
+    "运行 workflow"
+  ],
+  "inputs": {
+    "type": "object",
+    "properties": {
+      "flow": {
+        "type": "string",
+        "description": "Full natural-language browser flow including a URL and expected steps"
+      },
+      "query": {
+        "type": "string",
+        "description": "Short request used to match a saved workflow in the calling project"
+      },
+      "workflowDir": {
+        "type": "string",
+        "description": "Optional workflow directory, default .browser-opt/workflows under the calling project"
+      },
+      "profile": {
+        "type": "string",
+        "description": "Chrome profile name or path. Use state for login-only reuse; profile keeps full Chrome profile behavior."
+      },
+      "state": {
+        "type": "string",
+        "description": "Path to an agent-browser state file. Preferred for reusing login state without restoring tabs or Chrome recovery UI."
+      },
+      "liveViewport": {
+        "type": "boolean",
+        "description": "Whether to show the actual system Chrome browser, default true; never use the agent tool's built-in browser or the agent-browser dashboard"
+      },
+      "outputDir": {
+        "type": "string",
+        "description": "Optional directory for evidence reports"
+      }
+    }
+  },
+  "outputs": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "enum": [
+          "PASS",
+          "FAIL"
+        ]
+      },
+      "reportJsonPath": {
+        "type": "string"
+      },
+      "reportMarkdownPath": {
+        "type": "string"
+      },
+      "screenshotPaths": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "logPaths": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
