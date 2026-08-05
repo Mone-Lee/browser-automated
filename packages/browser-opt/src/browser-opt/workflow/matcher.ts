@@ -35,8 +35,18 @@ export function matchBrowserOptWorkflows(
     return { status: 'not-found', matched: null, candidates: [], available };
   }
 
+  const queryBigrams = toBigrams(normalizedQuery);
+  const queryTokens = toTokens(query);
   const scored = workflows
-    .map((workflow) => ({ workflow, score: scoreBrowserOptWorkflow(query, workflow) }))
+    .map((workflow) => ({
+      workflow,
+      score: scoreNormalizedWorkflow(
+        normalizedQuery,
+        queryBigrams,
+        queryTokens,
+        workflow,
+      ),
+    }))
     .filter((candidate) => candidate.score >= MIN_MATCH_SCORE)
     .sort(compareCandidates);
   const exact = scored.find((candidate) =>
@@ -65,6 +75,16 @@ export function matchBrowserOptWorkflows(
 /** 名称包含是强信号，字符 bigram 与英文 token 重叠负责短句和轻微差异兜底。 */
 export function scoreBrowserOptWorkflow(query: string, workflow: BrowserOptWorkflow): number {
   const normalizedQuery = normalizeBrowserOptWorkflowQuery(query);
+  return scoreNormalizedWorkflow(normalizedQuery, toBigrams(normalizedQuery), toTokens(query), workflow);
+}
+
+/** 复用查询侧归一化结果，避免候选较多时为每个 Workflow 重复拆词。 */
+function scoreNormalizedWorkflow(
+  normalizedQuery: string,
+  queryBigrams: Set<string>,
+  queryTokens: Set<string>,
+  workflow: BrowserOptWorkflow,
+): number {
   const normalizedName = normalizeBrowserOptWorkflowQuery(workflow.name);
   if (!normalizedQuery || !normalizedName) {
     return 0;
@@ -74,8 +94,8 @@ export function scoreBrowserOptWorkflow(query: string, workflow: BrowserOptWorkf
   }
 
   const containment = normalizedQuery.includes(normalizedName) || normalizedName.includes(normalizedQuery) ? 0.9 : 0;
-  const bigramScore = diceCoefficient(toBigrams(normalizedQuery), toBigrams(normalizedName));
-  const tokenScore = jaccard(toTokens(query), toTokens(workflow.name));
+  const bigramScore = diceCoefficient(queryBigrams, toBigrams(normalizedName));
+  const tokenScore = jaccard(queryTokens, toTokens(workflow.name));
   return Math.min(1, Math.max(containment, bigramScore * 0.75 + tokenScore * 0.25));
 }
 
