@@ -585,9 +585,9 @@ describe('browser-opt CLI', () => {
 
     expect(result.status).toBe(0);
     const commands = fs.readFileSync(commandLog, 'utf-8');
-    expect(commands).not.toContain(`state load ${statePath}`);
-    expect(commands.match(new RegExp(`--state ${statePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g')) ?? []).toHaveLength(1);
-    expect(commands).toContain(`--state ${statePath} --session`);
+    expect(commands).toContain('open about:blank');
+    expect(commands).toContain(`state load ${statePath}`);
+    expect(commands).not.toContain(`--state ${statePath}`);
     expect(commands).not.toContain('--profile Default');
     expect(commands).not.toContain('--auto-connect');
     expect(commands).toContain('state save');
@@ -618,12 +618,13 @@ describe('browser-opt CLI', () => {
 
     expect(result.status).toBe(0);
     const commands = fs.readFileSync(commandLog, 'utf-8');
-    expect(commands.match(new RegExp(`--state ${statePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g')) ?? []).toHaveLength(1);
+    expect(commands).toContain('open about:blank');
+    expect(commands).toContain(`state load ${statePath}`);
+    expect(commands).not.toContain(`--state ${statePath}`);
     expect(commands).toContain('--profile Default');
     expect(commands).toContain('close');
     expect(commands).not.toContain('handoff');
     expect(commands).not.toContain('resume');
-    expect(commands).not.toContain(`state load ${statePath}`);
     expect(commands.split('\n').filter((command) => /\bopen https:\/\/example\.com\b/.test(command))).toHaveLength(2);
     expect(commands).toContain(`state save ${statePath}`);
   });
@@ -644,9 +645,9 @@ describe('browser-opt CLI', () => {
 
     expect(result.status).toBe(0);
     const commands = fs.readFileSync(commandLog, 'utf-8');
-    expect(commands).not.toContain(`state load ${statePath}`);
-    expect(commands.match(new RegExp(`--state ${statePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g')) ?? []).toHaveLength(1);
-    expect(commands).toContain(`--state ${statePath} --session`);
+    expect(commands).toContain('open about:blank');
+    expect(commands).toContain(`state load ${statePath}`);
+    expect(commands).not.toContain(`--state ${statePath}`);
     expect(commands).not.toContain('--profile Default');
     expect(commands).toContain(`state save ${statePath}`);
   });
