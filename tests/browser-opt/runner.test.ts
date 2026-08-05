@@ -552,11 +552,13 @@ describe('BrowserOptRunner', () => {
 
     expect(result.passed).toBe(true);
     expect(capturedOptions).toHaveLength(2);
-    expect(capturedOptions[0]).toEqual(expect.objectContaining({ statePath: authStatePath }));
+    expect(capturedOptions[0].statePath).toBeUndefined();
     expect(capturedOptions[1]).toEqual(expect.objectContaining({ profile: 'Default', liveViewport: true }));
     expect(capturedOptions[1]).not.toHaveProperty('statePath');
     expect(capturedOptions[1]).not.toHaveProperty('headless');
-    expect((stateAgent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((stateAgent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(2);
+    expect((stateAgent.open as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(1, 'about:blank');
+    expect((stateAgent.stateLoad as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(authStatePath);
     expect((stateAgent.close as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
     expect((profileAgent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
     expect((profileAgent.close as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
@@ -601,7 +603,7 @@ describe('BrowserOptRunner', () => {
 
     expect(result.passed).toBe(true);
     expect(capturedOptions).toHaveLength(2);
-    expect(capturedOptions[0]).toEqual(expect.objectContaining({ statePath: authStatePath }));
+    expect(capturedOptions[0].statePath).toBeUndefined();
     expect(capturedOptions[1]).toEqual(expect.objectContaining({ profile: 'Default', liveViewport: true }));
     expect(capturedOptions[1]).not.toHaveProperty('statePath');
     expect((stateAgent.close as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
@@ -638,7 +640,9 @@ describe('BrowserOptRunner', () => {
     expect(capturedOptions).toHaveLength(1);
     expect((originalAgent.close as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect((originalAgent.handoff as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
-    expect((originalAgent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((originalAgent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(2);
+    expect((originalAgent.open as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(1, 'about:blank');
+    expect((originalAgent.stateLoad as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(authStatePath);
     expect(result.report.screenshots).toEqual([path.join(result.report.outputDir, '00-open.png')]);
     expect(result.report.logs.join('\n')).not.toContain('profile');
   });
@@ -1895,7 +1899,7 @@ describe('BrowserOptRunner', () => {
     expect(result.report.logs.join('\n')).toContain(`auth-state-save: ${authStateSavePath}`);
   });
 
-  it('passes the auth state path into the agent when a state path is provided', async () => {
+  it('loads auth state before the first business navigation', async () => {
     const outputDir = makeTempDir();
     const authStatePath = path.join(makeTempDir(), 'auth-state.json');
     const capturedOptions: AgentOptions[] = [];
@@ -1914,9 +1918,10 @@ describe('BrowserOptRunner', () => {
     });
 
     expect(result.passed).toBe(true);
-    expect(capturedOptions[0]).toEqual(expect.objectContaining({ statePath: authStatePath }));
-    expect((agent.stateLoad as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
-    expect((agent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('https://example.com');
+    expect(capturedOptions[0].statePath).toBeUndefined();
+    expect((agent.stateLoad as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(authStatePath);
+    expect((agent.open as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(1, 'about:blank');
+    expect((agent.open as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(2, 'https://example.com');
   });
 
   it('keeps ordinary action failures as normal errors instead of handoff', async () => {

@@ -76,7 +76,6 @@ export class BrowserOptRunner {
       sessionId: options.sessionId,
       profile: options.profile,
       sessionName: options.sessionName,
-      statePath: options.statePath,
       reuseRunningBrowser: options.reuseRunningBrowser ?? false,
       liveViewport: options.liveViewport ?? true,
       openLiveDashboard: false,
@@ -84,6 +83,22 @@ export class BrowserOptRunner {
     });
 
     try {
+      // 先在空白页显式恢复 state，确保业务页首批鉴权请求发出前 cookies 与 storage 已经就位。
+      if (options.statePath) {
+        logs.push('auth-state-stage-open: about:blank');
+        agent.open('about:blank');
+        try {
+          const loadOutput = agent.stateLoad(options.statePath);
+          logs.push(`auth-state-load: ${options.statePath}`);
+          if (loadOutput.trim()) {
+            logs.push(`auth-state-load-output: ${loadOutput.trim()}`);
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          logs.push(`auth-state-load-failed: ${message}`);
+        }
+      }
+
       logs.push(`open: ${url}`);
       agent.open(url);
 
