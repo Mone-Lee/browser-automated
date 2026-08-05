@@ -5,7 +5,7 @@
 - `browser-opt`：带截图、snapshot 和 PASS/FAIL 报告的自然语言浏览器工作流 CLI，负责即时执行与保存/复用 Workflow。
 - `browser-e2e`：自然语言驱动的 E2E 测试匹配、执行与 Playwright 生成 CLI。
 
-两者共享 `packages/browser-core` 中的浏览器适配和基础类型，但各自独立发布、独立安装 Skill、独立维护 CLI 边界。
+两者共享 `packages/browser-core/src` 中的底层实现，但该目录不是 npm package。构建时共享代码会分别进入两个 CLI 的发布物，因此它们都能独立安装和运行。
 
 ## 安装与环境初始化
 
@@ -100,7 +100,7 @@ npx --yes browser-e2e gen https://example.com "打开 pricing 页面并进入 co
 
 ## 仓库结构
 
-- `packages/browser-core/src`：两个 CLI 共享的浏览器适配、session、handoff 与基础类型；`src` 只保留 `.ts` 源码
+- `packages/browser-core/src`：两个 CLI 共用的底层浏览器适配、session、handoff 与基础类型；不包含 package 配置，不独立发布
 - `packages/browser-opt/src`：`browser-opt` 包源码与 CLI
 - `packages/browser-e2e/src`：`browser-e2e` 包源码与 CLI
 - `packages/*/dist`：构建产物，由 `npm run build` 生成
@@ -117,10 +117,11 @@ npm pack --dry-run -w browser-opt
 npm pack --dry-run -w browser-e2e
 ```
 
-只改 `browser-core` 并需要刷新本地构建产物时：
+只改共享底层代码并需要刷新某个 CLI 的本地构建产物时：
 
 ```bash
-npm run build -w @browser-automated/browser-core
+npm run build -w browser-opt
+npm run build -w browser-e2e
 ```
 
 ## 发版
@@ -133,6 +134,6 @@ npm run release -- browser-e2e patch
 npm run release -- all minor
 ```
 
-发 `browser-opt` / `browser-e2e` 时，脚本会自动探测 `packages/browser-core` 是否有变更；如果有，会先 bump、打包并发布 `@browser-automated/browser-core`，再把本次发布目标里的 core 依赖更新到新版本后继续发布。
+`browser-opt` 和 `browser-e2e` 的构建都会把共享底层代码编译进各自的 `dist/browser-core`。发版只发布这两个用户入口，不再发布或拉取独立的 core 包。
 
 更多结构和发版边界见 `docs/project-structure.md`。

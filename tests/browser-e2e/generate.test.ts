@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TestCaseGenerator } from '../../packages/browser-e2e/dist/browser-e2e/generate.js';
-import type { AgentOptions } from '@browser-automated/browser-core';
-import type { BrowserAgent } from '@browser-automated/browser-core/agent';
+import type { AgentOptions } from '#browser-core';
+import type { BrowserAgent } from '#browser-core/agent';
 
 function buildMockAgent(snapshot: string): BrowserAgent {
   return {

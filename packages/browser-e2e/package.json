@@ -11,6 +11,16 @@
       "types": "./dist/browser-e2e/index.d.ts"
     }
   },
+  "imports": {
+    "#browser-core": {
+      "types": "./dist/browser-core/index.d.ts",
+      "default": "./dist/browser-core/index.js"
+    },
+    "#browser-core/*": {
+      "types": "./dist/browser-core/*.d.ts",
+      "default": "./dist/browser-core/*.js"
+    }
+  },
   "bin": {
     "browser-e2e": "dist/cli/browser-e2e.js"
   },
@@ -19,8 +29,8 @@
     "skills/browser-e2e"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "build": "node ../../scripts/build-package.mjs browser-e2e",
+    "typecheck": "node ../../scripts/build-package.mjs browser-e2e --typecheck"
   },
   "engines": {
     "node": ">=24.0.0"
@@ -29,7 +39,6 @@
     "access": "public"
   },
   "dependencies": {
-    "@browser-automated/browser-core": "1.0.0",
     "agent-browser": "^0.33.1"
   }
 }

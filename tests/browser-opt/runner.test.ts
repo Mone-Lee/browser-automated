@@ -12,8 +12,8 @@ import {
   splitBrowserOptSteps,
 } from '../../packages/browser-opt/dist/browser-opt/runner/index.js';
 import { findClickableRef, parseDeterministicAction } from '../../packages/browser-opt/dist/browser-opt/utils.js';
-import type { BrowserAgent } from '@browser-automated/browser-core/agent';
-import type { AgentOptions } from '@browser-automated/browser-core';
+import type { BrowserAgent } from '#browser-core/agent';
+import type { AgentOptions } from '#browser-core';
 
 const tempDirs: string[] = [];
 

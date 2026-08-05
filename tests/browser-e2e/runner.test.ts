@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NaturalLanguageTestRunner } from '../../packages/browser-e2e/dist/browser-e2e/runner.js';
-import type { TestCase, AgentOptions } from '@browser-automated/browser-core';
-import type { BrowserAgent } from '@browser-automated/browser-core/agent';
+import type { TestCase, AgentOptions } from '#browser-core';
+import type { BrowserAgent } from '#browser-core/agent';
 
 // Build a mock agent object. The runner uses factory injection so no class
 // mocking is required.

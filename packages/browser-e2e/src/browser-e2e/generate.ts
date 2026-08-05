@@ -1,9 +1,9 @@
 /**
  * 根据 URL 与自然语言目标生成结构化 TestCase，供 E2E 执行和代码生成复用。
  */
-import { createBrowserAgent, type BrowserAgentFactory } from '@browser-automated/browser-core/agent';
+import { createBrowserAgent, type BrowserAgentFactory } from '#browser-core/agent';
 import { deriveDeterministicSteps } from './deterministic.js';
-import type { TestCase } from '@browser-automated/browser-core';
+import type { TestCase } from '#browser-core';
 
 /**
  * TestCaseGenerator 将自由文本测试目标转换为仓库内部统一的 TestCase 结构。

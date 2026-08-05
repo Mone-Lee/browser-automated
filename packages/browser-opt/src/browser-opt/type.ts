@@ -2,8 +2,8 @@
  * browser-opt 类型定义文件，集中承载对外报告结构以及 runner 内部共用的
  * 快照、动作和执行选项类型，避免执行逻辑与类型声明交错在同一个文件里。
  */
-import type { AgentBrowserJsonResult } from '@browser-automated/browser-core/agent';
-import type { BrowserAgent } from '@browser-automated/browser-core/agent';
+import type { AgentBrowserJsonResult } from '#browser-core/agent';
+import type { BrowserAgent } from '#browser-core/agent';
 
 export type BrowserOptStatus = 'PASS' | 'FAIL' | 'HANDOFF';
 

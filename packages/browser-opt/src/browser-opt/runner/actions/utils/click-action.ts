@@ -1,7 +1,7 @@
 /**
  * browser-opt 点击动作执行器，负责从当前快照定位可点击元素并下发 click。
  */
-import type { BrowserAgent } from '@browser-automated/browser-core/agent';
+import type { BrowserAgent } from '#browser-core/agent';
 import type { DeterministicAction, SnapshotEvidence } from '../../../type.js';
 import { findClickableRef } from '../../../utils.js';
 import { clickFieldScopedDomTarget } from './dom-action.js';

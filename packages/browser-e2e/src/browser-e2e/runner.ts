@@ -2,7 +2,7 @@
  * 执行结构化自然语言 TestCase，作为 browser-e2e 的兼容运行器和测试基础设施。
  */
 import * as path from 'node:path';
-import { createBrowserAgent, type BrowserAgentFactory, type BrowserAgent } from '@browser-automated/browser-core/agent';
+import { createBrowserAgent, type BrowserAgentFactory, type BrowserAgent } from '#browser-core/agent';
 import { executeDeterministicStep } from './deterministic.js';
 import type {
   TestCase,
@@ -10,7 +10,7 @@ import type {
   TestRunSummary,
   StepResult,
   RunnerOptions,
-} from '@browser-automated/browser-core';
+} from '#browser-core';
 
 /**
  * NaturalLanguageTestRunner 按顺序执行 TestCase 中的步骤，并在失败时按需截图。

@@ -2,7 +2,7 @@
  * browser-opt DOM 动作兜底工具，负责在 snapshot 信息缺失时按页面真实 DOM
  * 的字段上下文定位控件，并执行点击、输入等通用动作。
  */
-import type { BrowserAgent } from '@browser-automated/browser-core/agent';
+import type { BrowserAgent } from '#browser-core/agent';
 
 interface FieldScopedDomResult {
   found?: boolean;

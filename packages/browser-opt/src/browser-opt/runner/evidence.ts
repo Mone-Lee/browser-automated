@@ -3,7 +3,7 @@
  * 这些函数不判断业务语义，只为执行层提供一致的页面证据。
  */
 import * as fs from 'node:fs';
-import type { BrowserAgent } from '@browser-automated/browser-core/agent';
+import type { BrowserAgent } from '#browser-core/agent';
 import type { SnapshotEvidence } from '../type.js';
 import { countSnapshotNodes, snapshotText } from '../utils.js';
 

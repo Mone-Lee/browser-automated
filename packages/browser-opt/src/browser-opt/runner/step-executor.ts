@@ -3,7 +3,7 @@
  * 该文件只处理步骤级生命周期，避免主 runner 混入具体交互细节。
  */
 import * as path from 'node:path';
-import type { BrowserAgent } from '@browser-automated/browser-core/agent';
+import type { BrowserAgent } from '#browser-core/agent';
 import type { BrowserOptStepExecutionOptions, BrowserOptStepResult } from '../type.js';
 import {
   isVerificationStep,

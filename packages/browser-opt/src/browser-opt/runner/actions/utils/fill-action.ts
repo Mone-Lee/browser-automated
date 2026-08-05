@@ -1,7 +1,7 @@
 /**
  * browser-opt 输入动作执行器，负责定位输入框并处理登录页阻塞的 handoff。
  */
-import type { BrowserAgent } from '@browser-automated/browser-core/agent';
+import type { BrowserAgent } from '#browser-core/agent';
 import type { DeterministicAction, SnapshotEvidence } from '../../../type.js';
 import { findTextboxRef } from '../../../utils.js';
 import { buildLoginHandoffActionOutput, isLoginLikeSnapshot } from '../../handoff.js';

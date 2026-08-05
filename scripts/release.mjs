@@ -1,29 +1,22 @@
 /**
- * monorepo 发版入口，按目标包发布，并在 core 有变化时自动先发布 core。
+ * monorepo 发版入口，按目标发布两个自包含的 CLI package。
  */
 import { execSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 
 const NPMJS_REGISTRY = 'https://registry.npmjs.org/';
 const RELEASE_TYPES = new Set(['patch', 'minor', 'major']);
-const TARGETS = new Set(['all', 'browser-core', 'browser-opt', 'browser-e2e']);
+const TARGETS = new Set(['all', 'browser-opt', 'browser-e2e']);
 const PACKAGE_BY_TARGET = {
-  'browser-core': {
-    name: '@browser-automated/browser-core',
-    dir: 'packages/browser-core',
-    tagPrefix: 'browser-core',
-  },
   'browser-opt': {
     name: 'browser-opt',
     dir: 'packages/browser-opt',
     tagPrefix: 'browser-opt',
-    dependsOnCore: true,
   },
   'browser-e2e': {
     name: 'browser-e2e',
     dir: 'packages/browser-e2e',
     tagPrefix: 'browser-e2e',
-    dependsOnCore: true,
   },
 };
 
@@ -51,51 +44,24 @@ function parseArgs() {
 
   if (!RELEASE_TYPES.has(releaseType)) {
     console.error(`\nInvalid release type: "${releaseType}"`);
-    console.error('Usage: npm run release -- [all|browser-core|browser-opt|browser-e2e] [patch|minor|major]');
+    console.error('Usage: npm run release -- [all|browser-opt|browser-e2e] [patch|minor|major]');
     console.error('Dry run: npm run release:dry-run -- [target] [patch|minor|major]');
     process.exit(1);
   }
 
   if (first && !TARGETS.has(first) && !RELEASE_TYPES.has(first)) {
     console.error(`\nInvalid release target: "${first}"`);
-    console.error('Usage: npm run release -- [all|browser-core|browser-opt|browser-e2e] [patch|minor|major]');
+    console.error('Usage: npm run release -- [all|browser-opt|browser-e2e] [patch|minor|major]');
     process.exit(1);
   }
 
   return { target, releaseType, dryRun };
 }
 
-function hasGitHead() {
-  try {
-    runCapture('git rev-parse --verify HEAD');
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function hasPackageChanges(packageDir) {
-  if (!hasGitHead()) {
-    return true;
-  }
-
-  const trackedChanges = runCapture(`git diff --name-only HEAD -- ${packageDir}`);
-  const untrackedChanges = runCapture(`git ls-files --others --exclude-standard -- ${packageDir}`);
-  return Boolean(trackedChanges || untrackedChanges);
-}
-
 function resolveReleaseTargets(target) {
-  const requestedTargets = target === 'all'
+  return target === 'all'
     ? ['browser-opt', 'browser-e2e']
     : [target];
-  const needsCore = requestedTargets.includes('browser-core') ||
-    (requestedTargets.some((item) => PACKAGE_BY_TARGET[item].dependsOnCore) &&
-      hasPackageChanges(PACKAGE_BY_TARGET['browser-core'].dir));
-
-  return [
-    ...(needsCore ? ['browser-core'] : []),
-    ...requestedTargets.filter((item) => item !== 'browser-core'),
-  ];
 }
 
 function readPackageJson(packageDir) {
@@ -104,10 +70,6 @@ function readPackageJson(packageDir) {
     url,
     json: JSON.parse(readFileSync(url, 'utf8')),
   };
-}
-
-function writePackageJson(url, json) {
-  writeFileSync(url, `${JSON.stringify(json, null, 2)}\n`);
 }
 
 /** 使用统一参数刷新 lockfile，并立即用 npm ci 校验可选依赖没有被错误裁剪。 */
@@ -165,23 +127,6 @@ function ensureNpmPublishPreflight(dryRun) {
   }
 }
 
-function updateCoreDependents(targets, coreVersion, dryRun) {
-  for (const target of targets) {
-    const packageInfo = PACKAGE_BY_TARGET[target];
-    if (!packageInfo.dependsOnCore) {
-      continue;
-    }
-
-    const { url, json } = readPackageJson(packageInfo.dir);
-    json.dependencies = json.dependencies ?? {};
-    json.dependencies['@browser-automated/browser-core'] = coreVersion;
-    if (!dryRun) {
-      writePackageJson(url, json);
-    }
-    console.log(`Updated ${packageInfo.name} dependency @browser-automated/browser-core -> ${coreVersion}`);
-  }
-}
-
 function readVersion(target) {
   return readPackageJson(PACKAGE_BY_TARGET[target].dir).json.version;
 }
@@ -196,11 +141,9 @@ function bumpPackageVersion(target, releaseType, dryRun) {
   return readVersion(target);
 }
 
-function publishPackage(target, dryRun) {
+function publishPackage(target) {
   const packageInfo = PACKAGE_BY_TARGET[target];
-  const accessFlag = target === 'browser-core' ? ' --access public' : '';
-  const dryRunFlag = dryRun ? ' --dry-run' : '';
-  run(`npm publish -w ${packageInfo.name} --registry=${NPMJS_REGISTRY}${accessFlag}${dryRunFlag}`);
+  run(`npm publish -w ${packageInfo.name} --registry=${NPMJS_REGISTRY}`);
 }
 
 function hasStagedOrWorkingChanges() {
@@ -254,16 +197,7 @@ ensureNpmPublishPreflight(dryRun);
 run('npm run typecheck');
 commitCurrentChangesIfNeeded(dryRun);
 
-let newCoreVersion = null;
-if (releaseTargets.includes('browser-core')) {
-  newCoreVersion = bumpPackageVersion('browser-core', releaseType, dryRun);
-  updateCoreDependents(releaseTargets, newCoreVersion, dryRun);
-}
-
 for (const releaseTarget of releaseTargets) {
-  if (releaseTarget === 'browser-core') {
-    continue;
-  }
   bumpPackageVersion(releaseTarget, releaseType, dryRun);
 }
 
@@ -274,17 +208,11 @@ for (const releaseTarget of releaseTargets) {
   run(`npm pack --dry-run -w ${PACKAGE_BY_TARGET[releaseTarget].name}`, { dryRun });
 }
 
-for (const releaseTarget of releaseTargets) {
-  if (dryRun) {
-    publishPackage(releaseTarget, dryRun);
-  }
-}
-
 commitAndTagRelease(releaseTargets, dryRun);
 
 if (!dryRun) {
   for (const releaseTarget of releaseTargets) {
-    publishPackage(releaseTarget, dryRun);
+    publishPackage(releaseTarget);
   }
 
   console.log('\nnpm publish succeeded, pushing commits and tags to GitHub...');

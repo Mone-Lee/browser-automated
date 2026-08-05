@@ -2,8 +2,8 @@
  * 独立检查 browser-opt 运行环境并安装 Agent Skill，普通工作流不再承担任何安装职责。
  * 默认要求本机已有标准 Chrome；只有显式请求时才下载测试浏览器作为兜底。
  */
-import { resolveSystemChromeExecutable } from '@browser-automated/browser-core/browser-executable';
-import { resolveSkillInstallTarget } from '@browser-automated/browser-core/skill-install';
+import { resolveSystemChromeExecutable } from '#browser-core/browser-executable';
+import { resolveSkillInstallTarget } from '#browser-core/skill-install';
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';

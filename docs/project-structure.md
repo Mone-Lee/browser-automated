@@ -1,18 +1,17 @@
 # 项目结构与发版边界
 
-本文档说明当前 monorepo 的文件布局、包职责和发版规则。项目已经从根 `src/` 拆分到 `packages/*/src`，源码应保持在各自 package 内，构建产物统一输出到对应的 `dist/`。
+本文档说明当前 monorepo 的文件布局、源码职责和发版规则。两个 CLI 是独立 package，共享底层代码保持为仓库内源码，并在构建时进入各自的发布物。
 
 ## 对外产物
 
-项目对外发布三个 npm package，其中 `browser-core` 是内部共享基础包，另外两个是用户直接使用的 CLI / Skill：
+项目只对外发布两个 npm package：
 
 | 包 | 定位 | 是否直接面向用户 |
 | --- | --- | --- |
-| `@browser-automated/browser-core` | 封装 `agent-browser`、浏览器 session、handoff 和共享类型 | 否 |
 | `browser-opt` | 带截图、snapshot 和 PASS/FAIL 报告的自然语言浏览器工作流 CLI | 是 |
 | `browser-e2e` | 自然语言驱动的 E2E 测试匹配、执行与 Playwright 生成 CLI | 是 |
 
-`browser-opt` 和 `browser-e2e` 都依赖 `@browser-automated/browser-core`。本地开发通过 npm workspaces 直接引用本地包，不需要每次修改 core 都发布；只有正式发版给仓库外使用时才发布 core。
+`packages/browser-core/src` 只承载两个 CLI 共用的底层源码，不含 `package.json`，也不是 npm workspace。构建脚本会把它编译到目标 CLI 的 `dist/browser-core`，所以发布包没有额外的 core 依赖。
 
 ## 当前目录职责
 
@@ -24,8 +23,6 @@ packages/
       proxy-env.ts       agent-browser 子进程代理环境变量整理
       types.ts           TestCase、StepResult、AgentOptions 等共享类型
       index.ts           core 稳定导出
-    dist/                构建产物，只由 tsc 生成
-    package.json         @browser-automated/browser-core 包配置
 
   browser-opt/
     src/
@@ -68,15 +65,16 @@ docs/
   browser-opt-debug.md   browser-opt 调试说明
 
 scripts/
-  release.mjs            发版编排，自动探测 core 变更
+  build-package.mjs      将共享底层代码编译进指定 CLI，再构建 CLI 自身
+  release.mjs            两个 CLI 的发版编排
   release-check.mjs      发版前检查和 npm pack 预演
 ```
 
 ## 源码与构建产物
 
-- `packages/*/src` 只放源码。TypeScript 包中不要提交 `.js`、`.d.ts`、`.map`。
-- `packages/*/dist` 是构建产物，由 `npm run build` 或单包 `npm run build -w <package>` 生成。
-- package 的 `main`、`types`、`exports` 指向 `dist`，源码内跨包导入使用 workspace 包名，例如 `@browser-automated/browser-core/agent`。
+- `packages/*/src` 只放源码。TypeScript 源码目录中不要提交 `.js`、`.d.ts`、`.map`。
+- `packages/browser-opt/dist` 和 `packages/browser-e2e/dist` 是构建产物，由 `npm run build` 或单包构建生成。
+- 两个 CLI 通过包内 `#browser-core` imports 映射访问随包发布的底层代码；npm 不会把它解析成外部依赖。
 
 ## 修改边界
 
@@ -94,10 +92,11 @@ npm run build
 npm test
 ```
 
-只改 core 并需要刷新本地运行产物时：
+只改共享底层代码并需要刷新本地运行产物时：
 
 ```bash
-npm run build -w @browser-automated/browser-core
+npm run build -w browser-opt
+npm run build -w browser-e2e
 ```
 
 ## 发版命令
@@ -124,16 +123,11 @@ npm run release -- browser-e2e patch
 npm run release -- all minor
 ```
 
-目标参数支持 `all`、`browser-core`、`browser-opt`、`browser-e2e`；版本参数支持 `patch`、`minor`、`major`，默认是 `all patch`。
+目标参数支持 `all`、`browser-opt`、`browser-e2e`；版本参数支持 `patch`、`minor`、`major`，默认是 `all patch`。
 
-## core 自动发版规则
+## 共享底层代码的发版规则
 
-执行 `npm run release -- browser-opt patch` 或 `npm run release -- browser-e2e patch` 时，脚本会检查 `packages/browser-core` 相对当前 `HEAD` 是否有 tracked 或 untracked 变更。
-
-- 如果 core 没有变化，只发布目标包。
-- 如果 core 有变化，先发布 `@browser-automated/browser-core`。
-- core 发布后，脚本会把本次发布目标中依赖 core 的包的 `@browser-automated/browser-core` 版本更新为新的精确版本，再继续发布目标包。
-- `all` 会发布 `browser-opt` 和 `browser-e2e`，并在 core 有变化时自动把 core 插到最前面。
+执行 `npm run release -- browser-opt patch` 或 `npm run release -- browser-e2e patch` 时，共享底层代码会直接进入目标包。修改共享代码后，需要发布哪些 CLI 由发版目标决定；`all` 会同时发布两个 CLI。
 
 发版脚本会执行 typecheck、build、npm pack 预演、npm publish、git commit/tag/push。正式发版前建议只保留本次发布相关改动，避免把无关工作一起提交。
 

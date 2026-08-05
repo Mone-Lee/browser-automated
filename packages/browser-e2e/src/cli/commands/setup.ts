@@ -2,7 +2,7 @@
  * 安装 browser-e2e 运行所需的浏览器与 Agent Skill，使调用方只需执行一次 setup。
  * 该命令只在用户显式调用时写入本机目录，不影响普通测试匹配和执行流程。
  */
-import { resolveSkillInstallTarget } from '@browser-automated/browser-core/skill-install';
+import { resolveSkillInstallTarget } from '#browser-core/skill-install';
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';

@@ -4,7 +4,6 @@
 import { execSync } from 'node:child_process';
 
 const PACKAGES = [
-  '@browser-automated/browser-core',
   'browser-opt',
   'browser-e2e',
 ];
