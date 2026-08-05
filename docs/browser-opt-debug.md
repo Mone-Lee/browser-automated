@@ -37,10 +37,10 @@ ln -sfn /Users/lee/Documents/project/browser-automated/skills/browser-opt ~/.cod
 开发期在普通终端里推荐优先使用全局 `npm link` 后的 `browser-opt ...` 命令，避免
 `npx browser-opt ...` 在未发布 npm 包时回退到 registry 查询并触发 404。
 Codex 通过软链 Skill 触发时，执行环境可能没有加载 nvm 的全局 bin 目录，因此
-`skills/browser-opt/SKILL.md` 会直接调用当前仓库的构建产物：
+`skills/browser-opt/SKILL.md` 会直接调用当前仓库 package 内的构建产物：
 
 ```bash
-/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/dist/cli/browser-opt.js
+/Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/packages/browser-opt/dist/cli/browser-opt.js
 ```
 
 注意：跨项目触发的 Skill sandbox 可能没有权限读取本仓库的 `package.json`，
@@ -135,7 +135,7 @@ npm test -- tests/cli/browser-opt.test.ts
 
 ```bash
 npm run build
-node dist/cli/browser-opt.js "测试 https://example.com。
+node packages/browser-opt/dist/cli/browser-opt.js "测试 https://example.com。
 
 目标：
 1. 打开首页。
@@ -172,10 +172,10 @@ ls ./.browser-opt/artifacts/smoke
 ## 常见判断
 
 - 已执行 `npm link`：优先直接使用 `browser-opt ...`，这是当前项目联调其他仓库时最稳的方式。
-- 软链 Skill 在 Codex 中触发：优先按 `SKILL.md` 使用绝对路径调用当前仓库的 `dist/cli/browser-opt.js`，避免执行环境没有全局 npm bin。
+- 软链 Skill 在 Codex 中触发：优先按 `SKILL.md` 使用绝对路径调用当前仓库的 `packages/browser-opt/dist/cli/browser-opt.js`，避免执行环境没有全局 npm bin。
 - 只有目标项目安装了本地包或已发布包：再使用 `npx browser-opt ...`。
 - 只跑 `npm test -- tests/cli/browser-opt.test.ts`：测试 CLI 包装层，不触发真实浏览器。
-- 直接跑 `node dist/cli/browser-opt.js ...`：触发真实 `agent-browser`，但不测试 Codex Skill 自动发现。
+- 直接跑 `node packages/browser-opt/dist/cli/browser-opt.js ...`：触发真实 `agent-browser`，但不测试 Codex Skill 自动发现。
 - 在 Codex 中按 `skills/browser-opt/SKILL.md` 要求执行：测试 Agent 遵守 Skill 文档以及真实 `agent-browser` 调用。
 - 重开 Codex 后输入 `/browser-opt ...`：测试完整的 Skill 发现、触发、执行链路。
 - 登录态失效并看到 handoff：在当前浏览器里完成登录；终端直接运行时输入 `done`，Codex Workflow 则对原 `runId` 执行 `resume`；不要重跑保存流程命令。
