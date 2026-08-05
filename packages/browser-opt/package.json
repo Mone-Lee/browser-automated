@@ -1,6 +1,6 @@
 {
   "name": "browser-opt",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "带证据报告的自然语言浏览器工作流 CLI",
   "type": "module",
   "main": "dist/browser-opt/index.js",
