@@ -62,9 +62,11 @@ export async function cmdBrowserOpt(args: string[]): Promise<void> {
   const [subcommand] = parsed.positionals;
   const positionalText = parsed.positionals.join(' ').trim();
   const isImmediateFlow = Boolean(extractBrowserOptUrl(positionalText));
-  if (subcommand === 'setup' && !isImmediateFlow) {
+  if ((subcommand === 'install' || subcommand === 'setup') && !isImmediateFlow) {
+    const installSystemDependencies = getBooleanFlag(parsed.flags, 'with-deps');
     setupBrowserOpt({
-      installSystemDependencies: getBooleanFlag(parsed.flags, 'with-deps'),
+      installSystemDependencies,
+      downloadBrowser: getBooleanFlag(parsed.flags, 'download-browser') || installSystemDependencies,
       installSkill: !getBooleanFlag(parsed.flags, 'skip-skill'),
       agent: getStringFlag(parsed.flags, 'agent'),
       skillsDir: getStringFlag(parsed.flags, 'skills-dir'),
@@ -148,7 +150,7 @@ async function executeBrowserOptFlow(
 function saveWorkflowCommand(name: string, flags: Record<string, string | boolean>): void {
   const flow = getStringFlag(flags, 'flow');
   if (!name.trim() || !flow?.trim()) {
-    console.error('使用方式：npx browser-opt save "<名称>" --flow "<完整自然语言流程>" [--workflow-dir <目录>] [--force]');
+    console.error('使用方式：npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest save "<名称>" --flow "<完整自然语言流程>" [--workflow-dir <目录>] [--force]');
     process.exit(BROWSER_OPT_EXIT_CODE_FAILURE);
   }
 
@@ -189,7 +191,7 @@ function listWorkflowCommand(flags: Record<string, string | boolean>): void {
 /** 输出查询解析结果；该命令本身不启动浏览器，供 Skill 决定是否需要用户选择。 */
 function matchWorkflowCommand(query: string, flags: Record<string, string | boolean>): void {
   if (!query.trim()) {
-    console.error('使用方式：npx browser-opt match "<查询语句>" [--workflow-dir <目录>] [--json]');
+    console.error('使用方式：npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest match "<查询语句>" [--workflow-dir <目录>] [--json]');
     process.exit(BROWSER_OPT_EXIT_CODE_FAILURE);
   }
 
@@ -219,7 +221,7 @@ async function runWorkflowCommand(query: string, flags: Record<string, string | 
     return;
   }
   if (!query.trim()) {
-    console.error('使用方式：npx browser-opt run "<查询语句>" [--workflow-dir <目录>]');
+    console.error('使用方式：npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest run "<查询语句>" [--workflow-dir <目录>]');
     process.exit(BROWSER_OPT_EXIT_CODE_FAILURE);
   }
 
@@ -309,7 +311,7 @@ function resolveWorkflowForExecution(
     throw new Error(`未找到 Workflow ID：${workflowId}`);
   }
   if (!query.trim()) {
-    throw new Error('使用方式：npx browser-opt start "<查询语句>" [--workflow-dir <目录>]');
+    throw new Error('使用方式：npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest start "<查询语句>" [--workflow-dir <目录>]');
   }
 
   const result = matchBrowserOptWorkflows(query, workflows);

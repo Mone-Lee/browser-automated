@@ -34,10 +34,15 @@ ln -sfn /Users/lee/Documents/project/browser-automated/skills/browser-opt ~/.cod
 2. 验证页面包含 "Example"。
 ```
 
-开发期在普通终端里推荐优先使用全局 `npm link` 后的 `browser-opt ...` 命令，避免
-`npx browser-opt ...` 在未发布 npm 包时回退到 registry 查询并触发 404。
-Codex 通过软链 Skill 触发时，执行环境可能没有加载 nvm 的全局 bin 目录，因此
-`skills/browser-opt/SKILL.md` 会直接调用当前仓库 package 内的构建产物：
+开发期在普通终端里可以使用全局 `npm link` 后的 `browser-opt ...` 命令。正式环境统一通过
+`npx` 调用，并固定 npmjs 官方源：
+
+```bash
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install --agent codex
+```
+
+Codex 通过软链 Skill 触发时会按 Skill 统一使用 `npx`。只有需要验证尚未发布的本地源码时，
+才显式调用当前仓库的构建产物：
 
 ```bash
 /Users/lee/.nvm/versions/node/v24.11.1/bin/node /Users/lee/Documents/project/browser-automated/packages/browser-opt/dist/cli/browser-opt.js
@@ -53,7 +58,7 @@ Codex 通过软链 Skill 触发时，执行环境可能没有加载 nvm 的全�
 npm install -D /Users/lee/Documents/project/browser-automated
 ```
 
-然后通过 `npx browser-opt "<自然语言流程>"` 执行 CLI。
+然后可以通过项目脚本、`node_modules/.bin/browser-opt "<自然语言流程>"` 或统一的 `npx` 命令执行 CLI。
 
 ## 保存并一句话调用 Workflow
 
@@ -173,7 +178,7 @@ ls ./.browser-opt/artifacts/smoke
 
 - 已执行 `npm link`：优先直接使用 `browser-opt ...`，这是当前项目联调其他仓库时最稳的方式。
 - 软链 Skill 在 Codex 中触发：优先按 `SKILL.md` 使用绝对路径调用当前仓库的 `packages/browser-opt/dist/cli/browser-opt.js`，避免执行环境没有全局 npm bin。
-- 只有目标项目安装了本地包或已发布包：再使用 `npx browser-opt ...`。
+- 目标项目安装了本地包：使用 `node_modules/.bin/browser-opt ...`；已全局安装时直接使用 `browser-opt ...`。
 - 只跑 `npm test -- tests/cli/browser-opt.test.ts`：测试 CLI 包装层，不触发真实浏览器。
 - 直接跑 `node packages/browser-opt/dist/cli/browser-opt.js ...`：触发真实 `agent-browser`，但不测试 Codex Skill 自动发现。
 - 在 Codex 中按 `skills/browser-opt/SKILL.md` 要求执行：测试 Agent 遵守 Skill 文档以及真实 `agent-browser` 调用。

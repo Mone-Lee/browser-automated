@@ -7,13 +7,15 @@
 
 两者共享 `packages/browser-core` 中的浏览器适配和基础类型，但各自独立发布、独立安装 Skill、独立维护 CLI 边界。
 
-## 安装与首次初始化
+## 安装与环境初始化
 
-`browser-opt`：
+`browser-opt` 的环境安装与 Workflow 执行使用独立命令，无需全局安装：
 
 ```bash
-npx --yes browser-opt setup
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install
 ```
+
+`install` 默认检查并使用系统标准 Chrome，同时安装 Agent Skill；不会下载 Chrome for Testing。机器确实没有标准 Chrome 且接受测试浏览器时，才显式添加 `--download-browser`。所有命令统一通过 `npx` 调用，并显式指定 npmjs 官方源。
 
 `browser-e2e`：
 
@@ -21,36 +23,36 @@ npx --yes browser-opt setup
 npx --yes browser-e2e setup
 ```
 
-Linux 无桌面或缺少浏览器系统库时，两者都支持：
+Linux 无桌面或缺少浏览器系统库，并明确使用下载浏览器时：
 
 ```bash
-npx --yes browser-opt setup --with-deps
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install --download-browser --with-deps
 npx --yes browser-e2e setup --with-deps
 ```
 
-`setup` 默认分别安装到通用 Agent Skills 目录 `~/.agents/skills/browser-opt` 和 `~/.agents/skills/browser-e2e`，语义接近 `npx skills add`：支持该目录约定的 Agent 都可以发现。若要安装到 Codex 专用目录，可传 `--agent codex`；若要写入其他 Agent 的 skills 根目录，可传 `--skills-dir <目录>`；若只需要 CLI，可传 `--skip-skill`。
+`install`（`setup` 保留为兼容别名）默认把 browser-opt Skill 安装到 `~/.agents/skills/browser-opt`。若要安装到 Codex 专用目录，可在引导命令后传 `--agent codex`；若要写入其他 Agent 的 skills 根目录，可传 `--skills-dir <目录>`；若只需要 CLI，可传 `--skip-skill`。
 
 常见 Agent 安装示例：
 
 ```bash
 # Claude Code
-npx --yes browser-opt setup --skills-dir ~/.claude/skills
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install --skills-dir ~/.claude/skills
 npx --yes browser-e2e setup --skills-dir ~/.claude/skills
 
 # Codex
-npx --yes browser-opt setup --agent codex
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install --agent codex
 npx --yes browser-e2e setup --agent codex
 
 # GitHub Copilot
-npx --yes browser-opt setup --skills-dir ~/.copilot/skills
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install --skills-dir ~/.copilot/skills
 npx --yes browser-e2e setup --skills-dir ~/.copilot/skills
 
 # Gemini
-npx --yes browser-opt setup --skills-dir ~/.gemini/skills
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install --skills-dir ~/.gemini/skills
 npx --yes browser-e2e setup --skills-dir ~/.gemini/skills
 
 # Qoder
-npx --yes browser-opt setup --skills-dir ~/.qoder/skills
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install --skills-dir ~/.qoder/skills
 npx --yes browser-e2e setup --skills-dir ~/.qoder/skills
 ```
 
@@ -61,7 +63,7 @@ npx --yes browser-e2e setup --skills-dir ~/.qoder/skills
 `browser-opt`：
 
 ```bash
-npx --yes browser-opt "测试 https://example.com 的搜索功能。
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest "测试 https://example.com 的搜索功能。
 
 目标：
 1. 打开首页。
@@ -71,8 +73,8 @@ npx --yes browser-opt "测试 https://example.com 的搜索功能。
 保存并复用项目级 Workflow：
 
 ```bash
-npx --yes browser-opt save "示例首页验证流程" --flow "测试 https://example.com。\n1. 验证页面包含 \"Example\"。"
-npx --yes browser-opt run "执行示例首页验证流程"
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest save "示例首页验证流程" --flow "测试 https://example.com。\n1. 验证页面包含 \"Example\"。"
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest run "执行示例首页验证流程"
 ```
 
 Workflow 默认保存到调用项目的 `.browser-opt/workflows/`；运行证据默认保存到 `.browser-opt/artifacts/`。

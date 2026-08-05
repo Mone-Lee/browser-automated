@@ -73,15 +73,15 @@ Every execution must follow these rules:
 For saved workflows, start the browser run as a detached task and keep the returned stable `runId`. Do not keep an `exec_command` or PTY session id as the recovery handle; Codex may discard that process handle when the handoff response ends the current turn.
 
 ```bash
-npx --yes browser-opt start --workflow-id "<matched.id>" --json
-npx --yes browser-opt status --run-id "<runId>" --json
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest start --workflow-id "<matched.id>" --json
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest status --run-id "<runId>" --json
 ```
 
 Poll `status` until it returns `PASS`, `FAIL`, or `HANDOFF`. When it returns `HANDOFF`, ask the user to finish the manual action and end the current turn normally. After the user replies `done`, restore the original runner and browser with:
 
 ```bash
-npx --yes browser-opt resume --run-id "<runId>" --json
-npx --yes browser-opt status --run-id "<runId>" --json
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest resume --run-id "<runId>" --json
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest status --run-id "<runId>" --json
 ```
 
 The detached task still executes `browser-opt run` exactly once. `status` is read-only and `resume` only sends a one-time signal to that original process. Never start a second `run` or `start` command to simulate resume.
@@ -92,24 +92,26 @@ Reusable flows are stored as JSON files under the calling project's
 `.browser-opt/workflows/` directory by default. Resolve relative paths from the
 calling project's current working directory, not from this skill or package directory.
 
-Install the published CLI and this Skill with `npx --yes browser-opt setup`.
-By default it installs to the shared Agent Skills directory, similar to
-`npx skills add`. Use `--agent codex` for the Codex-specific skills directory,
-or `--skills-dir <dir>` for another agent root.
-Use this command prefix for every `browser-opt` invocation:
+Install the browser environment and this Skill explicitly before the first Workflow run:
 
 ```bash
-npx --yes browser-opt
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install
 ```
 
-Only use `browser-opt ...` when `command -v browser-opt` succeeds in the same
-execution environment; otherwise use `npx --yes browser-opt ...`.
+The installer does not require a global npm installation. By default it uses the system's standard Chrome and
+installs into the shared Agent Skills directory. Use `--agent codex` for the Codex-specific skills directory, or
+`--skills-dir <dir>` for another agent root. Use this exact official-registry prefix for every invocation on
+macOS, Linux, and Windows:
+
+```bash
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest
+```
 
 Save a complete flow without executing it:
 
 ```bash
-npx --yes browser-opt save "创建安选公开直播流程" --flow "<full natural language flow>"
-npx --yes browser-opt save "创建安选公开直播流程" --flow "<full natural language flow>" --workflow-dir ./custom/workflows
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest save "创建安选公开直播流程" --flow "<full natural language flow>"
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest save "创建安选公开直播流程" --flow "<full natural language flow>" --workflow-dir ./custom/workflows
 ```
 
 Saving an existing name fails by default. Only pass `--force` when the user
@@ -145,12 +147,12 @@ When `/browser-opt` is followed by a short request without a URL, such as:
 Do not treat it as a new one-shot flow. First run:
 
 ```bash
-npx --yes browser-opt match "<short request>" --json
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest match "<short request>" --json
 ```
 
 Handle the JSON result as follows:
 
-- `matched`: run `npx --yes browser-opt start --workflow-id "<matched.id>" --json`, retain its `runId`, and follow the interactive handoff execution protocol above.
+- `matched`: run `npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest start --workflow-id "<matched.id>" --json`, retain its `runId`, and follow the interactive handoff execution protocol above.
 - `ambiguous`: do not rely on the CLI's human-readable stdout as the user-facing
   choice list, and do not ask through a modal/input tool that may render Markdown
   as plain text. Parse `match --json`, then ask in a normal assistant message.
@@ -170,7 +172,7 @@ Handle the JSON result as follows:
   blocking valid candidates.
 
 Use `--workflow-dir` consistently on both `match` and `run` when the user selects
-a custom directory. Use `npx --yes browser-opt list --json` when
+a custom directory. Use `npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest list --json` when
 the user asks to see all saved workflows.
 
 Example ambiguous response format:
@@ -205,17 +207,17 @@ workflow request. A full flow includes its target URL:
 Translate that into:
 
 ```bash
-npx --yes browser-opt "<full natural language flow>"
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest "<full natural language flow>"
 ```
 
 Optional runtime flags:
 
 ```bash
-npx --yes browser-opt "<flow>" --profile Default
-npx --yes browser-opt "<flow>" --state ./.browser-opt/states/browser-opt-default.json
-npx --yes browser-opt "<flow>" --no-live-viewport
-npx --yes browser-opt "<flow>" --output-dir ./.browser-opt/artifacts
-npx --yes browser-opt "<flow>" --agent-chat
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest "<flow>" --profile Default
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest "<flow>" --state ./.browser-opt/states/browser-opt-default.json
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest "<flow>" --no-live-viewport
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest "<flow>" --output-dir ./.browser-opt/artifacts
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest "<flow>" --agent-chat
 ```
 
 Auth state reuse policy:
@@ -230,7 +232,7 @@ Auth state reuse policy:
 - Pass `--state <path>` to use a custom state file without automatic profile fallback.
 - Do not rely on focused-browser reuse for login import: ordinary Chrome is usually not CDP-accessible, and auto-connect can attach to the wrong temporary browser.
 
-It shows and keeps the actual system Chrome browser by default so the user can watch the operation and inspect the final page state. This must be a real Chrome window, not the agent tool's built-in browser such as the Copilot/Codex in-app browser, and it must not open the agent-browser dashboard at `http://localhost:4848`. Use `--no-live-viewport` only when the user explicitly wants headless execution. `--agent-chat` is a legacy compatibility mode. It may require `AI_GATEWAY_API_KEY`; avoid it when the caller can inspect snapshots and produce deterministic actions.
+It explicitly pins the system's standard Chrome executable and isolates the `browser-opt` agent-browser namespace, so a previously installed Chrome for Testing daemon cannot be reused accidentally. It shows and keeps that actual system Chrome browser by default so the user can watch the operation and inspect the final page state. This must be a real Chrome window, not the agent tool's built-in browser such as the Copilot/Codex in-app browser, and it must not open the agent-browser dashboard at `http://localhost:4848`. Use `--no-live-viewport` only when the user explicitly wants headless execution. `--agent-chat` is a legacy compatibility mode. It may require `AI_GATEWAY_API_KEY`; avoid it when the caller can inspect snapshots and produce deterministic actions.
 
 ## Output
 
