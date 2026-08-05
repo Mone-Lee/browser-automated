@@ -110,6 +110,21 @@ function writePackageJson(url, json) {
   writeFileSync(url, `${JSON.stringify(json, null, 2)}\n`);
 }
 
+/** 使用统一参数刷新 lockfile，并立即用 npm ci 校验可选依赖没有被错误裁剪。 */
+function refreshAndVerifyLockfile(dryRun) {
+  const installCommand = 'npm install --package-lock-only --ignore-scripts --include=optional';
+  const verifyCommand = 'npm ci --ignore-scripts';
+
+  if (dryRun) {
+    console.log(`\n$ ${installCommand}`);
+    console.log(`\n$ ${verifyCommand}`);
+    return;
+  }
+
+  run(installCommand);
+  run(verifyCommand);
+}
+
 function ensureNpmPublishPreflight(dryRun) {
   const configuredRegistry = runCapture('npm config get registry');
   if (configuredRegistry !== NPMJS_REGISTRY) {
@@ -252,12 +267,7 @@ for (const releaseTarget of releaseTargets) {
   bumpPackageVersion(releaseTarget, releaseType, dryRun);
 }
 
-if (dryRun) {
-  console.log('\n$ npm install --package-lock-only --ignore-scripts');
-} else {
-  run('npm install --package-lock-only --ignore-scripts');
-}
-
+refreshAndVerifyLockfile(dryRun);
 run('npm run build');
 
 for (const releaseTarget of releaseTargets) {

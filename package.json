@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "description": "browser-opt 与 browser-e2e 的 monorepo 工作区",
   "type": "module",
+  "packageManager": "npm@11.6.2",
   "workspaces": [
     "packages/browser-core",
     "packages/browser-opt",
