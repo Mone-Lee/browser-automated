@@ -10,9 +10,10 @@
     "packages/browser-e2e"
   ],
   "scripts": {
-    "build": "npm run build --workspaces",
+    "build": "npm run build:core && npm run build --workspaces",
+    "build:core": "tsc -p packages/browser-core/tsconfig.json",
     "lockfile:check": "node scripts/check-lockfile.mjs",
-    "test": "npm run build --workspaces && vitest run",
+    "test": "npm run build && vitest run",
     "test:watch": "vitest",
     "typecheck": "npm run typecheck --workspaces",
     "release:check": "node scripts/release-check.mjs",
