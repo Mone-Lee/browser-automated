@@ -98,14 +98,24 @@ Install the browser environment and this Skill explicitly before the first Workf
 npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install
 ```
 
-The installer does not require a global npm installation. By default it uses the system's standard Chrome and
-installs into the shared Agent Skills directory. Use `--agent codex` for the Codex-specific skills directory, or
-`--skills-dir <dir>` for another agent root. Use this exact official-registry prefix for every invocation on
-macOS, Linux, and Windows:
+The installer keeps `browser-opt` itself on `npx @latest`, but installs or updates the global `agent-browser`
+runtime once so pure Workflow matching stays lightweight. By default it uses the system's standard Chrome and
+installs into the shared Agent Skills directory. Use `--agent codex` for the Codex-specific skills directory,
+`--skills-dir <dir>` for another agent root, or `--skip-runtime` when only the Skill should be installed.
+Use this exact official-registry prefix for every invocation on macOS, Linux, and Windows:
 
 ```bash
 npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest
 ```
+
+To remove the global runtime and installed Skill, run:
+
+```bash
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest uninstall
+```
+
+Use `--all-data` only when the current project's `.browser-opt` states, artifacts, and handoff records should
+also be deleted.
 
 Save a complete flow without executing it:
 

@@ -41,6 +41,12 @@ ln -sfn /Users/lee/Documents/project/browser-automated/skills/browser-opt ~/.cod
 npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install --agent codex
 ```
 
+该命令会保持 `browser-opt` 通过 `npx @latest` 获取最新版本，同时预装或更新全局 `agent-browser` 运行时。卸载运行时和 Skill：
+
+```bash
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest uninstall --agent codex
+```
+
 Codex 通过软链 Skill 触发时会按 Skill 统一使用 `npx`。只有需要验证尚未发布的本地源码时，
 才显式调用当前仓库的构建产物：
 

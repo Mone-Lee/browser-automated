@@ -8,7 +8,8 @@ export const LIVE_VIEWPORT_DASHBOARD_URL = 'http://localhost:4848';
 export const HANDOFF_DONE_ANSWERS = ['done', 'ok', '继续', '完成'] as const;
 
 export const BROWSER_OPT_USAGE = `使用方式：
-  npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install [--download-browser] [--with-deps] [--skip-skill] [--agent agents|codex] [--skills-dir <目录>]
+  npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install [--download-browser] [--with-deps] [--skip-runtime] [--skip-skill] [--agent agents|codex] [--skills-dir <目录>]
+  npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest uninstall [--all-data] [--skip-runtime] [--skip-skill] [--agent agents|codex] [--skills-dir <目录>]
   npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest <自然语言流程> [--profile <name>] [--state <path>] [--session <id>] [--no-live-viewport] [--output-dir <dir>] [--agent-chat]
   npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest save "<名称>" --flow "<完整流程>" [--workflow-dir <目录>] [--force]
   npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest run "<查询语句>" [--workflow-dir <目录>]

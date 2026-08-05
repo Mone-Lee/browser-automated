@@ -3,10 +3,9 @@
  * 文件只协调 CLI 交互，存储、匹配和浏览器执行分别交由对应领域模块处理。
  */
 import {
-  BrowserOptRunner,
   browserOptTemplate,
   extractBrowserOptUrl,
-} from '../../browser-opt/runner/index.js';
+} from '../../browser-opt/utils.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import {
@@ -35,7 +34,7 @@ import {
 } from '../utils/args.js';
 import { BROWSER_OPT_USAGE, HANDOFF_DONE_ANSWERS, LIVE_VIEWPORT_DASHBOARD_URL } from '../utils/constants.js';
 import { printBrowserOptResult } from '../utils/output.js';
-import { setupBrowserOpt } from './setup.js';
+import { setupBrowserOpt, uninstallBrowserOpt } from './setup.js';
 
 interface BrowserOptDetachedRun {
   runId: string;
@@ -65,9 +64,20 @@ export async function cmdBrowserOpt(args: string[]): Promise<void> {
   if ((subcommand === 'install' || subcommand === 'setup') && !isImmediateFlow) {
     const installSystemDependencies = getBooleanFlag(parsed.flags, 'with-deps');
     setupBrowserOpt({
+      installRuntime: !getBooleanFlag(parsed.flags, 'skip-runtime'),
       installSystemDependencies,
       downloadBrowser: getBooleanFlag(parsed.flags, 'download-browser') || installSystemDependencies,
       installSkill: !getBooleanFlag(parsed.flags, 'skip-skill'),
+      agent: getStringFlag(parsed.flags, 'agent'),
+      skillsDir: getStringFlag(parsed.flags, 'skills-dir'),
+    });
+    return;
+  }
+  if (subcommand === 'uninstall' && !isImmediateFlow) {
+    uninstallBrowserOpt({
+      uninstallRuntime: !getBooleanFlag(parsed.flags, 'skip-runtime'),
+      uninstallSkill: !getBooleanFlag(parsed.flags, 'skip-skill'),
+      removeAllData: getBooleanFlag(parsed.flags, 'all-data'),
       agent: getStringFlag(parsed.flags, 'agent'),
       skillsDir: getStringFlag(parsed.flags, 'skills-dir'),
     });
@@ -124,6 +134,7 @@ async function executeBrowserOptFlow(
   const useAgentChat = getBooleanFlag(flags, 'agent-chat');
   const handoffSignalPath = getStringFlag(flags, 'handoff-signal');
 
+  const { BrowserOptRunner } = await import('../../browser-opt/runner/index.js');
   const runner = new BrowserOptRunner();
   const runnerOptions: BrowserOptRunnerOptions = {
     sessionId: resolveBrowserOptSessionId(flags, identity ?? text),

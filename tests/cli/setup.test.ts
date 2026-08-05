@@ -16,13 +16,16 @@ afterEach(() => {
   }
 });
 
-/** 创建可按行记录浏览器检查参数的 agent-browser 桩命令。 */
-function createAgentBrowserStub(agentBrowserLogPath: string): string {
+/** 创建可按行记录 npm 与 agent-browser 调用的桩命令。 */
+function createSetupCommandStubs(agentBrowserLogPath: string, npmLogPath: string): string {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-opt-setup-bin-'));
   temporaryDirectories.push(directory);
   const agentBrowserCommandPath = path.join(directory, 'agent-browser');
   fs.writeFileSync(agentBrowserCommandPath, `#!/usr/bin/env node\nrequire('node:fs').appendFileSync(${JSON.stringify(agentBrowserLogPath)}, process.argv.slice(2).join(' ') + '\\n');\n`);
   fs.chmodSync(agentBrowserCommandPath, 0o755);
+  const npmCommandPath = path.join(directory, 'npm');
+  fs.writeFileSync(npmCommandPath, `#!/usr/bin/env node\nrequire('node:fs').appendFileSync(${JSON.stringify(npmLogPath)}, process.argv.slice(2).join(' ') + '\\n');\n`);
+  fs.chmodSync(npmCommandPath, 0o755);
   return directory;
 }
 
@@ -31,23 +34,26 @@ describe('browser-opt install', () => {
     const projectRoot = path.resolve(import.meta.dirname, '../..');
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-opt-home-'));
     const commandLog = path.join(home, 'agent-browser.log');
+    const npmLog = path.join(home, 'npm.log');
     temporaryDirectories.push(home);
     const chromePath = path.join(home, 'Google Chrome');
     fs.writeFileSync(chromePath, 'stub');
     fs.chmodSync(chromePath, 0o755);
-    const binDirectory = createAgentBrowserStub(commandLog);
+    const binDirectory = createSetupCommandStubs(commandLog, npmLog);
     const result = spawnSync('node', [path.join(projectRoot, 'packages/browser-opt/dist/cli/browser-opt.js'), 'install'], {
       cwd: projectRoot,
       encoding: 'utf-8',
       env: {
         ...process.env,
         HOME: home,
+        npm_execpath: '',
         PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
         AGENT_BROWSER_EXECUTABLE_PATH: chromePath,
       },
     });
 
     expect(result.status).toBe(0);
+    expect(fs.readFileSync(npmLog, 'utf-8')).toBe('install -g agent-browser@latest\n');
     expect(fs.readFileSync(commandLog, 'utf-8')).toBe('--version\n');
     expect(fs.existsSync(path.join(home, '.agents/skills/browser-opt/SKILL.md'))).toBe(true);
     expect(result.stdout).toContain('已安装 Agent Skill');
@@ -58,11 +64,12 @@ describe('browser-opt install', () => {
     const projectRoot = path.resolve(import.meta.dirname, '../..');
     const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-opt-codex-home-'));
     const commandLog = path.join(codexHome, 'agent-browser.log');
+    const npmLog = path.join(codexHome, 'npm.log');
     temporaryDirectories.push(codexHome);
     const chromePath = path.join(codexHome, 'Google Chrome');
     fs.writeFileSync(chromePath, 'stub');
     fs.chmodSync(chromePath, 0o755);
-    const binDirectory = createAgentBrowserStub(commandLog);
+    const binDirectory = createSetupCommandStubs(commandLog, npmLog);
     const result = spawnSync('node', [
       path.join(projectRoot, 'packages/browser-opt/dist/cli/browser-opt.js'),
       'setup',
@@ -75,14 +82,53 @@ describe('browser-opt install', () => {
       env: {
         ...process.env,
         CODEX_HOME: codexHome,
+        npm_execpath: '',
         PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
         AGENT_BROWSER_EXECUTABLE_PATH: chromePath,
       },
     });
 
     expect(result.status).toBe(0);
+    expect(fs.readFileSync(npmLog, 'utf-8')).toBe('install -g agent-browser@latest\n');
     expect(fs.readFileSync(commandLog, 'utf-8')).toBe('--version\ninstall\n');
     expect(fs.existsSync(path.join(codexHome, 'skills/browser-opt/SKILL.md'))).toBe(true);
     expect(result.stdout).toContain('已安装 Codex Skill');
+  });
+
+  it('uninstalls the global runtime, installed Skill and optional project data', () => {
+    const projectRoot = path.resolve(import.meta.dirname, '../..');
+    const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-opt-project-'));
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-opt-uninstall-home-'));
+    const commandLog = path.join(home, 'agent-browser.log');
+    const npmLog = path.join(home, 'npm.log');
+    const skillDir = path.join(home, '.agents/skills/browser-opt');
+    const dataDir = path.join(projectDir, '.browser-opt/states');
+    temporaryDirectories.push(projectDir, home);
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), 'stub');
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(path.join(dataDir, 'state.json'), '{}');
+    const binDirectory = createSetupCommandStubs(commandLog, npmLog);
+
+    const result = spawnSync('node', [
+      path.join(projectRoot, 'packages/browser-opt/dist/cli/browser-opt.js'),
+      'uninstall',
+      '--all-data',
+    ], {
+      cwd: projectDir,
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        HOME: home,
+        npm_execpath: '',
+        PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(fs.readFileSync(npmLog, 'utf-8')).toBe('uninstall -g agent-browser\n');
+    expect(fs.existsSync(skillDir)).toBe(false);
+    expect(fs.existsSync(path.join(projectDir, '.browser-opt'))).toBe(false);
+    expect(result.stdout).toContain('browser-opt 运行依赖已清理');
   });
 });

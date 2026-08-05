@@ -9,13 +9,21 @@
 
 ## 安装与环境初始化
 
-`browser-opt` 的环境安装与 Workflow 执行使用独立命令，无需全局安装：
+`browser-opt` 的环境安装与 Workflow 执行使用独立命令：`browser-opt` 本体继续通过 `npx @latest` 获取最新版本，`install` 只把较重的 `agent-browser` 运行时预先全局安装或更新：
 
 ```bash
 npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install
 ```
 
-`install` 默认检查并使用系统标准 Chrome，同时安装 Agent Skill；不会下载 Chrome for Testing。机器确实没有标准 Chrome 且接受测试浏览器时，才显式添加 `--download-browser`。所有命令统一通过 `npx` 调用，并显式指定 npmjs 官方源。
+`install` 默认检查并使用系统标准 Chrome，同时安装 Agent Skill；不会下载 Chrome for Testing。机器确实没有标准 Chrome 且接受测试浏览器时，才显式添加 `--download-browser`。所有 browser-opt 命令统一通过 `npx` 调用，并显式指定 npmjs 官方源。
+
+卸载预装的运行时和 Skill：
+
+```bash
+npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest uninstall
+```
+
+只有确认要删除当前项目的 `.browser-opt` 登录态、报告和 handoff 记录时，才追加 `--all-data`。
 
 `browser-e2e`：
 
@@ -30,7 +38,7 @@ npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install --do
 npx --yes browser-e2e setup --with-deps
 ```
 
-`install`（`setup` 保留为兼容别名）默认把 browser-opt Skill 安装到 `~/.agents/skills/browser-opt`。若要安装到 Codex 专用目录，可在引导命令后传 `--agent codex`；若要写入其他 Agent 的 skills 根目录，可传 `--skills-dir <目录>`；若只需要 CLI，可传 `--skip-skill`。
+`install`（`setup` 保留为兼容别名）默认把 browser-opt Skill 安装到 `~/.agents/skills/browser-opt`。若要安装到 Codex 专用目录，可在引导命令后传 `--agent codex`；若要写入其他 Agent 的 skills 根目录，可传 `--skills-dir <目录>`；若只需要 CLI，可传 `--skip-skill`；若只安装 Skill、不处理运行时，可传 `--skip-runtime`。
 
 常见 Agent 安装示例：
 

@@ -38,7 +38,12 @@
   "publishConfig": {
     "access": "public"
   },
-  "dependencies": {
+  "peerDependencies": {
     "agent-browser": "^0.33.1"
+  },
+  "peerDependenciesMeta": {
+    "agent-browser": {
+      "optional": true
+    }
   }
 }

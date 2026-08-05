@@ -15,6 +15,7 @@ const DEFAULT_CLEAN_BROWSER_ARGS = [
   '--no-first-run',
   '--no-default-browser-check',
 ];
+const AGENT_BROWSER_INSTALL_HINT = '请先安装 agent-browser，例如：npm install -g agent-browser。';
 
 export interface AgentBrowserJsonResult {
   raw: string;
@@ -176,7 +177,7 @@ export class BrowserAgent {
     );
 
     if (result.error) {
-      throw result.error;
+      throw new Error(`无法启动 agent-browser：${result.error.message}。${AGENT_BROWSER_INSTALL_HINT}`);
     }
     if (result.status !== 0) {
       throw new Error(this.resultErrorMessage(result, `agent-browser exited with code ${result.status}`));
@@ -519,7 +520,7 @@ export class BrowserAgent {
     );
 
     if (result.error) {
-      throw result.error;
+      throw new Error(`无法启动 agent-browser：${result.error.message}。${AGENT_BROWSER_INSTALL_HINT}`);
     }
     if (result.status !== 0) {
       const stderr = result.stderr?.trim() || '';
