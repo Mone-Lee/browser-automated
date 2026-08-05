@@ -21,6 +21,6 @@ if (missingPackages.length > 0) {
     .join('\n');
 
   console.error(`package-lock.json 缺少 CI 必需的 optional 依赖：\n${details}`);
-  console.error('请在仓库根目录运行 npm install --package-lock-only --include=optional 后提交 package-lock.json。');
+  console.error('请恢复包含这些条目的 package-lock.json；发包流程不应使用 npm install --package-lock-only 重写锁文件。');
   process.exit(1);
 }

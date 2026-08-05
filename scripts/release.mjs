@@ -2,9 +2,10 @@
  * monorepo 发版入口，按目标发布两个自包含的 CLI package。
  */
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 const NPMJS_REGISTRY = 'https://registry.npmjs.org/';
+const LOCKFILE_URL = new URL('../package-lock.json', import.meta.url);
 const RELEASE_TYPES = new Set(['patch', 'minor', 'major']);
 const TARGETS = new Set(['all', 'browser-opt', 'browser-e2e']);
 const PACKAGE_BY_TARGET = {
@@ -72,18 +73,18 @@ function readPackageJson(packageDir) {
   };
 }
 
-/** 使用统一参数刷新 lockfile，并立即用 npm ci 校验可选依赖没有被错误裁剪。 */
-function refreshAndVerifyLockfile(dryRun) {
-  const installCommand = 'npm install --package-lock-only --ignore-scripts --include=optional';
+/** 校验 lockfile 保留跨平台可选依赖，并确认 npm ci 能完成安装。 */
+function verifyLockfile(dryRun) {
+  const checkCommand = 'npm run lockfile:check';
   const verifyCommand = 'npm ci --ignore-scripts';
 
   if (dryRun) {
-    console.log(`\n$ ${installCommand}`);
+    console.log(`\n$ ${checkCommand}`);
     console.log(`\n$ ${verifyCommand}`);
     return;
   }
 
-  run(installCommand);
+  run(checkCommand);
   run(verifyCommand);
 }
 
@@ -131,14 +132,30 @@ function readVersion(target) {
   return readPackageJson(PACKAGE_BY_TARGET[target].dir).json.version;
 }
 
+/** npm 不更新 workspace lockfile 时，仅同步对应 package 的版本字段。 */
+function updateLockfileVersion(target, version) {
+  const packagePath = PACKAGE_BY_TARGET[target].dir;
+  const lockfile = JSON.parse(readFileSync(LOCKFILE_URL, 'utf8'));
+  const lockfilePackage = lockfile.packages?.[packagePath];
+
+  if (!lockfilePackage) {
+    throw new Error(`Lockfile package not found: ${packagePath}`);
+  }
+
+  lockfilePackage.version = version;
+  writeFileSync(LOCKFILE_URL, `${JSON.stringify(lockfile, null, 2)}\n`);
+}
+
 function bumpPackageVersion(target, releaseType, dryRun) {
   const packageInfo = PACKAGE_BY_TARGET[target];
   if (dryRun) {
-    console.log(`\n$ npm version ${releaseType} --no-git-tag-version -w ${packageInfo.name}`);
+    console.log(`\n$ npm version ${releaseType} --no-git-tag-version --no-workspaces-update -w ${packageInfo.name}`);
     return `${readVersion(target)}+${releaseType}`;
   }
-  run(`npm version ${releaseType} --no-git-tag-version -w ${packageInfo.name}`);
-  return readVersion(target);
+  run(`npm version ${releaseType} --no-git-tag-version --no-workspaces-update -w ${packageInfo.name}`);
+  const version = readVersion(target);
+  updateLockfileVersion(target, version);
+  return version;
 }
 
 function publishPackage(target) {
@@ -201,7 +218,7 @@ for (const releaseTarget of releaseTargets) {
   bumpPackageVersion(releaseTarget, releaseType, dryRun);
 }
 
-refreshAndVerifyLockfile(dryRun);
+verifyLockfile(dryRun);
 run('npm run build');
 
 for (const releaseTarget of releaseTargets) {
