@@ -12,6 +12,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces",
+    "lockfile:check": "node scripts/check-lockfile.mjs",
     "test": "npm run build --workspaces && vitest run",
     "test:watch": "vitest",
     "typecheck": "npm run build -w @browser-automated/browser-core && npm run typecheck --workspaces",
