@@ -442,6 +442,7 @@ describe('BrowserOptRunner', () => {
 
     expect(result.passed).toBe(true);
     expect(capturedOptions[0]).toEqual(expect.objectContaining({
+      namespace: 'browser-opt',
       profile: 'Work',
       reuseRunningBrowser: false,
       liveViewport: true,
@@ -503,7 +504,11 @@ describe('BrowserOptRunner', () => {
 
     expect(result.passed).toBe(true);
     expect(capturedOptions).toHaveLength(1);
-    expect(capturedOptions[0]).toEqual(expect.objectContaining({ profile: 'Default', liveViewport: true }));
+    expect(capturedOptions[0]).toEqual(expect.objectContaining({
+      namespace: 'browser-opt',
+      profile: 'Default',
+      liveViewport: true,
+    }));
     expect(capturedOptions[0].statePath).toBeUndefined();
     expect((agent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
     expect((agent.close as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();

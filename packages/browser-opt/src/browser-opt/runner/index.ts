@@ -72,6 +72,7 @@ export class BrowserOptRunner {
     logAuthStateMode(logs, options);
     const openedWithProfile = Boolean(options.profile && !options.statePath);
     let agent = this.agentFactory({
+      namespace: 'browser-opt',
       sessionId: options.sessionId,
       profile: options.profile,
       sessionName: options.sessionName,
@@ -108,6 +109,7 @@ export class BrowserOptRunner {
         logs.push(`auth-state-fallback: state 登录态疑似失效，切换到 profile ${options.authStateFallbackProfile}。`);
         agent.close();
         const fallbackAgent = this.agentFactory({
+          namespace: 'browser-opt',
           profile: options.authStateFallbackProfile,
           sessionName: options.sessionName,
           reuseRunningBrowser: options.reuseRunningBrowser ?? false,

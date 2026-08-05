@@ -77,6 +77,8 @@ export interface TestRunSummary {
 export interface AgentOptions {
   /** 用于隔离浏览器会话的 session id。 */
   sessionId?: string;
+  /** 隔离 agent-browser 后台进程，避免连接到其他工具启动的测试浏览器。 */
+  namespace?: string;
   /** 按名称自动保存和恢复 cookies 与 localStorage。 */
   sessionName?: string;
   /** 每条命令的超时时间。 */
@@ -91,6 +93,8 @@ export interface AgentOptions {
   openLiveDashboard?: boolean;
   /** agent-browser 复用的 Chrome profile 名称或路径。 */
   profile?: string;
+  /** 标准 Chrome 可执行文件路径；默认自动探测系统安装，不使用 Chrome for Testing。 */
+  executablePath?: string;
   /** 直接加载的登录态 state 文件路径，优先于 profile 和 auto-connect。 */
   statePath?: string;
   /** 是否优先连接到当前正在运行的 Chrome，而不是新起一个独立窗口。 */

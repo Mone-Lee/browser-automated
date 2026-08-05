@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { BrowserAgent } from '../../packages/browser-core/dist/agent.js';
 
 // 监听 spawnSync，确保测试过程不会真的启动浏览器。
@@ -120,6 +123,33 @@ describe('BrowserAgent', () => {
           }),
         }),
       );
+    });
+
+    it('pins agent-browser to the configured standard Chrome and isolated namespace', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult(''));
+      const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-opt-chrome-'));
+      const chromePath = path.join(temporaryDirectory, 'Google Chrome');
+      fs.writeFileSync(chromePath, 'stub');
+      fs.chmodSync(chromePath, 0o755);
+      vi.stubEnv('AGENT_BROWSER_EXECUTABLE_PATH', chromePath);
+
+      try {
+        const agent = new BrowserAgent({ sessionId: 'test-session', namespace: 'browser-opt' });
+        agent.open('https://example.com');
+
+        expect(mockSpawnSync).toHaveBeenCalledWith(
+          'agent-browser',
+          expect.any(Array),
+          expect.objectContaining({
+            env: expect.objectContaining({
+              AGENT_BROWSER_EXECUTABLE_PATH: chromePath,
+              AGENT_BROWSER_NAMESPACE: 'browser-opt',
+            }),
+          }),
+        );
+      } finally {
+        fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+      }
     });
 
     it('throws when agent-browser exits with a non-zero code', () => {

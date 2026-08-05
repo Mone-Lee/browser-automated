@@ -4,6 +4,7 @@
  */
 export { BrowserAgent, createBrowserAgent } from './agent.js';
 export type { BrowserAgentFactory } from './agent.js';
+export { resolveSystemChromeExecutable } from './browser-executable.js';
 export type {
   AgentOptions,
   RunnerOptions,

@@ -3,6 +3,7 @@
  */
 import { spawnSync, SpawnSyncReturns } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { resolveSystemChromeExecutable } from './browser-executable.js';
 import { createAgentBrowserEnvironment } from './proxy-env.js';
 import { AgentOptions } from './types.js';
 
@@ -79,12 +80,14 @@ export class BrowserAgent {
   private static autoOpenedDashboardUrls: Set<string> = new Set();
 
   private readonly sessionId: string;
+  private readonly namespace: string | null;
   private readonly sessionName: string | null;
   private readonly timeout: number;
   private readonly headed: boolean;
   private readonly forceHeadless: boolean;
   private readonly openLiveDashboard: boolean;
   private readonly profile: string | null;
+  private readonly executablePath: string | null;
   private readonly statePath: string | null;
   private readonly reuseRunningBrowser: boolean;
   private readonly browserArgs: string[];
@@ -93,12 +96,14 @@ export class BrowserAgent {
 
   constructor(options: AgentOptions = {}) {
     this.sessionId = options.sessionId ?? `browser-agent-${Date.now()}-${randomUUID().slice(0, 8)}`;
+    this.namespace = options.namespace ?? null;
     this.sessionName = options.sessionName ?? null;
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT;
     this.headed = options.headed ?? options.liveViewport ?? false;
     this.forceHeadless = options.headless ?? false;
     this.openLiveDashboard = options.openLiveDashboard ?? true;
     this.profile = options.profile ?? null;
+    this.executablePath = options.executablePath ?? resolveSystemChromeExecutable() ?? null;
     this.statePath = options.statePath ?? null;
     this.reuseRunningBrowser = options.reuseRunningBrowser ?? false;
     this.browserArgs =
@@ -152,13 +157,22 @@ export class BrowserAgent {
     return stderr || stdout || fallback;
   }
 
+  /** 固定 agent-browser 使用系统标准 Chrome，防止已下载的测试浏览器被优先选中。 */
+  private createCommandEnvironment(): NodeJS.ProcessEnv {
+    return {
+      ...createAgentBrowserEnvironment(),
+      ...(this.namespace ? { AGENT_BROWSER_NAMESPACE: this.namespace } : {}),
+      ...(this.executablePath ? { AGENT_BROWSER_EXECUTABLE_PATH: this.executablePath } : {}),
+    };
+  }
+
   /** 底层命令执行入口，负责调用单条 agent-browser 命令并返回 stdout。 */
   private run(args: string[], options: { headed?: boolean; statePath?: string | null } = {}): string {
     const useHeaded = options.headed ?? this.headed;
     const result: SpawnSyncReturns<string> = spawnSync(
       'agent-browser',
       this.buildGlobalArgs(args, useHeaded, Object.hasOwn(options, 'statePath') ? { statePath: options.statePath } : {}),
-      { encoding: 'utf-8', timeout: this.timeout, env: createAgentBrowserEnvironment() },
+      { encoding: 'utf-8', timeout: this.timeout, env: this.createCommandEnvironment() },
     );
 
     if (result.error) {
@@ -185,7 +199,7 @@ export class BrowserAgent {
     return spawnSync('agent-browser', args, {
       encoding: 'utf-8',
       timeout: this.timeout,
-      env: createAgentBrowserEnvironment(),
+      env: this.createCommandEnvironment(),
     });
   }
 
@@ -500,6 +514,7 @@ export class BrowserAgent {
         input: JSON.stringify(commands),
         encoding: 'utf-8',
         timeout: this.timeout * commands.length,
+        env: this.createCommandEnvironment(),
       },
     );
 

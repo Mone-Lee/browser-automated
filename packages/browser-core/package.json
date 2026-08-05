@@ -14,6 +14,10 @@
       "import": "./dist/agent.js",
       "types": "./dist/agent.d.ts"
     },
+    "./browser-executable": {
+      "import": "./dist/browser-executable.js",
+      "types": "./dist/browser-executable.d.ts"
+    },
     "./proxy-env": {
       "import": "./dist/proxy-env.js",
       "types": "./dist/proxy-env.d.ts"
