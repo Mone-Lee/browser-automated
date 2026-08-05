@@ -16,7 +16,9 @@
     "typecheck": "npm run build -w @browser-automated/browser-core && npm run typecheck --workspaces",
     "release:check": "node scripts/release-check.mjs",
     "release:dry-run": "node scripts/release.mjs --dry-run",
-    "release": "node scripts/release.mjs"
+    "release": "node scripts/release.mjs",
+    "release:browser-opt": "node scripts/release.mjs browser-opt patch",
+    "release:browser-e2e": "node scripts/release.mjs browser-e2e patch"
   },
   "repository": {
     "type": "git",
