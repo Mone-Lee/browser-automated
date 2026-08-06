@@ -22,17 +22,21 @@
 
 ### browser-opt
 
-首次安装只需执行：
+#### 安装
+
+首次安装执行：
 
 ```bash
-npx browser-opt@latest install
+npx browser-opt@latest install --registry=https://registry.npmjs.org/
 ```
 
 该命令会一次性安装或更新全局 `browser-opt`、`agent-browser` 及 `browser-opt` Skill。默认 Skill 目录为 `~/.agents/skills/browser-opt`，Codex、GitHub Copilot、Gemini CLI 和 Qoder 可共用，无需分别安装。Claude Code 使用自己的目录：
 
 ```bash
-npx browser-opt@latest install --agent claude
+npx browser-opt@latest install --registry=https://registry.npmjs.org/ --agent claude
 ```
+
+#### 更新
 
 后续更新所有已安装组件：
 
@@ -40,13 +44,33 @@ npx browser-opt@latest install --agent claude
 browser-opt update
 ```
 
+如果安装时用了 `--agent claude`，更新时也传入同一参数。
+
+```bash
+browser-opt update --agent claude
+```
+
+#### 卸载
+
 卸载首次安装写入的全局 CLI、运行时和 Skill：
 
 ```bash
 browser-opt uninstall
 ```
 
-如果安装时用了 `--agent claude` 或 `--skills-dir <目录>`，更新和卸载时传入同一参数。只有确认要删除当前项目的 `.browser-opt` 登录态、报告和 handoff 记录时，卸载才追加 `--all-data`。
+如果安装时用了 `--agent claude`，卸载时也传入同一参数。
+
+```bash
+browser-opt uninstall --agent claude
+```
+
+只有确认要删除当前项目的 `.browser-opt` 登录态、报告和 handoff 记录时，卸载才追加 `--all-data`。 
+ 
+```bash
+browser-opt uninstall --all-data
+```
+
+#### 临时试用
 
 只想试用、不安装以上全局组件和 Skill，可直接临时运行：
 
@@ -54,9 +78,13 @@ browser-opt uninstall
 npx -p browser-opt@latest -p agent-browser@latest browser-opt "测试 https://example.com。验证页面包含 Example。"
 ```
 
+#### 环境说明
+
 `install`、`update` 和试用命令默认使用系统标准 Chrome，不会下载 Chrome for Testing。机器没有标准 Chrome 且接受测试浏览器时，安装或更新可追加 `--download-browser`；试用前则需自行准备 Chrome。
 
 ### browser-e2e
+
+#### 初始化
 
 `browser-e2e` 不依赖上面的 `browser-opt install`。只在需要 E2E 测试匹配、执行或生成时单独初始化：
 
@@ -67,7 +95,7 @@ npx --yes browser-e2e setup
 Linux 无桌面或缺少浏览器系统库，并明确使用下载浏览器时：
 
 ```bash
-npx browser-opt@latest install --download-browser --with-deps
+npx browser-opt@latest install --registry=https://registry.npmjs.org/ --download-browser --with-deps
 npx --yes browser-e2e setup --with-deps
 ```
 
