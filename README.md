@@ -22,6 +22,19 @@
 
 ### browser-opt
 
+#### 临时试用
+
+只想试用、不安装 cli 和 Skill，可直接运行：
+
+```bash
+npx -p browser-opt@latest -p agent-browser@latest browser-opt "
+执行创建药品分类商品流程
+目标：
+1. 打开页面https://test-ecmiddle.ifengqun.com/#/Home/goodsManage/GoodsDetaiManage/preFill?type=1&page=goodManage
+2. 商品标题输入“自动化创建药品分类商品”
+"
+```
+
 #### 安装
 
 首次安装执行：
@@ -68,14 +81,6 @@ browser-opt uninstall --agent claude
  
 ```bash
 browser-opt uninstall --all-data
-```
-
-#### 临时试用
-
-只想试用、不安装以上全局组件和 Skill，可直接临时运行：
-
-```bash
-npx -p browser-opt@latest -p agent-browser@latest browser-opt "测试 https://example.com。验证页面包含 Example。"
 ```
 
 #### 环境说明
