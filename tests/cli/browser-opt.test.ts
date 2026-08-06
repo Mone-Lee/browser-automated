@@ -534,13 +534,36 @@ describe('browser-opt CLI', () => {
     expect(commands).not.toContain('--state ');
     expect(commands).toContain('open https://example.com');
     expect(commands.trim().split('\n').every((command) => command.startsWith('--profile Default '))).toBe(true);
-    expect(commands).toContain('--profile Default --headed open https://example.com');
+    expect(commands).toMatch(/--profile Default --session browser-opt-[a-f0-9]{16} --headed open https:\/\/example\.com/);
     expect(commands.split('\n').filter((command) => /\bopen https:\/\/example\.com\b/.test(command))).toHaveLength(1);
     expect(commands).not.toContain('close');
     expect(commands).toContain('browser-opt-default.json');
     expect(commands).not.toContain('auth-import');
     expect(commands).not.toContain('dashboard start');
     expect(fs.readdirSync(outputDir).some((entry) => fs.existsSync(path.join(outputDir, entry, 'report.json')))).toBe(true);
+  });
+
+  it('uses a fresh browser session for each immediate flow execution', () => {
+    const stateDir = makeTempDir();
+    fs.writeFileSync(path.join(stateDir, 'browser-opt-default.json'), JSON.stringify({ cookies: [], origins: [] }));
+    const firstCommandLog = path.join(makeTempDir(), 'first-agent-browser.log');
+    const secondCommandLog = path.join(makeTempDir(), 'second-agent-browser.log');
+    const args = [
+      'browser-opt',
+      '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。',
+      '--output-dir',
+      makeTempDir(),
+    ];
+
+    expect(runCli(args, { AGENT_BROWSER_LOG: firstCommandLog, BROWSER_OPT_AUTH_STATE_DIR: stateDir }).status).toBe(0);
+    args[3] = makeTempDir();
+    expect(runCli(args, { AGENT_BROWSER_LOG: secondCommandLog, BROWSER_OPT_AUTH_STATE_DIR: stateDir }).status).toBe(0);
+
+    const firstSessions = extractLoggedSessions(fs.readFileSync(firstCommandLog, 'utf-8'));
+    const secondSessions = extractLoggedSessions(fs.readFileSync(secondCommandLog, 'utf-8'));
+    expect(new Set(firstSessions).size).toBe(1);
+    expect(new Set(secondSessions).size).toBe(1);
+    expect(firstSessions[0]).not.toBe(secondSessions[0]);
   });
 
   it('writes default browser-opt state and artifacts under .browser-opt', () => {
@@ -649,6 +672,11 @@ describe('browser-opt CLI', () => {
     expect(commands).toContain(`state load ${statePath}`);
     expect(commands).not.toContain(`--state ${statePath}`);
     expect(commands).toContain('--profile Default');
+    const stateSession = commands.split('\n').find((command) => command.includes(`state load ${statePath}`))?.match(/--session\s+(\S+)/)?.[1];
+    const profileSession = commands.split('\n').find((command) => command.includes('--profile Default'))?.match(/--session\s+(\S+)/)?.[1];
+    expect(stateSession).toBeTruthy();
+    expect(profileSession).toBeTruthy();
+    expect(profileSession).not.toBe(stateSession);
     expect(commands).toContain('close');
     expect(commands).not.toContain('handoff');
     expect(commands).not.toContain('resume');

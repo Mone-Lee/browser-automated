@@ -148,7 +148,7 @@ async function executeBrowserOptFlow(
   const { BrowserOptRunner } = await import('../../browser-opt/runner/index.js');
   const runner = new BrowserOptRunner();
   const runnerOptions: BrowserOptRunnerOptions = {
-    sessionId: resolveBrowserOptSessionId(flags, identity ?? text),
+    sessionId: resolveBrowserOptSessionId(flags, identity),
     profile: authState.profile,
     statePath: authState.statePath,
     authStateSavePath: authState.authStateSavePath,
@@ -547,11 +547,15 @@ function defaultBrowserOptStatePath(profile: string): string {
   return path.join(stateDir, `browser-opt-${stateName}.json`);
 }
 
-/** 为同一项目里的同一流程生成稳定 session，便于不同入口一致标识浏览器会话。 */
-function resolveBrowserOptSessionId(flags: Record<string, string | boolean>, identity: string): string {
+/** 即时流程使用独立 session；只有显式 session 或已保存 Workflow 才跨执行保持稳定。 */
+function resolveBrowserOptSessionId(flags: Record<string, string | boolean>, identity?: string): string {
   const configuredSession = getStringFlag(flags, 'session')?.trim();
   if (configuredSession) {
     return configuredSession;
+  }
+
+  if (!identity) {
+    return `browser-opt-${randomUUID().replaceAll('-', '').slice(0, 16)}`;
   }
 
   const seed = `${process.cwd()}\n${identity}`;

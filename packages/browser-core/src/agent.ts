@@ -135,15 +135,14 @@ export class BrowserAgent {
     const browserArgs = options.browserArgs ?? this.browserArgs;
     const isBrowserLaunch = args[0] === 'open' && !this.browserOpened;
     const hasBrowserLaunch = args[0] === 'open' || this.browserOpened;
-    const useNamedSession = !profile;
-
     return [
-      // profile 模式不使用 session id，后续命令必须持续携带 profile 才能命中同一浏览器会话。
+      // profile 只负责导入登录态，session 负责隔离本次运行，避免复用仍存活的旧 profile 窗口。
       ...(profile ? ['--profile', profile] : []),
       ...(this.sessionName ? ['--session-name', this.sessionName] : []),
       ...(statePath && isBrowserLaunch ? ['--state', statePath] : []),
       ...(reuseRunningBrowser ? ['--auto-connect'] : []),
-      ...(useNamedSession ? ['--session', this.sessionId] : []),
+      '--session',
+      this.sessionId,
       ...(useHeaded ? ['--headed'] : this.forceHeadless ? ['--headed', 'false'] : []),
       ...(hasBrowserLaunch && browserArgs.length > 0
         ? ['--args', browserArgs.join(',')]
