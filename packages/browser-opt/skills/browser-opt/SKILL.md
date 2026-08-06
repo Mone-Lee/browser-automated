@@ -57,6 +57,10 @@ For production environments, describe upload steps as manual handoff so the oper
 
 Every execution must follow these rules:
 
+- Before each `/browser-opt` execution, run `browser-opt check-update --json` once. If it returns
+  `outdated`, tell the user the current and latest versions and recommend
+  `browser-opt update`; then continue the
+  requested workflow unless the user asks to update first. If it returns `unknown`, continue without blocking.
 - Always open the actual system Chrome browser for the run. Do not open or operate inside the agent tool's built-in browser, including the Copilot/Codex in-app browser or any agent-browser dashboard/preview window.
 - Strictly run an `open -> snapshot --json -> deterministic act -> re-snapshot` loop.
 - Take a screenshot for every step.
@@ -73,15 +77,15 @@ Every execution must follow these rules:
 For saved workflows, start the browser run as a detached task and keep the returned stable `runId`. Do not keep an `exec_command` or PTY session id as the recovery handle; Codex may discard that process handle when the handoff response ends the current turn.
 
 ```bash
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest start --workflow-id "<matched.id>" --json
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest status --run-id "<runId>" --json
+browser-opt start --workflow-id "<matched.id>" --json
+browser-opt status --run-id "<runId>" --json
 ```
 
 Poll `status` until it returns `PASS`, `FAIL`, or `HANDOFF`. When it returns `HANDOFF`, ask the user to finish the manual action and end the current turn normally. After the user replies `done`, restore the original runner and browser with:
 
 ```bash
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest resume --run-id "<runId>" --json
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest status --run-id "<runId>" --json
+browser-opt resume --run-id "<runId>" --json
+browser-opt status --run-id "<runId>" --json
 ```
 
 The detached task still executes `browser-opt run` exactly once. `status` is read-only and `resume` only sends a one-time signal to that original process. Never start a second `run` or `start` command to simulate resume.
@@ -95,23 +99,26 @@ calling project's current working directory, not from this skill or package dire
 Install the browser environment and this Skill explicitly before the first Workflow run:
 
 ```bash
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install
+npx browser-opt@latest install
 ```
 
-The installer keeps `browser-opt` itself on `npx @latest`, but installs or updates the global `agent-browser`
-runtime once so pure Workflow matching stays lightweight. By default it uses the system's standard Chrome and
-installs into the shared Agent Skills directory. Use `--agent codex` for the Codex-specific skills directory,
-`--skills-dir <dir>` for another agent root, or `--skip-runtime` when only the Skill should be installed.
-Use this exact official-registry prefix for every invocation on macOS, Linux, and Windows:
+The installer installs or updates the global `browser-opt` CLI and `agent-browser`
+runtime once so ordinary Workflow calls do not execute `npx`. By default it uses
+the system's standard Chrome and installs into the shared Agent Skills directory.
+Codex, GitHub Copilot, Gemini CLI, and Qoder share this default directory. Use
+`--agent claude` for Claude Code, `--skills-dir <dir>` for another agent root, or
+`--skip-runtime` when only the Skill should be installed. Update all installed
+components later with `browser-opt update`.
+Use the global command for ordinary invocations on macOS, Linux, and Windows:
 
 ```bash
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest
+browser-opt
 ```
 
 To remove the global runtime and installed Skill, run:
 
 ```bash
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest uninstall
+browser-opt uninstall
 ```
 
 Use `--all-data` only when the current project's `.browser-opt` states, artifacts, and handoff records should
@@ -120,8 +127,8 @@ also be deleted.
 Save a complete flow without executing it:
 
 ```bash
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest save "创建安选公开直播流程" --flow "<full natural language flow>"
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest save "创建安选公开直播流程" --flow "<full natural language flow>" --workflow-dir ./custom/workflows
+browser-opt save "创建安选公开直播流程" --flow "<full natural language flow>"
+browser-opt save "创建安选公开直播流程" --flow "<full natural language flow>" --workflow-dir ./custom/workflows
 ```
 
 Saving an existing name fails by default. Only pass `--force` when the user
@@ -157,12 +164,12 @@ When `/browser-opt` is followed by a short request without a URL, such as:
 Do not treat it as a new one-shot flow. First run:
 
 ```bash
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest match "<short request>" --json
+browser-opt match "<short request>" --json
 ```
 
 Handle the JSON result as follows:
 
-- `matched`: run `npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest start --workflow-id "<matched.id>" --json`, retain its `runId`, and follow the interactive handoff execution protocol above.
+- `matched`: run `browser-opt start --workflow-id "<matched.id>" --json`, retain its `runId`, and follow the interactive handoff execution protocol above.
 - `ambiguous`: do not rely on the CLI's human-readable stdout as the user-facing
   choice list, and do not ask through a modal/input tool that may render Markdown
   as plain text. Parse `match --json`, then ask in a normal assistant message.
@@ -182,7 +189,7 @@ Handle the JSON result as follows:
   blocking valid candidates.
 
 Use `--workflow-dir` consistently on both `match` and `run` when the user selects
-a custom directory. Use `npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest list --json` when
+a custom directory. Use `browser-opt list --json` when
 the user asks to see all saved workflows.
 
 Example ambiguous response format:
@@ -217,17 +224,17 @@ workflow request. A full flow includes its target URL:
 Translate that into:
 
 ```bash
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest "<full natural language flow>"
+browser-opt "<full natural language flow>"
 ```
 
 Optional runtime flags:
 
 ```bash
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest "<flow>" --profile Default
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest "<flow>" --state ./.browser-opt/states/browser-opt-default.json
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest "<flow>" --no-live-viewport
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest "<flow>" --output-dir ./.browser-opt/artifacts
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest "<flow>" --agent-chat
+browser-opt "<flow>" --profile Default
+browser-opt "<flow>" --state ./.browser-opt/states/browser-opt-default.json
+browser-opt "<flow>" --no-live-viewport
+browser-opt "<flow>" --output-dir ./.browser-opt/artifacts
+browser-opt "<flow>" --agent-chat
 ```
 
 Auth state reuse policy:

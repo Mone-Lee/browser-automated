@@ -47,22 +47,22 @@ describe('browser-e2e setup', () => {
     expect(result.stdout).toContain('browser-e2e 已就绪');
   });
 
-  it('can install the bundled Skill into Codex explicitly', () => {
+  it('can install the bundled Skill into Claude Code explicitly', () => {
     const projectRoot = path.resolve(import.meta.dirname, '../..');
-    const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-e2e-codex-home-'));
-    const commandLog = path.join(codexHome, 'agent-browser.log');
-    temporaryDirectories.push(codexHome);
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-e2e-claude-home-'));
+    const commandLog = path.join(home, 'agent-browser.log');
+    temporaryDirectories.push(home);
     const binDirectory = createAgentBrowserStub(commandLog);
 
-    const result = spawnSync('node', [path.join(projectRoot, 'packages/browser-e2e/dist/cli/browser-e2e.js'), 'setup', '--agent', 'codex'], {
+    const result = spawnSync('node', [path.join(projectRoot, 'packages/browser-e2e/dist/cli/browser-e2e.js'), 'setup', '--agent', 'claude'], {
       cwd: projectRoot,
       encoding: 'utf-8',
-      env: { ...process.env, CODEX_HOME: codexHome, PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ''}` },
+      env: { ...process.env, HOME: home, PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ''}` },
     });
 
     expect(result.status).toBe(0);
     expect(fs.readFileSync(commandLog, 'utf-8')).toBe('install');
-    expect(fs.existsSync(path.join(codexHome, 'skills/browser-e2e/SKILL.md'))).toBe(true);
-    expect(result.stdout).toContain('已安装 Codex Skill');
+    expect(fs.existsSync(path.join(home, '.claude/skills/browser-e2e/SKILL.md'))).toBe(true);
+    expect(result.stdout).toContain('已安装 Claude Code Skill');
   });
 });

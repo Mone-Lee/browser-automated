@@ -2,30 +2,63 @@
 
 同一代码库下维护两个独立 npm CLI 包：
 
-- `browser-opt`：带截图、snapshot 和 PASS/FAIL 报告的自然语言浏览器工作流 CLI，负责即时执行与保存/复用 Workflow。
-- `browser-e2e`：自然语言驱动的 E2E 测试匹配、执行与 Playwright 生成 CLI。
+- `browser-opt`：面向“现在就让浏览器把这件事跑完”。它执行自然语言工作流，产出截图、snapshot、运行证据和 PASS/FAIL 报告，也能保存/复用 Workflow。
+- `browser-e2e`：面向“把自然语言需求沉淀成可重复测试”。它匹配已有 E2E 用例、执行测试，并生成 Playwright 测试代码。
 
 两者共享 `packages/browser-core/src` 中的底层实现，但该目录不是 npm package。构建时共享代码会分别进入两个 CLI 的发布物，因此它们都能独立安装和运行。
 
+## browser-opt 与 browser-e2e 怎么选
+
+| 你想做的事 | 使用 | 结果 |
+| --- | --- | --- |
+| 让浏览器立刻完成一次操作、调试页面、拿到执行证据 | `browser-opt` | 一次运行报告、截图、snapshot、PASS/FAIL |
+| 把常见流程保存下来，下次用一句话复跑 | `browser-opt save` / `browser-opt run` | 项目级 `.browser-opt/workflows/` |
+| 复用或生成可进 CI 的端到端测试 | `browser-e2e` | Playwright 测试匹配、执行或生成 |
+| 想要人工接管后继续同一次浏览器流程 | `browser-opt` | handoff 后恢复原运行 |
+
+简单说：`browser-opt` 是执行器和证据记录器；`browser-e2e` 是测试资产管理和 Playwright 生成器。前者更适合临时验证、运营流程和人工协作，后者更适合沉淀自动化测试。
+
 ## 安装与环境初始化
 
-`browser-opt` 的环境安装与 Workflow 执行使用独立命令：`browser-opt` 本体继续通过 `npx @latest` 获取最新版本，`install` 只把较重的 `agent-browser` 运行时预先全局安装或更新：
+### browser-opt
+
+首次安装只需执行：
 
 ```bash
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install
+npx browser-opt@latest install
 ```
 
-`install` 默认检查并使用系统标准 Chrome，同时安装 Agent Skill；不会下载 Chrome for Testing。机器确实没有标准 Chrome 且接受测试浏览器时，才显式添加 `--download-browser`。所有 browser-opt 命令统一通过 `npx` 调用，并显式指定 npmjs 官方源。
-
-卸载预装的运行时和 Skill：
+该命令会一次性安装或更新全局 `browser-opt`、`agent-browser` 及 `browser-opt` Skill。默认 Skill 目录为 `~/.agents/skills/browser-opt`，Codex、GitHub Copilot、Gemini CLI 和 Qoder 可共用，无需分别安装。Claude Code 使用自己的目录：
 
 ```bash
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest uninstall
+npx browser-opt@latest install --agent claude
 ```
 
-只有确认要删除当前项目的 `.browser-opt` 登录态、报告和 handoff 记录时，才追加 `--all-data`。
+后续更新所有已安装组件：
 
-`browser-e2e`：
+```bash
+browser-opt update
+```
+
+卸载首次安装写入的全局 CLI、运行时和 Skill：
+
+```bash
+browser-opt uninstall
+```
+
+如果安装时用了 `--agent claude` 或 `--skills-dir <目录>`，更新和卸载时传入同一参数。只有确认要删除当前项目的 `.browser-opt` 登录态、报告和 handoff 记录时，卸载才追加 `--all-data`。
+
+只想试用、不安装以上全局组件和 Skill，可直接临时运行：
+
+```bash
+npx -p browser-opt@latest -p agent-browser@latest browser-opt "测试 https://example.com。验证页面包含 Example。"
+```
+
+`install`、`update` 和试用命令默认使用系统标准 Chrome，不会下载 Chrome for Testing。机器没有标准 Chrome 且接受测试浏览器时，安装或更新可追加 `--download-browser`；试用前则需自行准备 Chrome。
+
+### browser-e2e
+
+`browser-e2e` 不依赖上面的 `browser-opt install`。只在需要 E2E 测试匹配、执行或生成时单独初始化：
 
 ```bash
 npx --yes browser-e2e setup
@@ -34,44 +67,20 @@ npx --yes browser-e2e setup
 Linux 无桌面或缺少浏览器系统库，并明确使用下载浏览器时：
 
 ```bash
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install --download-browser --with-deps
+npx browser-opt@latest install --download-browser --with-deps
 npx --yes browser-e2e setup --with-deps
 ```
 
-`install`（`setup` 保留为兼容别名）默认把 browser-opt Skill 安装到 `~/.agents/skills/browser-opt`。若要安装到 Codex 专用目录，可在引导命令后传 `--agent codex`；若要写入其他 Agent 的 skills 根目录，可传 `--skills-dir <目录>`；若只需要 CLI，可传 `--skip-skill`；若只安装 Skill、不处理运行时，可传 `--skip-runtime`。
-
-常见 Agent 安装示例：
-
-```bash
-# Claude Code
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install --skills-dir ~/.claude/skills
-npx --yes browser-e2e setup --skills-dir ~/.claude/skills
-
-# Codex
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install --agent codex
-npx --yes browser-e2e setup --agent codex
-
-# GitHub Copilot
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install --skills-dir ~/.copilot/skills
-npx --yes browser-e2e setup --skills-dir ~/.copilot/skills
-
-# Gemini
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install --skills-dir ~/.gemini/skills
-npx --yes browser-e2e setup --skills-dir ~/.gemini/skills
-
-# Qoder
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install --skills-dir ~/.qoder/skills
-npx --yes browser-e2e setup --skills-dir ~/.qoder/skills
-```
+`install`（`setup` 保留为兼容别名）还支持 `--skills-dir <目录>` 自定义 Skill 根目录、`--skip-skill` 只处理运行时，以及 `--skip-runtime` 只安装 Skill。Skill 每次执行前会用 `browser-opt check-update --json` 轻量检查新版本。
 
 需要 Node.js 24 或更高版本。
 
 ## 使用
 
-`browser-opt`：
+### browser-opt：一次性执行与 Workflow 复用
 
 ```bash
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest "测试 https://example.com 的搜索功能。
+browser-opt "测试 https://example.com 的搜索功能。
 
 目标：
 1. 打开首页。
@@ -81,13 +90,13 @@ npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest "测试 http
 保存并复用项目级 Workflow：
 
 ```bash
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest save "示例首页验证流程" --flow "测试 https://example.com。\n1. 验证页面包含 \"Example\"。"
-npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest run "执行示例首页验证流程"
+browser-opt save "示例首页验证流程" --flow "测试 https://example.com。\n1. 验证页面包含 \"Example\"。"
+browser-opt run "执行示例首页验证流程"
 ```
 
 Workflow 默认保存到调用项目的 `.browser-opt/workflows/`；运行证据默认保存到 `.browser-opt/artifacts/`。
 
-`browser-e2e`：
+### browser-e2e：E2E 测试复用与 Playwright 生成
 
 ```bash
 npx --yes browser-e2e "测试网站 https://example.com/login 的登录功能。

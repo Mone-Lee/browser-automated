@@ -27,6 +27,7 @@ interface BrowserOptUninstallOptions {
 }
 
 const AGENT_BROWSER_PACKAGE = 'agent-browser@latest';
+const BROWSER_OPT_PACKAGE = 'browser-opt@latest';
 const AGENT_BROWSER_INSTALL_HINT = '请先安装 agent-browser，例如：npm install -g agent-browser。';
 
 /** 安装或更新 browser-opt 的外部运行时，并把随包发布的 Skill 放到目标 Agent 目录。 */
@@ -35,6 +36,7 @@ export function setupBrowserOpt(options: BrowserOptSetupOptions): void {
     throw new Error('--download-browser 需要同时安装运行时，请移除 --skip-runtime。');
   }
   if (options.installRuntime) {
+    installBrowserOptRuntime();
     installAgentBrowserRuntime();
     verifyAgentBrowserRuntime();
   }
@@ -91,7 +93,18 @@ export function uninstallBrowserOpt(options: BrowserOptUninstallOptions): void {
   console.log('browser-opt 运行依赖已清理。');
 }
 
-/** 通过 npm 全局安装或更新运行时，使 npx browser-opt@latest 可以保持轻量。 */
+/** 通过 npm 全局安装或更新 browser-opt，让 Skill 日常调用无需再执行 npx。 */
+function installBrowserOptRuntime(): void {
+  const result = spawnNpm(['install', '-g', BROWSER_OPT_PACKAGE]);
+  if (result.error) {
+    throw new Error(`无法安装 browser-opt：${result.error.message}。`);
+  }
+  if (result.status !== 0) {
+    throw new Error(`browser-opt 安装失败（退出码 ${result.status ?? 'unknown'}）。`);
+  }
+}
+
+/** 通过 npm 全局安装或更新外部浏览器运行时，避免普通 Workflow 调用重复拉取。 */
 function installAgentBrowserRuntime(): void {
   const result = spawnNpm(['install', '-g', AGENT_BROWSER_PACKAGE]);
   if (result.error) {
@@ -104,12 +117,12 @@ function installAgentBrowserRuntime(): void {
 
 /** 卸载 install 安装的全局运行时，失败时直接暴露 npm 诊断。 */
 function uninstallAgentBrowserRuntime(): void {
-  const result = spawnNpm(['uninstall', '-g', 'agent-browser']);
+  const result = spawnNpm(['uninstall', '-g', 'browser-opt', 'agent-browser']);
   if (result.error) {
-    throw new Error(`无法卸载 agent-browser：${result.error.message}。`);
+    throw new Error(`无法卸载 browser-opt/agent-browser：${result.error.message}。`);
   }
   if (result.status !== 0) {
-    throw new Error(`agent-browser 卸载失败（退出码 ${result.status ?? 'unknown'}）。`);
+    throw new Error(`browser-opt/agent-browser 卸载失败（退出码 ${result.status ?? 'unknown'}）。`);
   }
 }
 

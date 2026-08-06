@@ -69,8 +69,8 @@ Use `/browser-e2e` prefix followed by the full natural language description to i
 
 Install the published CLI and this Skill with `npx --yes browser-e2e setup`.
 By default it installs to the shared Agent Skills directory, similar to
-`npx skills add`. Use `--agent codex` for the Codex-specific skills directory,
-or `--skills-dir <dir>` for another agent root.
+`npx skills add`. Use `--agent claude` for the Claude Code skills directory, or
+`--skills-dir <dir>` for another agent root.
 Use this command prefix for every `browser-e2e` invocation:
 
 ```bash
@@ -89,7 +89,7 @@ npx --yes browser-e2e "<full natural language text>"
 ## CLI commands
 
 - `npx --yes browser-e2e <自然语言测试描述>` — 主入口，提取 URL、检查已有用例、交互式决策
-- `npx --yes browser-e2e setup [--with-deps] [--skip-skill] [--agent agents|codex] [--skills-dir <dir>]`
+- `npx --yes browser-e2e setup [--with-deps] [--skip-skill] [--agent agents|claude] [--skills-dir <dir>]`
 - `npx --yes browser-e2e run <url> <instruction> [--assert <assertion>] [--auto-generate] [--name <name>] [--tags <a,b>]`
 - `npx --yes browser-e2e gen <url> <instruction> [--name <name>] [--tags <a,b>]`
 

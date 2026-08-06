@@ -53,20 +53,22 @@ describe('browser-opt install', () => {
     });
 
     expect(result.status).toBe(0);
-    expect(fs.readFileSync(npmLog, 'utf-8')).toBe('install -g agent-browser@latest\n');
+    expect(fs.readFileSync(npmLog, 'utf-8')).toBe('install -g browser-opt@latest\ninstall -g agent-browser@latest\n');
     expect(fs.readFileSync(commandLog, 'utf-8')).toBe('--version\n');
-    expect(fs.existsSync(path.join(home, '.agents/skills/browser-opt/SKILL.md'))).toBe(true);
+    const installedSkillPath = path.join(home, '.agents/skills/browser-opt/SKILL.md');
+    expect(fs.existsSync(installedSkillPath)).toBe(true);
+    expect(fs.readFileSync(installedSkillPath, 'utf-8')).toContain('browser-opt check-update --json');
     expect(result.stdout).toContain('已安装 Agent Skill');
     expect(result.stdout).toContain('browser-opt 已就绪');
   });
 
-  it('keeps setup as an alias and downloads a browser only when explicitly requested', () => {
+  it('keeps setup as an alias, supports Claude Code and downloads a browser only when explicitly requested', () => {
     const projectRoot = path.resolve(import.meta.dirname, '../..');
-    const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-opt-codex-home-'));
-    const commandLog = path.join(codexHome, 'agent-browser.log');
-    const npmLog = path.join(codexHome, 'npm.log');
-    temporaryDirectories.push(codexHome);
-    const chromePath = path.join(codexHome, 'Google Chrome');
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-opt-claude-home-'));
+    const commandLog = path.join(home, 'agent-browser.log');
+    const npmLog = path.join(home, 'npm.log');
+    temporaryDirectories.push(home);
+    const chromePath = path.join(home, 'Google Chrome');
     fs.writeFileSync(chromePath, 'stub');
     fs.chmodSync(chromePath, 0o755);
     const binDirectory = createSetupCommandStubs(commandLog, npmLog);
@@ -74,14 +76,14 @@ describe('browser-opt install', () => {
       path.join(projectRoot, 'packages/browser-opt/dist/cli/browser-opt.js'),
       'setup',
       '--agent',
-      'codex',
+      'claude',
       '--download-browser',
     ], {
       cwd: projectRoot,
       encoding: 'utf-8',
       env: {
         ...process.env,
-        CODEX_HOME: codexHome,
+        HOME: home,
         npm_execpath: '',
         PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
         AGENT_BROWSER_EXECUTABLE_PATH: chromePath,
@@ -89,10 +91,41 @@ describe('browser-opt install', () => {
     });
 
     expect(result.status).toBe(0);
-    expect(fs.readFileSync(npmLog, 'utf-8')).toBe('install -g agent-browser@latest\n');
+    expect(fs.readFileSync(npmLog, 'utf-8')).toBe('install -g browser-opt@latest\ninstall -g agent-browser@latest\n');
     expect(fs.readFileSync(commandLog, 'utf-8')).toBe('--version\ninstall\n');
-    expect(fs.existsSync(path.join(codexHome, 'skills/browser-opt/SKILL.md'))).toBe(true);
-    expect(result.stdout).toContain('已安装 Codex Skill');
+    expect(fs.existsSync(path.join(home, '.claude/skills/browser-opt/SKILL.md'))).toBe(true);
+    expect(result.stdout).toContain('已安装 Claude Code Skill');
+  });
+
+  it('updates the CLI, runtime and shared Skill with one command', () => {
+    const projectRoot = path.resolve(import.meta.dirname, '../..');
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-opt-update-home-'));
+    const commandLog = path.join(home, 'agent-browser.log');
+    const npmLog = path.join(home, 'npm.log');
+    temporaryDirectories.push(home);
+    const chromePath = path.join(home, 'Google Chrome');
+    fs.writeFileSync(chromePath, 'stub');
+    fs.chmodSync(chromePath, 0o755);
+    const binDirectory = createSetupCommandStubs(commandLog, npmLog);
+
+    const result = spawnSync('node', [
+      path.join(projectRoot, 'packages/browser-opt/dist/cli/browser-opt.js'),
+      'update',
+    ], {
+      cwd: projectRoot,
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        HOME: home,
+        npm_execpath: '',
+        PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
+        AGENT_BROWSER_EXECUTABLE_PATH: chromePath,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(fs.readFileSync(npmLog, 'utf-8')).toBe('install -g browser-opt@latest\ninstall -g agent-browser@latest\n');
+    expect(fs.existsSync(path.join(home, '.agents/skills/browser-opt/SKILL.md'))).toBe(true);
   });
 
   it('uninstalls the global runtime, installed Skill and optional project data', () => {
@@ -126,7 +159,7 @@ describe('browser-opt install', () => {
     });
 
     expect(result.status).toBe(0);
-    expect(fs.readFileSync(npmLog, 'utf-8')).toBe('uninstall -g agent-browser\n');
+    expect(fs.readFileSync(npmLog, 'utf-8')).toBe('uninstall -g browser-opt agent-browser\n');
     expect(fs.existsSync(skillDir)).toBe(false);
     expect(fs.existsSync(path.join(projectDir, '.browser-opt'))).toBe(false);
     expect(result.stdout).toContain('browser-opt 运行依赖已清理');

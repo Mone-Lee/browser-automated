@@ -8,14 +8,16 @@ export const LIVE_VIEWPORT_DASHBOARD_URL = 'http://localhost:4848';
 export const HANDOFF_DONE_ANSWERS = ['done', 'ok', '继续', '完成'] as const;
 
 export const BROWSER_OPT_USAGE = `使用方式：
-  npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest install [--download-browser] [--with-deps] [--skip-runtime] [--skip-skill] [--agent agents|codex] [--skills-dir <目录>]
-  npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest uninstall [--all-data] [--skip-runtime] [--skip-skill] [--agent agents|codex] [--skills-dir <目录>]
-  npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest <自然语言流程> [--profile <name>] [--state <path>] [--session <id>] [--no-live-viewport] [--output-dir <dir>] [--agent-chat]
-  npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest save "<名称>" --flow "<完整流程>" [--workflow-dir <目录>] [--force]
-  npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest run "<查询语句>" [--workflow-dir <目录>]
-  npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest run --workflow-id "<ID>" [--workflow-dir <目录>]
-  npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest start --workflow-id "<ID>" [--workflow-dir <目录>] [--json]
-  npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest status --run-id "<ID>" [--json]
-  npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest resume --run-id "<ID>" [--json]
-  npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest list [--workflow-dir <目录>] [--json]
-  npx --yes --registry=https://registry.npmjs.org/ browser-opt@latest match "<查询语句>" [--workflow-dir <目录>] [--json]`;
+  npx browser-opt@latest install [--download-browser] [--with-deps] [--skip-runtime] [--skip-skill] [--agent agents|claude] [--skills-dir <目录>]
+  browser-opt update [--download-browser] [--with-deps] [--skip-runtime] [--skip-skill] [--agent agents|claude] [--skills-dir <目录>]
+  browser-opt uninstall [--all-data] [--skip-runtime] [--skip-skill] [--agent agents|claude] [--skills-dir <目录>]
+  browser-opt check-update [--json] [--no-cache]
+  browser-opt <自然语言流程> [--profile <name>] [--state <path>] [--session <id>] [--no-live-viewport] [--output-dir <dir>] [--agent-chat]
+  browser-opt save "<名称>" --flow "<完整流程>" [--workflow-dir <目录>] [--force]
+  browser-opt run "<查询语句>" [--workflow-dir <目录>]
+  browser-opt run --workflow-id "<ID>" [--workflow-dir <目录>]
+  browser-opt start --workflow-id "<ID>" [--workflow-dir <目录>] [--json]
+  browser-opt status --run-id "<ID>" [--json]
+  browser-opt resume --run-id "<ID>" [--json]
+  browser-opt list [--workflow-dir <目录>] [--json]
+  browser-opt match "<查询语句>" [--workflow-dir <目录>] [--json]`;

@@ -7,6 +7,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { printBrowserOptResult } from '../../packages/browser-opt/dist/cli/utils/output.js';
+import { checkBrowserOptUpdate } from '../../packages/browser-opt/dist/cli/utils/version-check.js';
 import type { BrowserOptRunResult } from '../../packages/browser-opt/dist/browser-opt/type.js';
 
 const tempDirs: string[] = [];
@@ -193,6 +194,32 @@ function findReportJsonFiles(dir: string): string[] {
 }
 
 describe('browser-opt CLI', () => {
+  it('checks npm latest version with a short-lived local cache', async () => {
+    const cacheHome = makeTempDir();
+    const originalCacheHome = process.env.XDG_CACHE_HOME;
+    process.env.XDG_CACHE_HOME = cacheHome;
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ version: '999.0.0' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const first = await checkBrowserOptUpdate({ maxAgeMs: 60_000 });
+      const second = await checkBrowserOptUpdate({ maxAgeMs: 60_000 });
+
+      expect(first).toEqual(expect.objectContaining({
+        status: 'outdated',
+        latestVersion: '999.0.0',
+        updateCommand: 'browser-opt update',
+      }));
+      expect(second).toEqual(expect.objectContaining({
+        status: 'outdated',
+        latestVersion: '999.0.0',
+      }));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      process.env.XDG_CACHE_HOME = originalCacheHome;
+    }
+  });
+
   it('saves, lists and matches a project Workflow as JSON', () => {
     const workflowDir = makeTempDir();
     const flow = '测试 https://example.com。\\n\\n目标：\\n1. 验证页面包含 "Example"。';

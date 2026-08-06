@@ -76,7 +76,7 @@ browser-e2e "<full natural language text>"
 ## CLI commands
 
 - `browser-e2e <自然语言测试描述>` — 主入口，提取 URL、检查已有用例、交互式决策
-- `browser-e2e setup [--with-deps] [--skip-skill] [--agent agents|codex] [--skills-dir <dir>]`
+- `browser-e2e setup [--with-deps] [--skip-skill] [--agent agents|claude] [--skills-dir <dir>]`
 - `browser-e2e run <url> <instruction> [--assert <assertion>] [--auto-generate] [--name <name>] [--tags <a,b>]`
 - `browser-e2e gen <url> <instruction> [--name <name>] [--tags <a,b>]`
 

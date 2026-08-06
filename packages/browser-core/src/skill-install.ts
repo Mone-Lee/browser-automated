@@ -5,7 +5,7 @@
 import { homedir } from 'node:os';
 import * as path from 'node:path';
 
-export type SkillInstallAgent = 'agents' | 'codex';
+export type SkillInstallAgent = 'agents' | 'claude';
 
 export interface SkillInstallTargetOptions {
   agent?: string;
@@ -35,7 +35,7 @@ export function resolveSkillInstallTarget(skillName: string, options: SkillInsta
   const agent = normalizeSkillInstallAgent(options.agent);
   const rootDir = resolveSkillRootDir(agent);
   return {
-    label: agent === 'codex' ? 'Codex Skill' : 'Agent Skill',
+    label: agent === 'claude' ? 'Claude Code Skill' : 'Agent Skill',
     rootDir,
     targetDir: path.join(rootDir, skillName),
   };
@@ -44,17 +44,25 @@ export function resolveSkillInstallTarget(skillName: string, options: SkillInsta
 /** 将 CLI 传入的 agent 名称收敛到当前明确支持的安装目标。 */
 export function normalizeSkillInstallAgent(agent?: string): SkillInstallAgent {
   const normalized = agent?.trim().toLowerCase() || DEFAULT_AGENT;
-  if (normalized === 'agents' || normalized === 'codex') {
+  if (normalized === 'agents') {
     return normalized;
   }
 
-  throw new Error(`不支持的 Skill 安装目标：${agent}。可用值：agents、codex，或使用 --skills-dir <目录>。`);
+  // Codex 已改用共享目录，旧参数继续映射到新位置，避免升级后留下重复 Skill。
+  if (normalized === 'codex') {
+    return 'agents';
+  }
+  if (normalized === 'claude' || normalized === 'claude-code') {
+    return 'claude';
+  }
+
+  throw new Error(`不支持的 Skill 安装目标：${agent}。可用值：agents、claude，或使用 --skills-dir <目录>。`);
 }
 
 /** 解析各 Agent 目标对应的用户级 skills 根目录。 */
 function resolveSkillRootDir(agent: SkillInstallAgent): string {
-  if (agent === 'codex') {
-    return path.join(process.env.CODEX_HOME?.trim() || path.join(homedir(), '.codex'), 'skills');
+  if (agent === 'claude') {
+    return path.join(homedir(), '.claude', 'skills');
   }
 
   return path.join(homedir(), '.agents', 'skills');
