@@ -109,7 +109,7 @@ Skill 会先匹配当前项目中的 Workflow。名称精确命中或唯一候�
 2. 回到终端输入 `done`、`ok`、`继续` 或 `完成`。
 3. `browser-opt` 恢复同一 session，等待页面离开登录态后保存新的 state，再继续后续步骤。
 
-终端直接运行时，handoff 后应把 `done` 写回同一个进程。Codex 执行已保存 Workflow 时应通过 `start --workflow-id ... --json` 启动后台 runner，保存返回的 `runId`；用户确认后调用 `resume --run-id ...`，不要依赖跨 turn 会失效的 PTY session，也不要重新执行 workflow。
+终端直接运行时，handoff 后应把 `done` 写回同一个进程。Codex 执行即时流程时应通过 `start --flow ... --json`、执行已保存 Workflow 时应通过 `start --workflow-id ... --json` 启动后台 runner，并保存返回的 `runId`；用户确认后调用 `resume --run-id ...`，不要依赖跨 turn 会失效的 PTY session，也不要重新执行流程。
 
 默认 state 每轮最多回退一次 profile，后续的 handoff、resume 和自动化都复用该 profile 实例。显式传 `--state <path>` 表示使用隔离 state，不会自动回退到 profile。
 
@@ -155,7 +155,7 @@ node packages/browser-opt/dist/cli/browser-opt.js "测试 https://example.com。
 
 这个命令会真正调用 `agent-browser` CLI，执行浏览器打开、snapshot、确定性动作、截图和报告生成。`browser-opt` 默认显示并保留真实浏览器窗口，便于观察操作流程和执行后的页面状态，但不会打开 agent-browser 的 `http://localhost:4848` 截图面板；如需无头执行，可额外传 `--no-live-viewport`。如需旧的 `agent-browser chat` 路径，可额外传 `--agent-chat`，但这可能需要 `AI_GATEWAY_API_KEY`。
 
-测试受保护页面时，如果终端提示 `Browser Opt Handoff`，请在当前可见浏览器中完成登录，然后在同一个终端输入 `done` 继续。恢复后会继续使用同一 session，不会重新打开目标页面覆盖用户刚完成的登录状态。
+测试受保护页面时，如果终端提示 `Browser Opt Handoff`，请在当前可见浏览器中完成登录，然后在同一个终端输入 `done` 继续。Codex 后台执行则通过原 `runId` 调用 `resume`。恢复后会继续使用同一 session，不会重新打开目标页面覆盖用户刚完成的登录状态。
 
 执行后检查产物：
 

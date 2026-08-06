@@ -16,6 +16,7 @@ export const BROWSER_OPT_USAGE = `使用方式：
   browser-opt save "<名称>" --flow "<完整流程>" [--workflow-dir <目录>] [--force]
   browser-opt run "<查询语句>" [--workflow-dir <目录>]
   browser-opt run --workflow-id "<ID>" [--workflow-dir <目录>]
+  browser-opt start --flow "<完整流程>" [--json]
   browser-opt start --workflow-id "<ID>" [--workflow-dir <目录>] [--json]
   browser-opt status --run-id "<ID>" [--json]
   browser-opt resume --run-id "<ID>" [--json]

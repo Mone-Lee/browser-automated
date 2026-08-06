@@ -328,6 +328,38 @@ describe('browser-opt CLI', () => {
     expect(String(completed.output)).toContain('执行成功');
   }, 20_000);
 
+  it('resumes a detached immediate flow by run id without opening a second browser session', async () => {
+    const projectDir = makeTempDir();
+    const commandLog = path.join(projectDir, 'agent-browser.log');
+    const flow = '测试 https://example.com。\n1. handoff 给操作人员：请手动选择“商品白底图”的本地真实图片，并在确认完成后恢复自动化。';
+    const started = runCli([
+      'browser-opt',
+      'start',
+      '--flow',
+      flow,
+      '--json',
+    ], { AGENT_BROWSER_LOG: commandLog }, undefined, { cwd: projectDir });
+    expect(started.status).toBe(0);
+    const startedRun = JSON.parse(started.stdout) as { runId: string; status: string };
+    expect(startedRun.status).toBe('RUNNING');
+
+    await waitForDetachedRunStatus(projectDir, startedRun.runId, 'HANDOFF');
+    const resumed = runCli([
+      'browser-opt',
+      'resume',
+      '--run-id',
+      startedRun.runId,
+      '--json',
+    ], {}, undefined, { cwd: projectDir });
+    expect(resumed.status).toBe(0);
+
+    await waitForDetachedRunStatus(projectDir, startedRun.runId, 'PASS');
+    const commands = fs.readFileSync(commandLog, 'utf-8');
+    const sessions = extractLoggedSessions(commands);
+    expect(new Set(sessions).size).toBe(1);
+    expect(commands.split('\n').filter((command) => /\bopen https:\/\/example\.com\b/.test(command))).toHaveLength(1);
+  }, 20_000);
+
   it('reuses a stable browser session when rerunning the same saved Workflow', () => {
     const workflowDir = makeTempDir();
     const firstOutputDir = makeTempDir();

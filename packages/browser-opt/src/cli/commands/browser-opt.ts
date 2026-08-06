@@ -40,7 +40,7 @@ import { setupBrowserOpt, uninstallBrowserOpt } from './setup.js';
 interface BrowserOptDetachedRun {
   runId: string;
   pid: number;
-  workflowId: string;
+  workflowId?: string;
   signalPath: string;
   outputPath: string;
   startedAt: string;
@@ -111,7 +111,7 @@ export async function cmdBrowserOpt(args: string[]): Promise<void> {
     return;
   }
   if (subcommand === 'start' && !isImmediateFlow) {
-    startWorkflowCommand(parsed.positionals.slice(1).join(' '), parsed.flags);
+    startDetachedFlowCommand(parsed.positionals.slice(1).join(' '), parsed.flags);
     return;
   }
   if (subcommand === 'status' && !isImmediateFlow) {
@@ -259,11 +259,10 @@ async function runWorkflowCommand(query: string, flags: Record<string, string | 
   await executeBrowserOptFlow(renderBrowserOptWorkflowFlow(result.matched.workflow), flags, result.matched.workflow.id);
 }
 
-/** 后台启动可跨 Codex turn 恢复的 Workflow，handoff 期间不依赖临时 PTY 会话。 */
-function startWorkflowCommand(query: string, flags: Record<string, string | boolean>): void {
-  const loaded = loadBrowserOptWorkflows(getStringFlag(flags, 'workflow-dir'));
-  printWorkflowWarnings(loaded.warnings);
-  const workflow = resolveWorkflowForExecution(query, flags, loaded.workflows);
+/** 后台启动可跨 Codex turn 恢复的即时流程或 Workflow，handoff 期间不依赖临时 PTY 会话。 */
+function startDetachedFlowCommand(query: string, flags: Record<string, string | boolean>): void {
+  const immediateFlow = getStringFlag(flags, 'flow')?.trim();
+  const workflow = immediateFlow ? undefined : resolveDetachedWorkflow(query, flags);
   const runId = randomUUID();
   const runDir = path.resolve(process.cwd(), DEFAULT_HANDOFF_RUN_DIR, runId);
   const signalPath = path.join(runDir, 'resume.signal');
@@ -272,7 +271,7 @@ function startWorkflowCommand(query: string, flags: Record<string, string | bool
   fs.mkdirSync(runDir, { recursive: true });
 
   const outputFd = fs.openSync(outputPath, 'a');
-  const child = spawn(process.execPath, buildDetachedWorkflowArgs(workflow.id, signalPath, flags), {
+  const child = spawn(process.execPath, buildDetachedFlowArgs(workflow?.id, immediateFlow, signalPath, flags), {
     detached: true,
     stdio: ['ignore', outputFd, outputFd],
     env: {
@@ -289,13 +288,23 @@ function startWorkflowCommand(query: string, flags: Record<string, string | bool
   const metadata: BrowserOptDetachedRun = {
     runId,
     pid: child.pid,
-    workflowId: workflow.id,
+    workflowId: workflow?.id,
     signalPath,
     outputPath,
     startedAt: new Date().toISOString(),
   };
   fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
   printDetachedRun(metadata, 'RUNNING', getBooleanFlag(flags, 'json'));
+}
+
+/** 即时流程直接使用 --flow；未提供时再按现有规则解析已保存 Workflow。 */
+function resolveDetachedWorkflow(
+  query: string,
+  flags: Record<string, string | boolean>,
+): BrowserOptWorkflow {
+  const loaded = loadBrowserOptWorkflows(getStringFlag(flags, 'workflow-dir'));
+  printWorkflowWarnings(loaded.warnings);
+  return resolveWorkflowForExecution(query, flags, loaded.workflows);
 }
 
 /** 查询后台 Workflow 的稳定状态，并返回最近输出供 Skill 识别 handoff 与最终报告。 */
@@ -343,9 +352,10 @@ function resolveWorkflowForExecution(
   return result.matched.workflow;
 }
 
-/** 复用当前 Node/tsx 入口启动子进程，并只透传会影响 Workflow 执行的参数。 */
-function buildDetachedWorkflowArgs(
-  workflowId: string,
+/** 复用当前 Node/tsx 入口启动子进程，并只透传会影响流程执行的参数。 */
+function buildDetachedFlowArgs(
+  workflowId: string | undefined,
+  immediateFlow: string | undefined,
   signalPath: string,
   flags: Record<string, string | boolean>,
 ): string[] {
@@ -355,13 +365,11 @@ function buildDetachedWorkflowArgs(
     ...process.execArgv,
     process.argv[1] ?? '',
     ...commandPrefix,
-    'run',
-    '--workflow-id',
-    workflowId,
+    ...(immediateFlow ? [immediateFlow] : ['run', '--workflow-id', workflowId ?? '']),
     '--handoff-signal',
     signalPath,
   ];
-  const excludedFlags = new Set(['workflow-id', 'json', 'run-id', 'handoff-signal']);
+  const excludedFlags = new Set(['flow', 'workflow-id', 'json', 'run-id', 'handoff-signal']);
   for (const [key, value] of Object.entries(flags)) {
     if (excludedFlags.has(key)) {
       continue;

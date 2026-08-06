@@ -74,9 +74,10 @@ Every execution must follow these rules:
 
 ## Interactive handoff execution
 
-For saved workflows, start the browser run as a detached task and keep the returned stable `runId`. Do not keep an `exec_command` or PTY session id as the recovery handle; Codex may discard that process handle when the handoff response ends the current turn.
+Start every browser run that may require handoff as a detached task and keep the returned stable `runId`. This applies to both full flows with a URL and saved workflows. Do not keep an `exec_command` or PTY session id as the recovery handle; Codex may discard that process handle when the handoff response ends the current turn.
 
 ```bash
+browser-opt start --flow "<full natural language flow>" --json
 browser-opt start --workflow-id "<matched.id>" --json
 browser-opt status --run-id "<runId>" --json
 ```
@@ -88,7 +89,7 @@ browser-opt resume --run-id "<runId>" --json
 browser-opt status --run-id "<runId>" --json
 ```
 
-The detached task still executes `browser-opt run` exactly once. `status` is read-only and `resume` only sends a one-time signal to that original process. Never start a second `run` or `start` command to simulate resume.
+The detached task executes the requested flow exactly once. `status` is read-only and `resume` only sends a one-time signal to that original process. Never start a second direct flow, `run`, or `start` command to simulate resume.
 
 ## Saved workflows
 
@@ -224,8 +225,10 @@ workflow request. A full flow includes its target URL:
 Translate that into:
 
 ```bash
-browser-opt "<full natural language flow>"
+browser-opt start --flow "<full natural language flow>" --json
 ```
+
+Keep the returned `runId`, poll it with `status`, and use `resume` after every handoff as described above. Do not execute a full flow through a long-running shell or PTY handle.
 
 Optional runtime flags:
 
