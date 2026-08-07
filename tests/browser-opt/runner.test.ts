@@ -1566,6 +1566,91 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps[0].actionOutput).toContain('select dom click 售后周期=提货当天');
   });
 
+  it('does not verify a combobox as a switch when a nearby switch exists', async () => {
+    const outputDir = makeTempDir();
+    const selectedSnapshot = [
+      '- generic "吕木子咕咕" [ref=e117] clickable [cursor:pointer]',
+      '  - generic "吕木子咕咕" [ref=e154] clickable [onclick]',
+      '    - combobox "* 商品品牌 :" [expanded=false, required, ref=e192]',
+      '- LabelText "普通商品" [ref=e155] clickable [cursor:pointer, onclick]',
+      '  - radio "普通商品 " [checked=true, ref=e193]',
+      '- switch "荤素配置 :" [checked=false, ref=e92]',
+    ].join('\n');
+    const agent = buildAgent({
+      evaluate: (script) => {
+        if (script.includes('selectHelper.openDropdownByField')) {
+          return JSON.stringify({ found: true, opened: true });
+        }
+        if (script.includes('selectHelper.clickVisibleOption')) {
+          return JSON.stringify({ found: true, clicked: true, selectedText: '吕木子咕咕' });
+        }
+        return JSON.stringify({ found: false });
+      },
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(selectedSnapshot, {
+          e92: { role: 'switch', name: '荤素配置 :' },
+          e154: { role: 'generic', name: '吕木子咕咕' },
+          e192: { role: 'combobox', name: '* 商品品牌 :' },
+          e193: { role: 'radio', name: '普通商品 ' },
+        }),
+        snapshotJson(selectedSnapshot, {
+          e92: { role: 'switch', name: '荤素配置 :' },
+          e154: { role: 'generic', name: '吕木子咕咕' },
+          e192: { role: 'combobox', name: '* 商品品牌 :' },
+          e193: { role: 'radio', name: '普通商品 ' },
+        }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. “商品品牌”选择“吕木子咕咕”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect(result.report.steps[0].verification).toContain('已确认页面显示选择值：商品品牌=吕木子咕咕');
+    expect(result.report.steps[0].verification).not.toContain('开关状态');
+  });
+
+  it('does not click a stale snapshot ref after an opened DOM dropdown misses the option', async () => {
+    const outputDir = makeTempDir();
+    const closedSnapshot = [
+      '- StaticText "对接负责人" [ref=f1]',
+      '- combobox "请选择" [ref=e102]',
+    ].join('\n');
+    const agent = buildAgent({
+      evaluate: (script) => {
+        if (script.includes('selectHelper.openDropdownByField')) {
+          return JSON.stringify({ found: true, opened: true });
+        }
+        if (script.includes('selectHelper.searchActiveDropdown')) {
+          return JSON.stringify({ searched: false });
+        }
+        if (script.includes('selectHelper.clickVisibleOption')) {
+          return JSON.stringify({ found: false, clicked: false });
+        }
+        return JSON.stringify({ found: false });
+      },
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(closedSnapshot, {
+          f1: { role: 'StaticText', name: '对接负责人' },
+          e102: { role: 'combobox', name: '请选择' },
+        }),
+        snapshotJson(closedSnapshot, {
+          f1: { role: 'StaticText', name: '对接负责人' },
+          e102: { role: 'combobox', name: '请选择' },
+        }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. “对接负责人”选择“嘻嘻嘻”', { outputDir });
+
+    expect(result.passed).toBe(false);
+    expect(result.report.steps[0].error).toContain('无法找到选项：对接负责人 -> 嘻嘻嘻');
+    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalledWith('e102');
+  });
+
   it('searches an opened dropdown before failing when the option is not visible', async () => {
     const outputDir = makeTempDir();
     const closedSnapshot = [

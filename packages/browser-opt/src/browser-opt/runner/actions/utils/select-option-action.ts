@@ -58,6 +58,9 @@ export function executeSelectOptionAction(
   if (dropdownDomTarget.output) {
     return dropdownDomTarget.output;
   }
+  if (dropdownDomTarget.attempted && !option.ref) {
+    throw new Error(`无法找到选项：${fieldLabel} -> ${action.option}`);
+  }
   if (!option.ref) {
     const fieldRef = findSelectableFieldRef(searchSnapshot, action.field);
     if (fieldRef) {
@@ -180,7 +183,10 @@ function clickDropdownDomTarget(agent: BrowserAgent, field: string, option: stri
     if (typeof opened.opened !== 'boolean') {
       return { attempted: false, output: null };
     }
-    if (!opened.found || opened.opened === false) {
+    if (!opened.found) {
+      return { attempted: false, output: null };
+    }
+    if (opened.opened === false) {
       return { attempted: true, output: null };
     }
 
@@ -612,11 +618,16 @@ function snapshotHasSwitchField(snapshot: SnapshotEvidence, field: string | null
   const normalizedField = normalizeVisibleText(field);
   const lines = snapshot.text.split('\n');
   return lines.some((line, index) => {
-    const normalizedLine = normalizeVisibleText(line);
-    if (/-\s*switch\s+"/i.test(line) && normalizedLine.includes(normalizedField)) {
+    const parsed = parseSnapshotRoleAndLabel(line);
+    if (!parsed) {
+      return false;
+    }
+
+    const normalizedLabel = normalizeVisibleText(parsed.label);
+    if (/switch/i.test(parsed.role) && normalizedLabel.includes(normalizedField)) {
       return true;
     }
-    if (!normalizedLine.includes(normalizedField)) {
+    if (!isFieldLabelSnapshotLine(parsed, normalizedField)) {
       return false;
     }
 
@@ -624,6 +635,24 @@ function snapshotHasSwitchField(snapshot: SnapshotEvidence, field: string | null
       .slice(index + 1, index + 5)
       .some((followingLine) => /-\s*switch\s+"/i.test(followingLine));
   });
+}
+
+/** 解析 snapshot 文本中的角色和标签，供本文件做局部语义判断。 */
+function parseSnapshotRoleAndLabel(line: string): { role: string; label: string } | null {
+  const match = line.match(/-\s*([A-Za-z]+)\s+"([^"]*)"/);
+  return match?.[1]
+    ? { role: match[1], label: match[2] ?? '' }
+    : null;
+}
+
+/** 只把短字段标签视为 switch 锚点，避免整页容器文本把普通下拉误判为开关。 */
+function isFieldLabelSnapshotLine(parsed: { role: string; label: string }, normalizedField: string): boolean {
+  if (!/StaticText|LabelText|label|text|generic/i.test(parsed.role)) {
+    return false;
+  }
+
+  const normalizedLabel = normalizeVisibleText(parsed.label);
+  return normalizedLabel.includes(normalizedField) && normalizedLabel.length <= normalizedField.length + 8;
 }
 
 /** 下拉选择通常会收起选项列表，只保留字段和值文案，因此补充基于页面文案的确认。 */
