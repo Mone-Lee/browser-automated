@@ -1490,6 +1490,55 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps[0].actionOutput).toContain('select dom click 售后周期=提货当天');
   });
 
+  it('searches an opened dropdown before failing when the option is not visible', async () => {
+    const outputDir = makeTempDir();
+    const closedSnapshot = [
+      '- StaticText "对接负责人" [ref=f1]',
+      '- combobox "请选择" [ref=e61]',
+    ].join('\n');
+    const selectedSnapshot = [
+      '- StaticText "对接负责人" [ref=f1]',
+      '- combobox "嘻嘻嘻" [ref=e61]',
+    ].join('\n');
+    let clickVisibleCount = 0;
+    const agent = buildAgent({
+      evaluate: (script) => {
+        if (script.includes('selectHelper.openDropdownByField')) {
+          return JSON.stringify({ found: true, opened: true });
+        }
+        if (script.includes('selectHelper.searchActiveDropdown')) {
+          return JSON.stringify({ searched: true });
+        }
+        if (script.includes('selectHelper.clickVisibleOption')) {
+          clickVisibleCount += 1;
+          return JSON.stringify(clickVisibleCount === 1
+            ? { found: false, clicked: false }
+            : { found: true, clicked: true, selectedText: '嘻嘻嘻' });
+        }
+        return JSON.stringify({ found: false });
+      },
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(closedSnapshot, {
+          f1: { role: 'StaticText', name: '对接负责人' },
+          e61: { role: 'combobox', name: '请选择' },
+        }),
+        snapshotJson(selectedSnapshot, {
+          f1: { role: 'StaticText', name: '对接负责人' },
+          e61: { role: 'combobox', name: '嘻嘻嘻' },
+        }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 对接负责人选择“嘻嘻嘻”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect((agent.evaluate as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(4);
+    expect(result.report.steps[0].actionOutput).toContain('select dom click 对接负责人=嘻嘻嘻 (嘻嘻嘻)');
+  });
+
   it('selects an ordinal dropdown option without requiring the option text upfront', async () => {
     const outputDir = makeTempDir();
     const closedSnapshot = [
@@ -1564,6 +1613,54 @@ describe('BrowserOptRunner', () => {
     expect(result.passed).toBe(true);
     expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect(result.report.steps[0].actionOutput).toContain('selection skipped');
+  });
+
+  it('uses switch checked and unchecked labels to infer the requested state', async () => {
+    const outputDir = makeTempDir();
+    const beforeSnapshot = [
+      '- StaticText "荤素配置" [ref=f1]',
+      '- switch "素食" [checked=true, ref=e51]',
+    ].join('\n');
+    const afterSnapshot = [
+      '- StaticText "荤素配置" [ref=f1]',
+      '- switch "荤食" [checked=false, ref=e51]',
+    ].join('\n');
+    const refs = {
+      f1: { role: 'StaticText', name: '荤素配置' },
+      e51: { role: 'switch', name: '素食' },
+    };
+    let evaluateCount = 0;
+    const agent = buildAgent({
+      evaluate: (script) => {
+        if (script.includes('switchHelper.findSwitchByField')) {
+          evaluateCount += 1;
+          return JSON.stringify({
+            found: true,
+            checked: evaluateCount === 1,
+            desiredChecked: false,
+            switchId: 'browser-opt-switch-0',
+            clicked: evaluateCount === 1,
+          });
+        }
+        return JSON.stringify({ found: false });
+      },
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(beforeSnapshot, refs),
+        snapshotJson(afterSnapshot, {
+          ...refs,
+          e51: { role: 'switch', name: '荤食' },
+        }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 荤素配置选择“荤食”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(result.report.steps[0].actionOutput).toContain('switch dom click 荤素配置=荤食');
+    expect(result.report.steps[0].verification).toContain('已确认开关状态：荤素配置=荤食');
   });
 
   it('waits and retries when a dependent select option appears after another field update', async () => {

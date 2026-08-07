@@ -41,7 +41,7 @@ export function executeSelectOptionAction(
     option = { ...option, alreadySelected: false };
   }
 
-  const switchDomTarget = isSwitchSelectable(option.role) && action.field
+  const switchDomTarget = action.field && (isSwitchSelectable(option.role) || snapshotHasSwitchField(snapshot, action.field))
     ? clickSwitchDomTarget(agent, action.field, action.option)
     : null;
   if (switchDomTarget) {
@@ -58,10 +58,6 @@ export function executeSelectOptionAction(
   if (dropdownDomTarget.output) {
     return dropdownDomTarget.output;
   }
-  if (dropdownDomTarget.attempted && !option.ref && findSelectableFieldRef(searchSnapshot, action.field)) {
-    throw new Error(`无法通过 DOM 安全选择下拉选项：${fieldLabel} -> ${action.option}`);
-  }
-
   if (!option.ref) {
     const fieldRef = findSelectableFieldRef(searchSnapshot, action.field);
     if (fieldRef) {
@@ -115,7 +111,7 @@ export function verifySelectOptionActionEffect(
   }
 
   const selected = findSelectableOption(afterSnapshot, action.field, action.option);
-  if (isSwitchSelectable(selected.role) && action.field) {
+  if ((isSwitchSelectable(selected.role) || snapshotHasSwitchField(afterSnapshot, action.field)) && action.field) {
     const domState = verifySwitchDomState(agent, action.field, action.option);
     if (domState === true) {
       return { passed: true, message: `已确认开关状态：${action.field}=${action.option}` };
@@ -194,6 +190,21 @@ function clickDropdownDomTarget(agent: BrowserAgent, field: string, option: stri
   return JSON.stringify(selectHelper.clickVisibleOption(${JSON.stringify(option)}));
 })()`;
     const clicked = parseEvalJson(agent.evaluate(clickScript));
+    if (clicked.clicked !== true) {
+      const searchScript = `(() => {
+  const selectHelper = ${dropdownDomHelperSource()};
+  return JSON.stringify(selectHelper.searchActiveDropdown(${JSON.stringify(option)}));
+})()`;
+      const searched = parseEvalJson(agent.evaluate(searchScript));
+      if (searched.searched === true) {
+        agent.waitMs(500);
+        const retryClickScript = `(() => {
+  const selectHelper = ${dropdownDomHelperSource()};
+  return JSON.stringify(selectHelper.clickVisibleOption(${JSON.stringify(option)}));
+})()`;
+        Object.assign(clicked, parseEvalJson(agent.evaluate(retryClickScript)));
+      }
+    }
     if (clicked.clicked === true) {
       agent.waitMs(300);
       const selectedText = clicked.selectedText ? ` (${clicked.selectedText})` : '';
@@ -239,14 +250,13 @@ function searchSelectableInLongForm(
 
 /** 对 switch 优先使用 DOM 中字段同一行的最近开关，避免无障碍 ref 指向或 checked 状态失真。 */
 function clickSwitchDomTarget(agent: BrowserAgent, field: string, option: string): string | null {
-  const desiredChecked = /^(是|开|开启|打开|启用|true|yes|on)$/i.test(option.trim());
   const script = `(() => {
   const switchHelper = ${switchDomHelperSource()};
-  const result = switchHelper.findSwitchByField(${JSON.stringify(field)});
-  if (!result.found || !result.switchId) {
+  const result = switchHelper.findSwitchByField(${JSON.stringify(field)}, ${JSON.stringify(option)});
+  if (!result.found || !result.switchId || typeof result.desiredChecked !== 'boolean') {
     return JSON.stringify(result);
   }
-  if (result.checked === ${JSON.stringify(desiredChecked)}) {
+  if (result.checked === result.desiredChecked) {
     return JSON.stringify({ ...result, clicked: false });
   }
   const element = document.querySelector('[data-browser-opt-switch-id="' + result.switchId + '"]');
@@ -260,7 +270,11 @@ function clickSwitchDomTarget(agent: BrowserAgent, field: string, option: string
 
   try {
     const parsed = parseEvalJson(agent.evaluate(script));
+    const desiredChecked = parsed.desiredChecked ?? parsed.desired;
     if (!parsed.found) {
+      return null;
+    }
+    if (typeof desiredChecked !== 'boolean') {
       return null;
     }
     if (parsed.clicked === false && parsed.checked === desiredChecked) {
@@ -278,20 +292,20 @@ function clickSwitchDomTarget(agent: BrowserAgent, field: string, option: string
 
 /** switch 的 accessibility checked 在部分业务页不可靠，单独走 DOM 近邻状态确认。 */
 function verifySwitchDomState(agent: BrowserAgent, field: string, option: string): boolean | null {
-  const desiredChecked = /^(是|开|开启|打开|启用|true|yes|on)$/i.test(option.trim());
   const script = `(() => {
   const switchHelper = ${switchDomHelperSource()};
-  const result = switchHelper.findSwitchByField(${JSON.stringify(field)});
-  return JSON.stringify({ ...result, desired: ${JSON.stringify(desiredChecked)} });
+  const result = switchHelper.findSwitchByField(${JSON.stringify(field)}, ${JSON.stringify(option)});
+  return JSON.stringify(result);
 })()
 `;
 
   try {
     const parsed = parseEvalJson(agent.evaluate(script));
-    if (!parsed.found || typeof parsed.checked !== 'boolean') {
+    const desiredChecked = parsed.desiredChecked ?? parsed.desired;
+    if (!parsed.found || typeof parsed.checked !== 'boolean' || typeof desiredChecked !== 'boolean') {
       return null;
     }
-    return parsed.checked === parsed.desired;
+    return parsed.checked === desiredChecked;
   } catch {
     return null;
   }
@@ -300,13 +314,15 @@ function verifySwitchDomState(agent: BrowserAgent, field: string, option: string
 function parseEvalJson(raw: string): {
   found?: boolean;
   checked?: boolean | null;
-  desired?: boolean;
+  desired?: boolean | null;
+  desiredChecked?: boolean | null;
   clicked?: boolean;
   switchId?: string;
   matchedCount?: number;
   disabled?: boolean;
   opened?: boolean;
   selectedText?: string;
+  searched?: boolean;
 } {
   const decoded = JSON.parse(raw.trim()) as unknown;
   return typeof decoded === 'string'
@@ -355,6 +371,16 @@ const browserOptClickableSelect = (element) =>
   element.matches('select')
     ? element
     : element.querySelector('.ant-select-selector, .el-input, .ant-cascader-input, [role="combobox"]') || element;
+const browserOptInputValue = (element, value) => {
+  element.focus?.();
+  const proto = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+  setter?.call(element, value);
+  element.dispatchEvent(new Event('input', { bubbles: true }));
+  element.dispatchEvent(new Event('change', { bubbles: true }));
+  element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: value.slice(-1) || 'a' }));
+  element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key: value.slice(-1) || 'a' }));
+};
 const browserOptDropdownContainers = () => [...document.querySelectorAll([
   '.ant-select-dropdown:not(.ant-select-dropdown-hidden)',
   '.el-select-dropdown:not([style*="display: none"])',
@@ -479,7 +505,19 @@ function clickVisibleOption(option) {
   browserOptDispatchMouse(target.element);
   return { found: true, clicked: true, selectedText: target.rawText };
 }
-return { openDropdownByField, clickVisibleOption };
+function searchActiveDropdown(option) {
+  const active = document.querySelector('[data-browser-opt-active-select="true"]');
+  const containers = browserOptDropdownContainers().map((item) => item.element);
+  const input = active?.querySelector('input:not([type="hidden"]):not(:disabled), textarea:not(:disabled)')
+    || containers.map((container) => container.querySelector('input:not([type="hidden"]):not(:disabled), textarea:not(:disabled)')).find(Boolean)
+    || document.activeElement;
+  if (!(input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement)) {
+    return { searched: false };
+  }
+  browserOptInputValue(input, option);
+  return { searched: true };
+}
+return { openDropdownByField, clickVisibleOption, searchActiveDropdown };
 })()
 `;
 }
@@ -496,8 +534,8 @@ const browserOptVisible = (element) => {
 };
 const browserOptSwitchState = (element) => {
   const aria = element.getAttribute('aria-checked');
-  if (aria === 'true') return true;
-  if (aria === 'false') return false;
+  if (aria === 'true' || aria === '1') return true;
+  if (aria === 'false' || aria === '0') return false;
   if (element.checked === true) return true;
   if (element.checked === false) return false;
   const className = String(element.className || '');
@@ -510,9 +548,19 @@ const browserOptSwitchState = (element) => {
   if (hasFalsyText && !hasTruthyText) return false;
   return null;
 };
+const browserOptSwitchDesiredState = (element, option) => {
+  const optionText = normalizeBrowserOptText(option);
+  const checkedText = normalizeBrowserOptText(element.querySelector('.ant-switch-inner-checked, [class*="inner-checked"]')?.textContent || '');
+  const uncheckedText = normalizeBrowserOptText(element.querySelector('.ant-switch-inner-unchecked, [class*="inner-unchecked"]')?.textContent || '');
+  if (checkedText && (checkedText.includes(optionText) || optionText.includes(checkedText))) return true;
+  if (uncheckedText && (uncheckedText.includes(optionText) || optionText.includes(uncheckedText))) return false;
+  if (/^(是|开|开启|打开|启用|true|yes|on)$/i.test(String(option || '').trim())) return true;
+  if (/^(否|关|关闭|停用|禁用|false|no|off)$/i.test(String(option || '').trim())) return false;
+  return null;
+};
 const browserOptSwitches = () => [...document.querySelectorAll('[role="switch"], .ant-switch, button')]
   .filter((element) => browserOptVisible(element) && (element.getAttribute('role') === 'switch' || String(element.className || '').includes('switch')));
-function findSwitchByField(field) {
+function findSwitchByField(field, option) {
   const fieldText = normalizeBrowserOptText(field);
   const labels = [...document.querySelectorAll('body *')]
     .filter((element) => browserOptVisible(element) && normalizeBrowserOptText(element.textContent).includes(fieldText))
@@ -521,7 +569,13 @@ function findSwitchByField(field) {
   const switches = browserOptSwitches().map((element, index) => {
     const id = 'browser-opt-switch-' + index;
     element.setAttribute('data-browser-opt-switch-id', id);
-    return { element, id, rect: element.getBoundingClientRect(), checked: browserOptSwitchState(element) };
+    return {
+      element,
+      id,
+      rect: element.getBoundingClientRect(),
+      checked: browserOptSwitchState(element),
+      desiredChecked: browserOptSwitchDesiredState(element, option),
+    };
   });
   for (const label of labels) {
     const sameRow = switches
@@ -531,14 +585,14 @@ function findSwitchByField(field) {
         const xDistance = Math.abs((label.rect.left + label.rect.right) / 2 - (item.rect.left + item.rect.right) / 2);
         return { ...item, verticalOverlap, yDistance, xDistance };
       })
-      .filter((item) => item.checked !== null && (item.verticalOverlap > 0 || item.yDistance < Math.max(label.rect.height, item.rect.height)))
+      .filter((item) => item.checked !== null && item.desiredChecked !== null && (item.verticalOverlap > 0 || item.yDistance < Math.max(label.rect.height, item.rect.height)))
       .sort((a, b) => a.yDistance - b.yDistance || a.xDistance - b.xDistance);
     const target = sameRow[0];
     if (target) {
-      return { found: true, checked: target.checked, switchId: target.id };
+      return { found: true, checked: target.checked, desiredChecked: target.desiredChecked, switchId: target.id };
     }
   }
-  return { found: false, checked: null };
+  return { found: false, checked: null, desiredChecked: null };
 }
 return { findSwitchByField };
 })()
@@ -547,6 +601,29 @@ return { findSwitchByField };
 
 function isSwitchSelectable(role: string | null): boolean {
   return Boolean(role && /switch/i.test(role));
+}
+
+/** 只有 snapshot 明确把字段暴露为 switch 时，才启用开关 DOM 兜底，避免大表单误碰邻近控件。 */
+function snapshotHasSwitchField(snapshot: SnapshotEvidence, field: string | null): boolean {
+  if (!field) {
+    return false;
+  }
+
+  const normalizedField = normalizeVisibleText(field);
+  const lines = snapshot.text.split('\n');
+  return lines.some((line, index) => {
+    const normalizedLine = normalizeVisibleText(line);
+    if (/-\s*switch\s+"/i.test(line) && normalizedLine.includes(normalizedField)) {
+      return true;
+    }
+    if (!normalizedLine.includes(normalizedField)) {
+      return false;
+    }
+
+    return lines
+      .slice(index + 1, index + 5)
+      .some((followingLine) => /-\s*switch\s+"/i.test(followingLine));
+  });
 }
 
 /** 下拉选择通常会收起选项列表，只保留字段和值文案，因此补充基于页面文案的确认。 */
