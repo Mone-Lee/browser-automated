@@ -53,7 +53,10 @@ describe('browser-opt install', () => {
     });
 
     expect(result.status).toBe(0);
-    expect(fs.readFileSync(npmLog, 'utf-8')).toBe('install -g browser-opt@latest\ninstall -g agent-browser@latest\n');
+    expect(fs.readFileSync(npmLog, 'utf-8')).toBe(
+      'install -g browser-opt@latest --registry=https://registry.npmjs.org/\n'
+      + 'install -g agent-browser@latest --registry=https://registry.npmjs.org/\n',
+    );
     expect(fs.readFileSync(commandLog, 'utf-8')).toBe('--version\n');
     const installedSkillPath = path.join(home, '.agents/skills/browser-opt/SKILL.md');
     expect(fs.existsSync(installedSkillPath)).toBe(true);
@@ -91,7 +94,10 @@ describe('browser-opt install', () => {
     });
 
     expect(result.status).toBe(0);
-    expect(fs.readFileSync(npmLog, 'utf-8')).toBe('install -g browser-opt@latest\ninstall -g agent-browser@latest\n');
+    expect(fs.readFileSync(npmLog, 'utf-8')).toBe(
+      'install -g browser-opt@latest --registry=https://registry.npmjs.org/\n'
+      + 'install -g agent-browser@latest --registry=https://registry.npmjs.org/\n',
+    );
     expect(fs.readFileSync(commandLog, 'utf-8')).toBe('--version\ninstall\n');
     expect(fs.existsSync(path.join(home, '.claude/skills/browser-opt/SKILL.md'))).toBe(true);
     expect(result.stdout).toContain('已安装 Claude Code Skill');
@@ -124,7 +130,10 @@ describe('browser-opt install', () => {
     });
 
     expect(result.status).toBe(0);
-    expect(fs.readFileSync(npmLog, 'utf-8')).toBe('install -g browser-opt@latest\ninstall -g agent-browser@latest\n');
+    expect(fs.readFileSync(npmLog, 'utf-8')).toBe(
+      'install -g browser-opt@latest --registry=https://registry.npmjs.org/\n'
+      + 'install -g agent-browser@latest --registry=https://registry.npmjs.org/\n',
+    );
     expect(fs.existsSync(path.join(home, '.agents/skills/browser-opt/SKILL.md'))).toBe(true);
   });
 
@@ -159,7 +168,9 @@ describe('browser-opt install', () => {
     });
 
     expect(result.status).toBe(0);
-    expect(fs.readFileSync(npmLog, 'utf-8')).toBe('uninstall -g browser-opt agent-browser\n');
+    expect(fs.readFileSync(npmLog, 'utf-8')).toBe(
+      'uninstall -g browser-opt agent-browser --registry=https://registry.npmjs.org/\n',
+    );
     expect(fs.existsSync(skillDir)).toBe(false);
     expect(fs.existsSync(path.join(projectDir, '.browser-opt'))).toBe(false);
     expect(result.stdout).toContain('browser-opt 运行依赖已清理');

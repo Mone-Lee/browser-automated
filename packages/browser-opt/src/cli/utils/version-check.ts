@@ -161,7 +161,8 @@ function normalizeRegistryUrl(registry: string): string {
   return registry.endsWith('/') ? registry : `${registry}/`;
 }
 
-function readCurrentPackageVersion(): string {
+/** 读取当前 browser-opt CLI 所在包的版本号，供版本展示和更新检查共用。 */
+export function readCurrentPackageVersion(): string {
   const packagePath = path.join(resolvePackageDir(), 'package.json');
   const parsed = JSON.parse(fs.readFileSync(packagePath, 'utf-8')) as { version?: unknown };
   if (typeof parsed.version !== 'string') {

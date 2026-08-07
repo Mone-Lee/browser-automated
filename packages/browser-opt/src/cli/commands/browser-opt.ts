@@ -69,6 +69,7 @@ export async function cmdBrowserOpt(args: string[]): Promise<void> {
       installSystemDependencies,
       downloadBrowser: getBooleanFlag(parsed.flags, 'download-browser') || installSystemDependencies,
       installSkill: !getBooleanFlag(parsed.flags, 'skip-skill'),
+      registry: getStringFlag(parsed.flags, 'registry'),
       agent: getStringFlag(parsed.flags, 'agent'),
       skillsDir: getStringFlag(parsed.flags, 'skills-dir'),
     });

@@ -14,6 +14,7 @@ interface BrowserOptSetupOptions {
   installSystemDependencies: boolean;
   downloadBrowser: boolean;
   installSkill: boolean;
+  registry?: string;
   agent?: string;
   skillsDir?: string;
 }
@@ -29,6 +30,7 @@ interface BrowserOptUninstallOptions {
 const AGENT_BROWSER_PACKAGE = 'agent-browser@latest';
 const BROWSER_OPT_PACKAGE = 'browser-opt@latest';
 const AGENT_BROWSER_INSTALL_HINT = '请先安装 agent-browser，例如：npm install -g agent-browser。';
+const DEFAULT_NPM_REGISTRY = 'https://registry.npmjs.org/';
 
 /** 安装或更新 browser-opt 的外部运行时，并把随包发布的 Skill 放到目标 Agent 目录。 */
 export function setupBrowserOpt(options: BrowserOptSetupOptions): void {
@@ -36,8 +38,8 @@ export function setupBrowserOpt(options: BrowserOptSetupOptions): void {
     throw new Error('--download-browser 需要同时安装运行时，请移除 --skip-runtime。');
   }
   if (options.installRuntime) {
-    installBrowserOptRuntime();
-    installAgentBrowserRuntime();
+    installBrowserOptRuntime(options.registry);
+    installAgentBrowserRuntime(options.registry);
     verifyAgentBrowserRuntime();
   }
 
@@ -94,8 +96,8 @@ export function uninstallBrowserOpt(options: BrowserOptUninstallOptions): void {
 }
 
 /** 通过 npm 全局安装或更新 browser-opt，让 Skill 日常调用无需再执行 npx。 */
-function installBrowserOptRuntime(): void {
-  const result = spawnNpm(['install', '-g', BROWSER_OPT_PACKAGE]);
+function installBrowserOptRuntime(registry?: string): void {
+  const result = spawnNpm(['install', '-g', BROWSER_OPT_PACKAGE], registry);
   if (result.error) {
     throw new Error(`无法安装 browser-opt：${result.error.message}。`);
   }
@@ -105,8 +107,8 @@ function installBrowserOptRuntime(): void {
 }
 
 /** 通过 npm 全局安装或更新外部浏览器运行时，避免普通 Workflow 调用重复拉取。 */
-function installAgentBrowserRuntime(): void {
-  const result = spawnNpm(['install', '-g', AGENT_BROWSER_PACKAGE]);
+function installAgentBrowserRuntime(registry?: string): void {
+  const result = spawnNpm(['install', '-g', AGENT_BROWSER_PACKAGE], registry);
   if (result.error) {
     throw new Error(`无法安装 agent-browser：${result.error.message}。`);
   }
@@ -137,11 +139,12 @@ function verifyAgentBrowserRuntime(): void {
   }
 }
 
-function spawnNpm(args: string[]): ReturnType<typeof spawnSync> {
+function spawnNpm(args: string[], registry = DEFAULT_NPM_REGISTRY): ReturnType<typeof spawnSync> {
+  const commandArgs = [...args, `--registry=${registry}`];
   if (process.env.npm_execpath) {
-    return spawnSync(process.execPath, [process.env.npm_execpath, ...args], { stdio: 'inherit' });
+    return spawnSync(process.execPath, [process.env.npm_execpath, ...commandArgs], { stdio: 'inherit' });
   }
-  return spawnSync('npm', args, { stdio: 'inherit' });
+  return spawnSync('npm', commandArgs, { stdio: 'inherit' });
 }
 
 /** 从编译后的 CLI 位置反查 npm 包内随包发布的 browser-opt Skill。 */
