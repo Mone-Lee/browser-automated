@@ -34,7 +34,7 @@ import {
 } from '../utils/args.js';
 import { BROWSER_OPT_USAGE, HANDOFF_DONE_ANSWERS, LIVE_VIEWPORT_DASHBOARD_URL } from '../utils/constants.js';
 import { printBrowserOptResult } from '../utils/output.js';
-import { checkBrowserOptUpdate, printBrowserOptUpdateCheck } from '../utils/version-check.js';
+import { checkBrowserOptUpdate, printBrowserOptUpdateCheck, readCurrentPackageVersion } from '../utils/version-check.js';
 import { setupBrowserOpt, uninstallBrowserOpt } from './setup.js';
 
 interface BrowserOptDetachedRun {
@@ -60,6 +60,10 @@ const HANDOFF_SIGNAL_POLL_INTERVAL_MS = 250;
 export async function cmdBrowserOpt(args: string[]): Promise<void> {
   const parsed = parseCliArgs(args);
   const [subcommand] = parsed.positionals;
+  if (getBooleanFlag(parsed.flags, 'version') || subcommand === 'version') {
+    console.log(readCurrentPackageVersion());
+    return;
+  }
   const positionalText = parsed.positionals.join(' ').trim();
   const isImmediateFlow = Boolean(extractBrowserOptUrl(positionalText));
   if ((subcommand === 'install' || subcommand === 'setup' || subcommand === 'update') && !isImmediateFlow) {

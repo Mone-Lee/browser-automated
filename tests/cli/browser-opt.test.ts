@@ -194,6 +194,21 @@ function findReportJsonFiles(dir: string): string[] {
 }
 
 describe('browser-opt CLI', () => {
+  it('prints the current package version with --version and version', () => {
+    const projectRoot = path.resolve(import.meta.dirname, '../..');
+    const expectedVersion = JSON.parse(
+      fs.readFileSync(path.join(projectRoot, 'packages/browser-opt/package.json'), 'utf-8'),
+    ) as { version: string };
+
+    const flagResult = runCli(['browser-opt', '--version']);
+    const subcommandResult = runCli(['browser-opt', 'version']);
+
+    expect(flagResult.status).toBe(0);
+    expect(flagResult.stdout.trim()).toBe(expectedVersion.version);
+    expect(subcommandResult.status).toBe(0);
+    expect(subcommandResult.stdout.trim()).toBe(expectedVersion.version);
+  });
+
   it('checks npm latest version with a short-lived local cache', async () => {
     const cacheHome = makeTempDir();
     const originalCacheHome = process.env.XDG_CACHE_HOME;

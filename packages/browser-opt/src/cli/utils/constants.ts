@@ -11,6 +11,8 @@ export const BROWSER_OPT_USAGE = `使用方式：
   npx browser-opt@latest install [--registry <url>] [--download-browser] [--with-deps] [--skip-runtime] [--skip-skill] [--agent agents|claude] [--skills-dir <目录>]
   browser-opt update [--registry <url>] [--download-browser] [--with-deps] [--skip-runtime] [--skip-skill] [--agent agents|claude] [--skills-dir <目录>]
   browser-opt uninstall [--all-data] [--skip-runtime] [--skip-skill] [--agent agents|claude] [--skills-dir <目录>]
+  browser-opt --version
+  browser-opt version
   browser-opt check-update [--json] [--no-cache]
   browser-opt <自然语言流程> [--profile <name>] [--state <path>] [--session <id>] [--no-live-viewport] [--output-dir <dir>] [--agent-chat]
   browser-opt save "<名称>" --flow "<完整流程>" [--workflow-dir <目录>] [--force]
