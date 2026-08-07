@@ -132,20 +132,41 @@ const fieldElements = (field) => {
     .sort((a, b) => a.textLength - b.textLength || (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height));
 };
 const closestFieldContainer = (element) => element.closest('.ant-form-item, .el-form-item, .form-item, [class*="form-item"], [class*="FormItem"], [class*="field"], [class*="Field"]');
-const nearestByPosition = (fields, targets) => {
-  const scored = [];
-  for (const field of fields) {
-    for (const item of targets) {
-      const rect = item.element.getBoundingClientRect();
-      if (rect.top < field.rect.top - 8) continue;
-      const verticalGap = Math.max(0, rect.top - field.rect.bottom);
-      if (verticalGap > 260) continue;
-      const horizontalGap = Math.abs(rect.left - field.rect.left);
-      scored.push({ element: item.element, score: verticalGap * 10 + horizontalGap });
+const actionableDescendants = (root, predicate) => [...root.querySelectorAll('*')].filter((element) => visible(element) && predicate(element));
+const collectSiblingScope = (element) => {
+  const scope = [];
+  let current = element;
+  for (let depth = 0; current && depth < 3; depth += 1) {
+    if (visible(current)) {
+      scope.push(current);
+    }
+
+    const parent = current.parentElement;
+    if (!parent) break;
+    const siblings = [...parent.children];
+    const currentIndex = siblings.indexOf(current);
+    for (let offset = 1; offset <= 2; offset += 1) {
+      const previous = siblings[currentIndex - offset];
+      const next = siblings[currentIndex + offset];
+      if (previous && visible(previous)) scope.push(previous);
+      if (next && visible(next)) scope.push(next);
+    }
+    current = parent;
+  }
+  return [...new Set(scope)];
+};
+const structurallyScopedTargets = (fieldElement, predicate) => {
+  for (const root of collectSiblingScope(fieldElement)) {
+    if (predicate(root)) {
+      return root;
+    }
+
+    const descendant = actionableDescendants(root, predicate)[0];
+    if (descendant) {
+      return descendant;
     }
   }
-  scored.sort((a, b) => a.score - b.score);
-  return scored[0]?.element || null;
+  return null;
 };
 const scopedTarget = (field, predicate) => {
   const fields = fieldElements(field);
@@ -155,9 +176,13 @@ const scopedTarget = (field, predicate) => {
     if (scoped.length > 0) {
       return { element: scoped[0], fields };
     }
+
+    const structural = structurallyScopedTargets(fieldItem.element, predicate);
+    if (structural) {
+      return { element: structural, fields };
+    }
   }
-  const targets = candidates().filter(predicate).map((element) => ({ element }));
-  return { element: nearestByPosition(fields, targets), fields };
+  return { element: null, fields };
 };
 function clickFieldScopedTarget(field, target) {
   const targetText = normalize(target);

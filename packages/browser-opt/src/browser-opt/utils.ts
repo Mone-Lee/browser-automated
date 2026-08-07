@@ -570,7 +570,7 @@ function parseSnapshotTextLines(text: string): SnapshotTextLine[] {
     .filter((line): line is SnapshotTextLine => Boolean(line));
 }
 
-/** 从目标文案之后按文本顺序查找同级或子级 clickable，越过目标结构块后停止。 */
+/** 从目标文案之后查找子级或紧邻同级 clickable，越过目标结构块后停止。 */
 function findFirstFollowingClickableLine(
   lines: SnapshotTextLine[],
   anchor: SnapshotTextLine,
@@ -591,7 +591,34 @@ function findFirstFollowingClickableLine(
     }
 
     if (line.indent === anchor.indent) {
+      const descendant = findFirstDescendantClickableLine(lines, line, normalizedFollowingTarget);
+      if (descendant) {
+        return descendant;
+      }
       break;
+    }
+  }
+
+  return null;
+}
+
+/** 同级容器本身不可点时，继续在这个兄弟节点的子树里寻找目标控件。 */
+function findFirstDescendantClickableLine(
+  lines: SnapshotTextLine[],
+  root: SnapshotTextLine,
+  normalizedFollowingTarget: string,
+): SnapshotTextLine | null {
+  for (const line of lines) {
+    if (line.index <= root.index) {
+      continue;
+    }
+
+    if (line.indent <= root.indent) {
+      break;
+    }
+
+    if (isClickableNode(line.node) && !isTextboxRole(line.node.role) && matchesOptionalTarget(line.node, normalizedFollowingTarget)) {
+      return line;
     }
   }
 
@@ -774,16 +801,52 @@ function findScopedSwitchControl(
   return null;
 }
 
-/** 在字段文案后面的短范围内寻找下拉控件，适配字段名和控件值分离的表单布局。 */
+/** 在字段文案后面的子级或紧邻同级里寻找下拉控件，适配水平和上下表单布局。 */
 function findScopedSelectableFieldRef(text: string, field: string): string | null {
   const lines = text.split('\n');
   const normalizedField = normalizeMatchText(field);
-  const fieldIndex = lines.findIndex((line) => normalizeMatchText(line).includes(normalizedField));
-  if (fieldIndex < 0) {
+  const fieldCandidate = lines
+    .map((line, index) => ({ index, parsed: parseSnapshotLine(line), indent: line.match(/^\s*/)?.[0].length ?? 0 }))
+    .filter((item): item is { index: number; parsed: SnapshotNode; indent: number } => {
+      const label = normalizeMatchText(item.parsed?.label ?? '');
+      return Boolean(label) && label.includes(normalizedField);
+    })
+    .sort((a, b) => rankNodeMatch(a.parsed, normalizedField) - rankNodeMatch(b.parsed, normalizedField))[0];
+  if (!fieldCandidate) {
     return null;
   }
 
-  for (let index = fieldIndex + 1; index < Math.min(lines.length, fieldIndex + 6); index += 1) {
+  if (isExpandableSelectRole(fieldCandidate.parsed.role) && !fieldCandidate.parsed.disabled) {
+    return fieldCandidate.parsed.ref;
+  }
+
+  for (let index = fieldCandidate.index + 1; index < Math.min(lines.length, fieldCandidate.index + 6); index += 1) {
+    const indent = lines[index]?.match(/^\s*/)?.[0].length ?? 0;
+    const parsed = parseSnapshotLine(lines[index]);
+    if (parsed && indent <= fieldCandidate.indent && !isExpandableSelectRole(parsed.role)) {
+      const descendant = findFirstDescendantSelectableRef(lines, index);
+      if (descendant) {
+        return descendant;
+      }
+      break;
+    }
+    if (parsed && isExpandableSelectRole(parsed.role) && !parsed.disabled) {
+      return parsed.ref;
+    }
+  }
+
+  return null;
+}
+
+/** 同级容器本身不是下拉时，在该兄弟节点的子树里继续寻找下拉控件。 */
+function findFirstDescendantSelectableRef(lines: string[], rootIndex: number): string | null {
+  const rootIndent = lines[rootIndex]?.match(/^\s*/)?.[0].length ?? 0;
+  for (let index = rootIndex + 1; index < lines.length; index += 1) {
+    const indent = lines[index]?.match(/^\s*/)?.[0].length ?? 0;
+    if (indent <= rootIndent) {
+      break;
+    }
+
     const parsed = parseSnapshotLine(lines[index]);
     if (parsed && isExpandableSelectRole(parsed.role) && !parsed.disabled) {
       return parsed.ref;

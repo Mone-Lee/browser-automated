@@ -11,7 +11,7 @@ import {
   extractBrowserOptUrl,
   splitBrowserOptSteps,
 } from '../../packages/browser-opt/dist/browser-opt/runner/index.js';
-import { findClickableRef, parseDeterministicAction } from '../../packages/browser-opt/dist/browser-opt/utils.js';
+import { findClickableRef, findSelectableFieldRef, parseDeterministicAction } from '../../packages/browser-opt/dist/browser-opt/utils.js';
 import type { BrowserAgent } from '#browser-core/agent';
 import type { AgentOptions } from '#browser-core';
 
@@ -311,6 +311,82 @@ describe('browser-opt parsing', () => {
     expect(findClickableRef(snapshot, '请选择', '商品类目')).toBe('e1');
     expect(findClickableRef(snapshot, '请选择', '供应商')).toBe('e2');
     expect(findClickableRef(snapshot, '请选择', '不存在字段')).toBeNull();
+  });
+
+  it('finds click targets inside a sibling container of the field label', () => {
+    const snapshot = {
+      output: snapshotJson('', {
+        f1: { role: 'StaticText', name: '商品类目' },
+        c1: { role: 'generic', name: '' },
+        e1: { role: 'button', name: '请选择' },
+      }),
+      text: [
+        '- StaticText "商品类目" [ref=f1]',
+        '- generic "" [ref=c1]',
+        '  - button "请选择" [ref=e1]',
+      ].join('\n'),
+      nodeCount: 3,
+    };
+
+    expect(findClickableRef(snapshot, '请选择', '商品类目')).toBe('e1');
+  });
+
+  it('returns the current combobox line when the field name is on the select itself', () => {
+    const snapshot = {
+      output: snapshotJson('', {
+        e100: { role: 'generic', name: '请选择' },
+        e123: { role: 'generic', name: '请选择' },
+        e162: { role: 'combobox', name: '* 对接负责人 :' },
+        e101: { role: 'textbox', name: '生产厂商 :' },
+        e102: { role: 'button', name: '查看示例' },
+      }),
+      text: [
+        '- generic "请选择" [ref=e100] clickable [cursor:pointer]',
+        '  - generic "请选择" [ref=e123] clickable [onclick]',
+        '    - combobox "* 对接负责人 :" [expanded=false, required, ref=e162]',
+        '- textbox "生产厂商 :" [ref=e101]',
+        '- button "查看示例" [ref=e102]',
+      ].join('\n'),
+      nodeCount: 5,
+    };
+
+    expect(findSelectableFieldRef(snapshot, '对接负责人')).toBe('e162');
+  });
+
+  it('finds a select field ref inside a sibling container of the field label', () => {
+    const snapshot = {
+      output: snapshotJson('', {
+        f1: { role: 'StaticText', name: '对接负责人' },
+        c1: { role: 'generic', name: '' },
+        e162: { role: 'combobox', name: '请选择' },
+      }),
+      text: [
+        '- StaticText "对接负责人" [ref=f1]',
+        '- generic "" [ref=c1]',
+        '  - combobox "请选择" [expanded=false, ref=e162]',
+      ].join('\n'),
+      nodeCount: 3,
+    };
+
+    expect(findSelectableFieldRef(snapshot, '对接负责人')).toBe('e162');
+  });
+
+  it('does not cross into unrelated buttons while resolving a select field ref', () => {
+    const snapshot = {
+      output: snapshotJson('', {
+        f1: { role: 'StaticText', name: '对接负责人' },
+        e101: { role: 'textbox', name: '生产厂商 :' },
+        e102: { role: 'button', name: '查看示例' },
+      }),
+      text: [
+        '- StaticText "对接负责人" [ref=f1]',
+        '- textbox "生产厂商 :" [ref=e101]',
+        '- button "查看示例" [ref=e102]',
+      ].join('\n'),
+      nodeCount: 3,
+    };
+
+    expect(findSelectableFieldRef(snapshot, '对接负责人')).toBeNull();
   });
 
   it('prefers specific clickable nodes over large containers that contain the target text', () => {
