@@ -1611,11 +1611,14 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps[0].verification).not.toContain('开关状态');
   });
 
-  it('does not click a stale snapshot ref after an opened DOM dropdown misses the option', async () => {
+  it('falls back to snapshot refs after an opened DOM dropdown misses the option', async () => {
     const outputDir = makeTempDir();
     const closedSnapshot = [
       '- StaticText "对接负责人" [ref=f1]',
       '- combobox "请选择" [ref=e102]',
+    ].join('\n');
+    const openedSnapshot = [
+      '- option "嘻嘻嘻" [ref=e203]',
     ].join('\n');
     const agent = buildAgent({
       evaluate: (script) => {
@@ -1636,9 +1639,11 @@ describe('BrowserOptRunner', () => {
           f1: { role: 'StaticText', name: '对接负责人' },
           e102: { role: 'combobox', name: '请选择' },
         }),
-        snapshotJson(closedSnapshot, {
-          f1: { role: 'StaticText', name: '对接负责人' },
-          e102: { role: 'combobox', name: '请选择' },
+        snapshotJson(openedSnapshot, {
+          e203: { role: 'option', name: '嘻嘻嘻' },
+        }),
+        snapshotJson('对接负责人 嘻嘻嘻', {
+          e203: { role: 'option', name: '嘻嘻嘻', checked: true },
         }),
       ],
     });
@@ -1646,9 +1651,10 @@ describe('BrowserOptRunner', () => {
 
     const result = await runner.run('测试 https://example.com。\n\n目标：\n1. “对接负责人”选择“嘻嘻嘻”', { outputDir });
 
-    expect(result.passed).toBe(false);
-    expect(result.report.steps[0].error).toContain('无法找到选项：对接负责人 -> 嘻嘻嘻');
-    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalledWith('e102');
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e102');
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e203');
+    expect(result.report.steps[0].actionOutput).toContain('open select @e102');
   });
 
   it('searches an opened dropdown before failing when the option is not visible', async () => {

@@ -58,9 +58,6 @@ export function executeSelectOptionAction(
   if (dropdownDomTarget.output) {
     return dropdownDomTarget.output;
   }
-  if (dropdownDomTarget.attempted && !option.ref) {
-    throw new Error(`无法找到选项：${fieldLabel} -> ${action.option}`);
-  }
   if (!option.ref) {
     const fieldRef = findSelectableFieldRef(searchSnapshot, action.field);
     if (fieldRef) {
