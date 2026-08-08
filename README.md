@@ -133,6 +133,25 @@ browser-opt save "示例首页验证流程" --flow "测试 https://example.com�
 browser-opt run "执行示例首页验证流程"
 ```
 
+也可以完全通过 Skill 保存和执行。保存请求只会写入 Workflow，不会打开浏览器或立即执行：
+
+```text
+/browser-opt 把下面的流程保存为“示例首页验证流程”，先不要执行。
+
+目标页面：https://example.com
+
+目标：
+1. 验证页面包含“Example Domain”。
+2. 点击“More information”链接。
+3. 验证跳转后的页面可以正常访问。
+```
+
+保存成功后，用一句话执行：
+
+```text
+/browser-opt 执行示例首页验证流程
+```
+
 Workflow 默认保存到调用项目的 `.browser-opt/workflows/`；运行证据默认保存到 `.browser-opt/artifacts/`。
 
 ### browser-e2e：E2E 测试复用与 Playwright 生成

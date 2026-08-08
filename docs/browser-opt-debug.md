@@ -78,6 +78,22 @@ browser-opt save "创建安选公开直播流程" --flow "测试 https://example
 2. 验证页面显示直播间名称。"
 ```
 
+也可以直接用 Skill 表达保存意图。Skill 会把流程转换为一次 `browser-opt save`，只保存文件，
+不会打开浏览器或执行流程：
+
+```text
+/browser-opt 把下面的流程保存为“创建安选公开直播流程”，先不要执行。
+
+目标页面：https://example.com/live/create
+
+目标：
+1. 验证页面显示直播间名称。
+2. 在“直播间名称”输入“自动化测试直播间”。
+3. 验证页面显示“自动化测试直播间”。
+```
+
+保存成功后，Skill 应返回 Workflow 名称、文件路径以及可复用的执行短句。
+
 同名流程默认拒绝覆盖；确认更新时显式添加 `--force`。如需使用其他目录，
 保存、匹配和运行时都传入同一个 `--workflow-dir <目录>`。
 
@@ -89,7 +105,7 @@ browser-opt match "执行创建安选公开直播流程" --json
 browser-opt run "执行创建安选公开直播流程"
 ```
 
-在 Codex 中可以直接输入：
+在 Codex 中执行刚才保存的 Workflow：
 
 ```text
 /browser-opt 执行创建安选公开直播流程

@@ -1,7 +1,6 @@
 ---
 name: browser-opt
-description: Execute natural-language browser flows with agent-browser and produce simplified PASS/FAIL results.
-summary: Run deterministic browser execution loops with screenshots, JSON snapshots, retries, and concise success output.
+description: Save, match, and execute project-level natural-language browser workflows with agent-browser, including one-shot flows, reusable Workflow requests, interactive handoff, and simplified PASS/FAIL evidence.
 ---
 
 # browser-opt skill
@@ -125,15 +124,46 @@ browser-opt uninstall
 Use `--all-data` only when the current project's `.browser-opt` states, artifacts, and handoff records should
 also be deleted.
 
-Save a complete flow without executing it:
+Treat an explicit save request as Workflow management, not browser execution. Extract the
+Workflow name and the complete natural-language flow from the request, then run `save`.
+Do not open Chrome, call `start`, or execute the saved flow while saving it:
 
 ```bash
 browser-opt save "创建安选公开直播流程" --flow "<full natural language flow>"
 browser-opt save "创建安选公开直播流程" --flow "<full natural language flow>" --workflow-dir ./custom/workflows
 ```
 
-Saving an existing name fails by default. Only pass `--force` when the user
-explicitly wants to replace it.
+The flow must include one target URL and all reusable business steps and verification
+points. Preserve concrete test data, upload URLs, and handoff instructions. If the request
+does not provide a Workflow name or target URL, ask for the missing value instead of
+inventing it. Saving an existing name fails by default. Only pass `--force` when the user
+explicitly asks to overwrite or update that Workflow. After saving, report the Workflow
+name and returned file path, and show the short `/browser-opt` request that can execute it.
+
+Example Skill request for saving without execution:
+
+```text
+/browser-opt 把下面的流程保存为“示例首页验证流程”，先不要执行。
+
+目标页面：https://example.com
+
+目标：
+1. 验证页面包含“Example Domain”。
+2. 点击“More information”链接。
+3. 验证跳转后的页面可以正常访问。
+```
+
+Translate it into a single save command:
+
+```bash
+browser-opt save "示例首页验证流程" --flow "测试 https://example.com。\n\n目标：\n1. 验证页面包含“Example Domain”。\n2. 点击“More information”链接。\n3. 验证跳转后的页面可以正常访问。"
+```
+
+Then the user can execute the saved Workflow with this Skill request:
+
+```text
+/browser-opt 执行示例首页验证流程
+```
 
 Saved workflow files are structured JSON, not a single `flow` string. The
 persisted schema uses `target.url` as the page entrypoint plus a `steps` string
@@ -156,7 +186,7 @@ do not include a first step such as "打开页面":
 }
 ```
 
-When `/browser-opt` is followed by a short request without a URL, such as:
+When `/browser-opt` is followed by an execution request without a URL, such as:
 
 ```text
 /browser-opt 执行创建安选公开直播流程
