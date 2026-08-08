@@ -29,6 +29,15 @@ function createSetupCommandStubs(agentBrowserLogPath: string, npmLogPath: string
   return directory;
 }
 
+function createNpmExecStub(directory: string, npmLogPath: string): string {
+  const npmExecPath = path.join(directory, 'npm-cli.js');
+  fs.writeFileSync(
+    npmExecPath,
+    `const { spawnSync } = require('node:child_process');\nconst fs = require('node:fs');\nconst path = require('node:path');\nconst args = process.argv.slice(2);\nfs.appendFileSync(${JSON.stringify(npmLogPath)}, 'exec:' + args.join(' ') + '\\n');\nconst npmPath = path.join(${JSON.stringify(directory)}, 'npm');\nconst result = spawnSync(npmPath, args, { stdio: 'inherit' });\nprocess.exit(result.status ?? 1);\n`,
+  );
+  return npmExecPath;
+}
+
 describe('browser-opt install', () => {
   it('checks the existing standard Chrome without downloading a test browser', () => {
     const projectRoot = path.resolve(import.meta.dirname, '../..');
@@ -134,6 +143,38 @@ describe('browser-opt install', () => {
       'install -g browser-opt@latest --registry=https://registry.npmjs.org/\n'
       + 'install -g agent-browser@latest --registry=https://registry.npmjs.org/\n',
     );
+    expect(fs.existsSync(path.join(home, '.agents/skills/browser-opt/SKILL.md'))).toBe(true);
+  });
+
+  it('updates the currently running installation prefix when browser-opt comes from another global prefix', () => {
+    const projectRoot = path.resolve(import.meta.dirname, '../..');
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-opt-update-prefix-home-'));
+    const commandLog = path.join(home, 'agent-browser.log');
+    const npmLog = path.join(home, 'npm.log');
+    temporaryDirectories.push(home);
+    const chromePath = path.join(home, 'Google Chrome');
+    fs.writeFileSync(chromePath, 'stub');
+    fs.chmodSync(chromePath, 0o755);
+    const binDirectory = createSetupCommandStubs(commandLog, npmLog);
+    const npmExecPath = createNpmExecStub(binDirectory, npmLog);
+
+    const result = spawnSync('node', [
+      path.join(projectRoot, 'packages/browser-opt/dist/cli/browser-opt.js'),
+      'update',
+    ], {
+      cwd: projectRoot,
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        HOME: home,
+        npm_execpath: npmExecPath,
+        PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
+        AGENT_BROWSER_EXECUTABLE_PATH: chromePath,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(fs.readFileSync(npmLog, 'utf-8')).toContain('--prefix');
     expect(fs.existsSync(path.join(home, '.agents/skills/browser-opt/SKILL.md'))).toBe(true);
   });
 

@@ -63,6 +63,12 @@ browser-opt update
 browser-opt update --agent claude
 ```
 
+`browser-opt update` 会优先更新当前正在执行这条命令的那份安装前缀，避免机器上存在多个全局前缀时把包装到别处。只有当当前 shell 仍解析到旧二进制、`update` 不可用，或你明确要绕过现有全局命令时，才回退到下面这条安装命令：
+
+```bash
+npx browser-opt@latest install --registry=https://registry.npmjs.org/
+```
+
 #### 卸载
 
 卸载首次安装写入的全局 CLI、运行时和 Skill：
@@ -85,7 +91,7 @@ browser-opt uninstall --all-data
 
 #### 环境说明
 
-`install`、`update` 和试用命令默认使用系统标准 Chrome，不会下载 Chrome for Testing。机器没有标准 Chrome 且接受测试浏览器时，安装或更新可追加 `--download-browser`；试用前则需自行准备 Chrome。
+`install`、`update` 和试用命令默认使用系统标准 Chrome，不会下载 Chrome for Testing。机器没有标准 Chrome 且接受测试浏览器时，安装或更新可追加 `--download-browser`；试用前则需自行准备 Chrome。若执行 `install` 或 `update` 后 shell 仍指向旧的 `browser-opt`，请按命令输出提示调整 PATH 或重开终端。
 
 ### browser-e2e
 

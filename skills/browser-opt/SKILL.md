@@ -59,7 +59,7 @@ Every execution must follow these rules:
 
 - Before each `/browser-opt` execution, run `browser-opt check-update --json` once. If it returns
   `outdated`, tell the user the current and latest versions and recommend
-  `browser-opt update`; then continue the
+  `browser-opt update`; if the shell still points to a stale binary or `update` 不可用，再回退到 `npx browser-opt@latest install`；然后继续
   requested workflow unless the user asks to update first. If it returns `unknown`, continue without blocking.
 - Always open the actual system Chrome browser for the run. Do not open or operate inside the agent tool's built-in browser, including the Copilot/Codex in-app browser or any agent-browser dashboard/preview window.
 - Strictly run an `open -> snapshot --json -> deterministic act -> re-snapshot` loop.
@@ -109,7 +109,7 @@ the system's standard Chrome and installs into the shared Agent Skills directory
 Codex, GitHub Copilot, Gemini CLI, and Qoder share this default directory. Use
 `--agent claude` for Claude Code, `--skills-dir <dir>` for another agent root, or
 `--skip-runtime` when only the Skill should be installed. Update all installed
-components later with `browser-opt update`.
+components later with `browser-opt update`；如果当前 shell 仍指向旧二进制，再回退到 `npx browser-opt@latest install`。
 Use the global command for ordinary invocations on macOS, Linux, and Windows:
 
 ```bash
