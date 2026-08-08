@@ -1291,6 +1291,30 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps[0].verification).toContain('已确认日期字段：直播时间=2026-07-15');
   });
 
+  it('uses the DatePicker path when the quoted field name contains the fill verb', async () => {
+    const outputDir = makeTempDir();
+    const dateSnapshot = '- textbox "* 填写出行人时间 :" [required, ref=e20]';
+    const refs = {
+      e20: { role: 'textbox', name: '* 填写出行人时间 :', placeholder: '请选择日期' },
+    };
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(dateSnapshot, refs),
+        snapshotJson(`${dateSnapshot}: 2026-08-30`, refs),
+      ],
+      evaluate: vi.fn().mockReturnValue(JSON.stringify({ found: true, value: '2026-08-30' })),
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. “填写出行人时间”选择“2026-08-30”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e20', '2026-08-30');
+    expect(result.report.steps[0].actionOutput).toContain('datepicker fill @e20 填写出行人时间=2026-08-30');
+    expect(result.report.steps[0].verification).toContain('已确认日期字段：填写出行人时间=2026-08-30');
+  });
+
   it('normalizes compact month-day date descriptions for date fields', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-14T10:00:00+08:00'));

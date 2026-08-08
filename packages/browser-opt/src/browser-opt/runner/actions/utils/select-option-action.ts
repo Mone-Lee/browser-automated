@@ -392,6 +392,8 @@ const browserOptCenterDistance = (a, b) => {
   return Math.abs(ax - bx) + Math.abs(ay - by);
 };
 const browserOptDispatchMouse = (element) => {
+  element.scrollIntoView({ block: 'center', inline: 'nearest' });
+  element.focus?.();
   const rect = element.getBoundingClientRect();
   const init = {
     bubbles: true,
@@ -400,7 +402,10 @@ const browserOptDispatchMouse = (element) => {
     clientX: (rect.left + rect.right) / 2,
     clientY: (rect.top + rect.bottom) / 2,
   };
+  const PointerEventCtor = window.PointerEvent || MouseEvent;
+  element.dispatchEvent(new PointerEventCtor('pointerdown', init));
   element.dispatchEvent(new MouseEvent('mousedown', init));
+  element.dispatchEvent(new PointerEventCtor('pointerup', init));
   element.dispatchEvent(new MouseEvent('mouseup', init));
   element.dispatchEvent(new MouseEvent('click', init));
 };
