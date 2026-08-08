@@ -164,6 +164,10 @@ function printInstalledBrowserOptVersion(registry?: string, installPrefix?: stri
   }
 }
 
+/**
+ * install/update 完成后，通过 npm prefix 反查本次落盘的全局 bin 目录。
+ * 这样可以避免 shell 仍指向旧路径时误读版本，先确认“新二进制实际在哪里”。
+ */
 function resolveInstalledBrowserOptBinary(registry?: string, installPrefix?: string): string | undefined {
   const prefix = captureNpmOutput(['prefix', '-g'], registry, installPrefix) ?? installPrefix;
   if (!prefix) {
@@ -175,6 +179,10 @@ function resolveInstalledBrowserOptBinary(registry?: string, installPrefix?: str
   return fs.existsSync(executablePath) ? executablePath : undefined;
 }
 
+/**
+ * 读取当前 shell 可执行解析结果，用于和“新安装路径”比对。
+ * 仅用于提示 PATH 漂移，不参与安装成功判定。
+ */
 function resolveShellBrowserOptPath(): string | undefined {
   const lookupCommand = process.platform === 'win32' ? 'where' : 'which';
   const lookupResult = spawnSync(lookupCommand, ['browser-opt'], { encoding: 'utf-8', stdio: 'pipe' });
@@ -187,6 +195,10 @@ function resolveShellBrowserOptPath(): string | undefined {
     .find((line) => line.length > 0);
 }
 
+/**
+ * update 模式优先使用“当前正在执行的安装前缀”。
+ * 目的是在多前缀环境（如 nvm/Homebrew/系统 npm 并存）里就地覆盖当前来源，减少更新后命令仍旧版本的概率。
+ */
 function resolveCurrentInstallPrefix(): string | undefined {
   const packageDir = resolveBundledPackageDir();
   const nodeModulesDir = path.dirname(packageDir);
@@ -204,6 +216,10 @@ function resolveCurrentInstallPrefix(): string | undefined {
   return parentDir;
 }
 
+/**
+ * 统一 npm 调用入口：优先复用 npm_execpath，兼容 npm/yarn/pnpm 代理启动场景。
+ * 这样 update/install 在被其它包管理器包装时仍能走同一执行链路。
+ */
 function spawnNpm(
   args: string[],
   registry = DEFAULT_NPM_REGISTRY,
@@ -216,6 +232,9 @@ function spawnNpm(
   return spawnSync('npm', commandArgs, { stdio: 'inherit' });
 }
 
+/**
+ * 只在需要读取 stdout 的场景（如 npm prefix -g）使用 pipe，避免把普通安装输出吞掉。
+ */
 function captureNpmOutput(args: string[], registry = DEFAULT_NPM_REGISTRY, installPrefix?: string): string | undefined {
   const commandArgs = withNpmTargetArgs(args, registry, installPrefix);
   const result = process.env.npm_execpath
@@ -228,6 +247,10 @@ function captureNpmOutput(args: string[], registry = DEFAULT_NPM_REGISTRY, insta
   return output || undefined;
 }
 
+/**
+ * 所有 npm 调用都统一附带 registry；仅在提供 installPrefix 时追加 --prefix。
+ * 这样可以保持参数顺序稳定，便于测试桩按行记录并断言。
+ */
 function withNpmTargetArgs(args: string[], registry: string, installPrefix?: string): string[] {
   const prefixArgs = installPrefix ? ['--prefix', installPrefix] : [];
   return [...args, ...prefixArgs, `--registry=${registry}`];
