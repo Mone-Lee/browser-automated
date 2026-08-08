@@ -38,6 +38,10 @@ function createNpmExecStub(directory: string, npmLogPath: string): string {
   return npmExecPath;
 }
 
+function readLoggedCommands(logPath: string): string[] {
+  return fs.readFileSync(logPath, 'utf-8').trim().split('\n').filter((line) => line.length > 0);
+}
+
 describe('browser-opt install', () => {
   it('checks the existing standard Chrome without downloading a test browser', () => {
     const projectRoot = path.resolve(import.meta.dirname, '../..');
@@ -62,10 +66,12 @@ describe('browser-opt install', () => {
     });
 
     expect(result.status).toBe(0);
-    expect(fs.readFileSync(npmLog, 'utf-8')).toBe(
-      'install -g browser-opt@latest --registry=https://registry.npmjs.org/\n'
-      + 'install -g agent-browser@latest --registry=https://registry.npmjs.org/\n',
-    );
+    const npmCommands = readLoggedCommands(npmLog);
+    expect(npmCommands.slice(0, 2)).toEqual([
+      'install -g browser-opt@latest --registry=https://registry.npmjs.org/',
+      'install -g agent-browser@latest --registry=https://registry.npmjs.org/',
+    ]);
+    expect(npmCommands).toContain('prefix -g --registry=https://registry.npmjs.org/');
     expect(fs.readFileSync(commandLog, 'utf-8')).toBe('--version\n');
     const installedSkillPath = path.join(home, '.agents/skills/browser-opt/SKILL.md');
     expect(fs.existsSync(installedSkillPath)).toBe(true);
@@ -103,10 +109,12 @@ describe('browser-opt install', () => {
     });
 
     expect(result.status).toBe(0);
-    expect(fs.readFileSync(npmLog, 'utf-8')).toBe(
-      'install -g browser-opt@latest --registry=https://registry.npmjs.org/\n'
-      + 'install -g agent-browser@latest --registry=https://registry.npmjs.org/\n',
-    );
+    const npmCommands = readLoggedCommands(npmLog);
+    expect(npmCommands.slice(0, 2)).toEqual([
+      'install -g browser-opt@latest --registry=https://registry.npmjs.org/',
+      'install -g agent-browser@latest --registry=https://registry.npmjs.org/',
+    ]);
+    expect(npmCommands).toContain('prefix -g --registry=https://registry.npmjs.org/');
     expect(fs.readFileSync(commandLog, 'utf-8')).toBe('--version\ninstall\n');
     expect(fs.existsSync(path.join(home, '.claude/skills/browser-opt/SKILL.md'))).toBe(true);
     expect(result.stdout).toContain('已安装 Claude Code Skill');
@@ -139,14 +147,16 @@ describe('browser-opt install', () => {
     });
 
     expect(result.status).toBe(0);
-    expect(fs.readFileSync(npmLog, 'utf-8')).toBe(
-      'install -g browser-opt@latest --registry=https://registry.npmjs.org/\n'
-      + 'install -g agent-browser@latest --registry=https://registry.npmjs.org/\n',
-    );
+    const npmCommands = readLoggedCommands(npmLog);
+    expect(npmCommands.slice(0, 2)).toEqual([
+      'install -g browser-opt@latest --registry=https://registry.npmjs.org/',
+      'install -g agent-browser@latest --registry=https://registry.npmjs.org/',
+    ]);
+    expect(npmCommands).toContain('prefix -g --registry=https://registry.npmjs.org/');
     expect(fs.existsSync(path.join(home, '.agents/skills/browser-opt/SKILL.md'))).toBe(true);
   });
 
-  it('updates the currently running installation prefix when browser-opt comes from another global prefix', () => {
+  it('keeps update compatible when npm_execpath is provided', () => {
     const projectRoot = path.resolve(import.meta.dirname, '../..');
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-opt-update-prefix-home-'));
     const commandLog = path.join(home, 'agent-browser.log');
@@ -174,7 +184,10 @@ describe('browser-opt install', () => {
     });
 
     expect(result.status).toBe(0);
-    expect(fs.readFileSync(npmLog, 'utf-8')).toContain('--prefix');
+    const npmCommands = readLoggedCommands(npmLog);
+    expect(npmCommands).toContain('exec:install -g browser-opt@latest --registry=https://registry.npmjs.org/');
+    expect(npmCommands).toContain('exec:install -g agent-browser@latest --registry=https://registry.npmjs.org/');
+    expect(npmCommands).toContain('exec:prefix -g --registry=https://registry.npmjs.org/');
     expect(fs.existsSync(path.join(home, '.agents/skills/browser-opt/SKILL.md'))).toBe(true);
   });
 
