@@ -91,11 +91,13 @@ export async function cmdBrowserOpt(args: string[]): Promise<void> {
     return;
   }
   if (subcommand === 'check-update' && !isImmediateFlow) {
+    const noCache = getBooleanFlag(parsed.flags, 'no-cache');
     const result = await checkBrowserOptUpdate({
       registry: getStringFlag(parsed.flags, 'registry'),
       timeoutMs: Number(getStringFlag(parsed.flags, 'timeout-ms')) || undefined,
       maxAgeMs: Number(getStringFlag(parsed.flags, 'max-age-ms')) || undefined,
-      noCache: getBooleanFlag(parsed.flags, 'no-cache'),
+      noCache,
+      backgroundOnCacheMiss: !noCache,
     });
     printBrowserOptUpdateCheck(result, getBooleanFlag(parsed.flags, 'json'));
     return;

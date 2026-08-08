@@ -3,6 +3,8 @@
  */
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -213,12 +215,21 @@ describe('browser-opt CLI', () => {
     const cacheHome = makeTempDir();
     const originalCacheHome = process.env.XDG_CACHE_HOME;
     process.env.XDG_CACHE_HOME = cacheHome;
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ version: '999.0.0' }), { status: 200 }));
-    vi.stubGlobal('fetch', fetchMock);
+    let requestCount = 0;
+    const server = createServer((_, response) => {
+      requestCount += 1;
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ version: '999.0.0' }));
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const { port } = server.address() as AddressInfo;
+    const registry = `http://127.0.0.1:${port}`;
 
     try {
-      const first = await checkBrowserOptUpdate({ maxAgeMs: 60_000 });
-      const second = await checkBrowserOptUpdate({ maxAgeMs: 60_000 });
+      const first = await checkBrowserOptUpdate({ registry, maxAgeMs: 60_000 });
+      const second = await checkBrowserOptUpdate({ registry, maxAgeMs: 60_000 });
 
       expect(first).toEqual(expect.objectContaining({
         status: 'outdated',
@@ -229,8 +240,126 @@ describe('browser-opt CLI', () => {
         status: 'outdated',
         latestVersion: '999.0.0',
       }));
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(requestCount).toBe(1);
     } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+      process.env.XDG_CACHE_HOME = originalCacheHome;
+    }
+  });
+
+  it('returns unknown quickly when registry check stalls', async () => {
+    const cacheHome = makeTempDir();
+    const originalCacheHome = process.env.XDG_CACHE_HOME;
+    process.env.XDG_CACHE_HOME = cacheHome;
+    const server = createServer(() => {
+      // 故意不返回响应体，用于模拟 registry 长时间无响应。
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const { port } = server.address() as AddressInfo;
+    const registry = `http://127.0.0.1:${port}`;
+
+    try {
+      const startedAt = Date.now();
+      const result = await checkBrowserOptUpdate({ registry, timeoutMs: 500, noCache: true });
+      const elapsedMs = Date.now() - startedAt;
+
+      expect(result.status).toBe('unknown');
+      expect(typeof result.error).toBe('string');
+      expect(elapsedMs).toBeLessThan(2000);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+      process.env.XDG_CACHE_HOME = originalCacheHome;
+    }
+  });
+
+  it('falls back to npm view when direct registry check cannot complete', async () => {
+    const cacheHome = makeTempDir();
+    const originalCacheHome = process.env.XDG_CACHE_HOME;
+    const originalNpmExecPath = process.env.npm_execpath;
+    process.env.XDG_CACHE_HOME = cacheHome;
+
+    const hangingServer = createServer(() => {
+      // 模拟直连 registry 不返回，触发 HTTP 路径超时。
+    });
+    await new Promise<void>((resolve) => {
+      hangingServer.listen(0, '127.0.0.1', resolve);
+    });
+    const { port } = hangingServer.address() as AddressInfo;
+    const registry = `http://127.0.0.1:${port}`;
+
+    const npmDir = makeTempDir();
+    const npmExecPath = path.join(npmDir, 'npm-cli.js');
+    const npmLogPath = path.join(npmDir, 'npm.log');
+    fs.writeFileSync(
+      npmExecPath,
+      `const fs = require('node:fs');\nconst args = process.argv.slice(2);\nfs.appendFileSync(${JSON.stringify(npmLogPath)}, args.join(' ') + '\\n');\nif (args[0] === 'view') { process.stdout.write('"999.0.0"'); process.exit(0); }\nprocess.exit(1);\n`,
+    );
+    process.env.npm_execpath = npmExecPath;
+
+    try {
+      const result = await checkBrowserOptUpdate({ registry, timeoutMs: 50, noCache: true });
+      expect(result.status).toBe('outdated');
+      expect(result.latestVersion).toBe('999.0.0');
+      const npmLog = fs.readFileSync(npmLogPath, 'utf-8');
+      expect(npmLog).toContain('view browser-opt version --json');
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        hangingServer.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+      if (originalNpmExecPath === undefined) {
+        delete process.env.npm_execpath;
+      } else {
+        process.env.npm_execpath = originalNpmExecPath;
+      }
+      process.env.XDG_CACHE_HOME = originalCacheHome;
+    }
+  });
+
+  it('returns immediately on cache miss when background refresh is enabled', async () => {
+    const cacheHome = makeTempDir();
+    const originalCacheHome = process.env.XDG_CACHE_HOME;
+    const originalDisableBackground = process.env.BROWSER_OPT_DISABLE_BACKGROUND_UPDATE_CHECK;
+    process.env.XDG_CACHE_HOME = cacheHome;
+    process.env.BROWSER_OPT_DISABLE_BACKGROUND_UPDATE_CHECK = '1';
+
+    try {
+      const startedAt = Date.now();
+      const result = await checkBrowserOptUpdate({ backgroundOnCacheMiss: true });
+      const elapsedMs = Date.now() - startedAt;
+
+      expect(result.status).toBe('unknown');
+      expect(result.error).toContain('scheduled in background');
+      expect(elapsedMs).toBeLessThan(1000);
+    } finally {
+      if (originalDisableBackground === undefined) {
+        delete process.env.BROWSER_OPT_DISABLE_BACKGROUND_UPDATE_CHECK;
+      } else {
+        process.env.BROWSER_OPT_DISABLE_BACKGROUND_UPDATE_CHECK = originalDisableBackground;
+      }
       process.env.XDG_CACHE_HOME = originalCacheHome;
     }
   });
