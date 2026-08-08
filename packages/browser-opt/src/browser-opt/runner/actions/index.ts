@@ -5,7 +5,7 @@ import type { BrowserAgent } from '#browser-core/agent';
 import type { DeterministicAction, SnapshotEvidence, DeterministicExecutionOptions } from '../../type.js';
 import { parseDeterministicAction } from '../../utils.js';
 import { executeClickAction } from './utils/click-action.js';
-import { executeFillAction } from './utils/fill-action.js';
+import { executeFillAction, verifyFillActionEffect } from './utils/fill-action.js';
 import { executeHandoffAction } from './utils/handoff-action.js';
 import { executeOpenAction } from './utils/open-action.js';
 import { executeSelectOptionAction, verifySelectOptionActionEffect } from './utils/select-option-action.js';
@@ -61,9 +61,13 @@ export function verifyDeterministicActionEffect(
   action: DeterministicAction,
   afterSnapshot: SnapshotEvidence,
 ): { passed: boolean; message: string } {
-  if (action.type !== 'select-option') {
-    return { passed: true, message: '动作步骤已完成，已重新 snapshot。' };
+  if (action.type === 'fill') {
+    return verifyFillActionEffect(action, afterSnapshot);
   }
 
-  return verifySelectOptionActionEffect(agent, action, afterSnapshot);
+  if (action.type === 'select-option') {
+    return verifySelectOptionActionEffect(agent, action, afterSnapshot);
+  }
+
+  return { passed: true, message: '动作步骤已完成，已重新 snapshot。' };
 }

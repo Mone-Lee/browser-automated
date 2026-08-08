@@ -286,6 +286,85 @@ describe('browser-opt parsing', () => {
     expect(findClickableRef(snapshot, '提交')).toBe('e2');
   });
 
+  it('reads the current value from the matched textbox snapshot line', () => {
+    const snapshot = {
+      output: snapshotJson('', {
+        e1: { role: 'textbox', name: '* 商品长标题 :' },
+        e2: { role: 'textbox', name: '* 商品短标题 :' },
+      }),
+      text: [
+        '- textbox "* 商品长标题 :" [required, ref=e1]: 完整自动化创建药品分类商品',
+        '- textbox "* 商品短标题 :" [required, ref=e2]: 自动化创建药品分类商品',
+      ].join('\n'),
+      nodeCount: 2,
+    };
+
+    expect(readTextboxValue(snapshot, '商品长标题')).toBe('完整自动化创建药品分类商品');
+  });
+
+  it('does not reuse an unrelated switch option when the target field is a dropdown', () => {
+    const snapshot = {
+      output: snapshotJson('', {
+        e1: { role: 'combobox', name: '* 是否二次确认 :' },
+        e2: { role: 'switch', name: '否', checked: false },
+      }),
+      text: [
+        '- generic "请选择" [ref=g1] clickable [onclick]',
+        '  - combobox "* 是否二次确认 :" [expanded=false, required, ref=e1]',
+        '- switch "药食同源 :" [checked=false, ref=e2]',
+      ].join('\n'),
+      nodeCount: 3,
+    };
+
+    expect(findSelectableOption(snapshot, '是否二次确认', '否')).toEqual({
+      ref: null,
+      alreadySelected: false,
+      role: null,
+    });
+  });
+
+  it('does not reuse a later checked radio when the target field is a closed dropdown', () => {
+    const snapshot = {
+      output: snapshotJson('', {
+        e1: { role: 'combobox', name: '* 是否二次确认 :' },
+        e2: { role: 'radio', name: '否', checked: true },
+      }),
+      text: [
+        '- generic "请选择" [ref=g1] clickable [onclick]',
+        '  - combobox "* 是否二次确认 :" [expanded=false, required, ref=e1]',
+        '- LabelText "否" [ref=l2] clickable [onclick]',
+        '  - radio "否" [checked=true, ref=e2]',
+      ].join('\n'),
+      nodeCount: 4,
+    };
+
+    expect(findSelectableOption(snapshot, '是否二次确认', '否')).toEqual({
+      ref: null,
+      alreadySelected: false,
+      role: null,
+    });
+  });
+
+  it('prefers an opened dropdown option over an unrelated switch with the same text', () => {
+    const snapshot = {
+      output: snapshotJson('', {
+        e1: { role: 'switch', name: '否', checked: false },
+        e2: { role: 'option', name: '否' },
+      }),
+      text: [
+        '- switch "药食同源 :" [checked=false, ref=e1]',
+        '- option "否" [ref=e2]',
+      ].join('\n'),
+      nodeCount: 2,
+    };
+
+    expect(findSelectableOption(snapshot, null, '否')).toEqual({
+      ref: 'e2',
+      alreadySelected: false,
+      role: 'option',
+    });
+  });
+
   it('falls back to the first following sibling or child clickable node for label clicks', () => {
     const siblingSnapshot = {
       output: snapshotJson('', {
@@ -540,7 +619,10 @@ describe('BrowserOptRunner', () => {
       snapshots: [
         snapshotJson('open'),
         snapshotJson('- StaticText "商品标题"', {}),
-        snapshotJson('商品标题 芝麻丸礼盒', {}),
+        snapshotJson('- StaticText "商品标题"', {}),
+        snapshotJson('- textbox "商品标题" [ref=e1]: 芝麻丸礼盒', {
+          e1: { role: 'textbox', name: '商品标题' },
+        }),
       ],
     });
     const runner = new BrowserOptRunner(makeFactory(agent));
@@ -554,6 +636,76 @@ describe('BrowserOptRunner', () => {
     expect((agent.fill as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect((agent.waitMs as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(300);
     expect(result.report.steps[0].actionOutput).toContain('fill dom 商品标题 "芝麻丸礼盒"');
+    expect(result.report.steps[0].verification).toContain('已确认输入值：商品标题=芝麻丸礼盒');
+  });
+
+  it('re-snapshots before filling a field that appears after an SPA transition', async () => {
+    const outputDir = makeTempDir();
+    const fieldSnapshot = '- textbox "* 商品长标题 :" [required, ref=e1]';
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('page shell', {}),
+        snapshotJson(fieldSnapshot, { e1: { role: 'textbox', name: '* 商品长标题 :' } }),
+        snapshotJson(`${fieldSnapshot}: 完整自动化创建药品分类商品`, {
+          e1: { role: 'textbox', name: '* 商品长标题 :' },
+        }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. “商品长标题”输入“完整自动化创建药品分类商品”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.waitMs as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(500);
+    expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e1', '完整自动化创建药品分类商品');
+    expect((agent.evaluate as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(result.report.steps[0].actionOutput).toContain('fill delayed @e1');
+  });
+
+  it('retries a next-step button until an asynchronous page gate allows the transition', async () => {
+    const outputDir = makeTempDir();
+    const nextButton = '- button "下一步，完善商品信息" [ref=e1]';
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(nextButton, { e1: { role: 'button', name: '下一步，完善商品信息' } }),
+        snapshotJson(nextButton, { e1: { role: 'button', name: '下一步，完善商品信息' } }),
+        snapshotJson('- textbox "商品长标题" [ref=e2]', { e2: { role: 'textbox', name: '商品长标题' } }),
+        snapshotJson('- textbox "商品长标题" [ref=e2]', { e2: { role: 'textbox', name: '商品长标题' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 点击“下一步，完善商品信息”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(2);
+    expect((agent.waitMs as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(2);
+    expect(result.report.steps[0].actionOutput).toContain('page transition retry 1 @e1');
+    expect(result.report.steps[0].actionOutput).toContain('page transition confirmed after 2s');
+  });
+
+  it('reports failure when a fill command does not change the target textbox value', async () => {
+    const outputDir = makeTempDir();
+    const emptyLongTitle = '- textbox "* 商品长标题 :" [required, ref=e1]';
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(emptyLongTitle, { e1: { role: 'textbox', name: '* 商品长标题 :' } }),
+        snapshotJson(emptyLongTitle, { e1: { role: 'textbox', name: '* 商品长标题 :' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run([
+      '测试 https://example.com。',
+      '1. “商品长标题”输入“完整自动化创建药品分类商品”',
+      '2. “商品卖点”输入“后续测试步骤”',
+    ].join('\n'), { outputDir });
+
+    expect(result.passed).toBe(false);
+    expect(result.report.steps[0].error).toContain('动作后未确认输入值：商品长标题=完整自动化创建药品分类商品');
   });
 
   it('runs open, snapshot, screenshot, chat, re-snapshot, screenshot and writes reports', async () => {
@@ -713,7 +865,7 @@ describe('BrowserOptRunner', () => {
         snapshotJson('before visit after resume', { e2: { role: 'textbox', name: '直播间名称' } }),
         snapshotJson('after visit after resume', { e2: { role: 'textbox', name: '直播间名称' } }),
         snapshotJson('before input', { e2: { role: 'textbox', name: '直播间名称' } }),
-        snapshotJson('after 安选公开直播自动化', { e2: { role: 'textbox', name: '直播间名称' } }),
+        snapshotJson('- textbox "直播间名称" [ref=e2]: 安选公开直播自动化', { e2: { role: 'textbox', name: '直播间名称' } }),
       ],
     });
     const capturedOptions: AgentOptions[] = [];
@@ -1626,6 +1778,11 @@ describe('BrowserOptRunner', () => {
     expect(result.passed).toBe(true);
     expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect((agent.evaluate as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(4);
+    const openDropdownScript = (agent.evaluate as ReturnType<typeof vi.fn>).mock.calls
+      .map(([script]) => String(script))
+      .find((script) => script.includes('selectHelper.openDropdownByField'));
+    expect(openDropdownScript).toContain("scrollIntoView({ block: 'center', inline: 'nearest' })");
+    expect(openDropdownScript).toContain("new PointerEventCtor('pointerdown', init)");
     expect(result.report.steps[0].actionOutput).toContain('select dom click 售后周期=提货当天');
     expect(result.report.steps[0].actionOutput).toContain('dismiss active dropdown');
   });
@@ -2170,7 +2327,7 @@ describe('BrowserOptRunner', () => {
         snapshotJson('before visit after resume', { e2: { role: 'textbox', name: '直播间名称' } }),
         snapshotJson('after visit after resume', { e2: { role: 'textbox', name: '直播间名称' } }),
         snapshotJson('before input', { e2: { role: 'textbox', name: '直播间名称' } }),
-        snapshotJson('after 安选公开直播自动化', { e2: { role: 'textbox', name: '直播间名称' } }),
+        snapshotJson('- textbox "直播间名称" [ref=e2]: 安选公开直播自动化', { e2: { role: 'textbox', name: '直播间名称' } }),
       ],
     });
     const onHandoffRequired = vi.fn(async () => {});
@@ -2553,7 +2710,7 @@ describe('BrowserOptRunner', () => {
         }),
         snapshotJson('after resume with 商品白底图预览', { e3: { role: 'file', name: '商品白底图' } }),
         snapshotJson('before title', { e6: { role: 'textbox', name: '商品标题' } }),
-        snapshotJson('after 芝麻丸礼盒', { e6: { role: 'textbox', name: '商品标题' } }),
+        snapshotJson('- textbox "商品标题" [ref=e6]: 芝麻丸礼盒', { e6: { role: 'textbox', name: '商品标题' } }),
       ],
     });
     const runner = new BrowserOptRunner(makeFactory(agent));

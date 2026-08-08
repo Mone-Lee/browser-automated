@@ -3,7 +3,8 @@
  */
 import type { BrowserAgent } from '#browser-core/agent';
 import type { DeterministicAction, SnapshotEvidence } from '../../../type.js';
-import { findTextboxRef } from '../../../utils.js';
+import { findTextboxRef, readTextboxValue } from '../../../utils.js';
+import { captureTransientSnapshot } from '../../evidence.js';
 import { buildLoginHandoffActionOutput, isLoginLikeSnapshot } from '../../handoff.js';
 import { fillFieldScopedDomTarget } from './dom-action.js';
 
@@ -13,13 +14,21 @@ export function executeFillAction(
   action: Extract<DeterministicAction, { type: 'fill' }>,
   snapshot: SnapshotEvidence,
 ): string {
-  const ref = findTextboxRef(snapshot, action.field);
+  let ref = findTextboxRef(snapshot, action.field);
   if (!ref) {
     if (isLoginLikeSnapshot(snapshot)) {
       return buildLoginHandoffActionOutput(
         agent,
         `当前页面仍在登录页，无法继续填写“${action.field}”，请先完成登录后再继续自动化。`,
       );
+    }
+
+    agent.waitMs(500);
+    const settledSnapshot = captureTransientSnapshot(agent);
+    ref = findTextboxRef(settledSnapshot, action.field);
+    if (ref) {
+      const output = agent.fill(ref, action.value);
+      return `fill delayed @${ref} ${JSON.stringify(action.value)}\n${output}`.trim();
     }
 
     const domOutput = fillFieldScopedDomTarget(agent, action.field, action.value);
@@ -32,4 +41,21 @@ export function executeFillAction(
 
   const output = agent.fill(ref, action.value);
   return `fill @${ref} ${JSON.stringify(action.value)}\n${output}`.trim();
+}
+
+/** 确认目标输入框已写入预期值，避免命令成功返回但受控表单没有接收输入时误报通过。 */
+export function verifyFillActionEffect(
+  action: Extract<DeterministicAction, { type: 'fill' }>,
+  afterSnapshot: SnapshotEvidence,
+): { passed: boolean; message: string } {
+  const actualValue = readTextboxValue(afterSnapshot, action.field);
+  if (actualValue === action.value) {
+    return { passed: true, message: `已确认输入值：${action.field}=${action.value}` };
+  }
+
+  const actualDescription = actualValue === null ? 'snapshot 未暴露该输入框的值' : `实际值为${JSON.stringify(actualValue)}`;
+  return {
+    passed: false,
+    message: `动作后未确认输入值：${action.field}=${action.value}（${actualDescription}）`,
+  };
 }

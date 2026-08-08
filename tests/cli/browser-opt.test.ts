@@ -949,7 +949,7 @@ describe('browser-opt CLI', () => {
       AGENT_BROWSER_LOG: commandLog,
       AGENT_BROWSER_LOGIN_SNAPSHOT: '1',
       AGENT_BROWSER_LOGIN_SNAPSHOT_TEXT: '登录远方的梦想直播平台',
-      AGENT_BROWSER_AFTER_RESUME_SNAPSHOT_TEXT: '创建直播页',
+      AGENT_BROWSER_AFTER_RESUME_SNAPSHOT_TEXT: '- textbox "直播间名称" [ref=e2]: 安选公开直播自动化',
       AGENT_BROWSER_LIVE_CREATE_SNAPSHOT: '1',
       AGENT_BROWSER_RESUME_MARKER: resumeMarker,
     }, 'done\n');
