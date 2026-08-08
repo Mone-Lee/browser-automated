@@ -318,7 +318,9 @@ export async function executeStep(
 
 /** 确定性动作已确认业务上不可达时不再重试，避免把不可选状态误当异步未完成。 */
 function isTerminalActionError(message: string): boolean {
-  return message.startsWith('日期不可选：');
+  return message.startsWith('日期不可选：')
+    || message.startsWith('上传失败：')
+    || message.startsWith('等待上传完成超时：');
 }
 
 /** 上传动作后图片裁剪弹层可能异步出现，短暂轮询后再交给 handoff 探测。 */

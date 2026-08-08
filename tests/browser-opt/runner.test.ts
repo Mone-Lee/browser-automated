@@ -2290,8 +2290,64 @@ describe('BrowserOptRunner', () => {
     expect(fetchMock).toHaveBeenCalledWith('https://stantic.ifengqun.com/front/fq-ecmiddle-sys/upload/82243689cae75e27b3867a5cbdd4292b.png');
     expect(uploadCalls[0]?.[0]).toBe('e3');
     expect(uploadedPath).toContain(path.join('uploads', '82243689cae75e27b3867a5cbdd4292b.png'));
-    expect(fs.readFileSync(uploadedPath, 'utf-8')).toBe('image-bytes');
-    expect(result.report.steps[0].actionOutput).toContain('upload @e3');
+  expect(fs.readFileSync(uploadedPath, 'utf-8')).toBe('image-bytes');
+  expect(result.report.steps[0].actionOutput).toContain('upload @e3');
+  });
+
+  it('waits until the scoped upload loading state disappears', async () => {
+    const outputDir = makeTempDir();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('image-bytes', { status: 200 })));
+    let uploadStateChecks = 0;
+    const agent = buildAgent({
+      evaluate: (script) => {
+        if (script.includes('uploadHelper.getUploadStateByField')) {
+          uploadStateChecks += 1;
+          return JSON.stringify({ found: true, pending: uploadStateChecks < 3, failed: false });
+        }
+        return JSON.stringify({ found: false });
+      },
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before upload', { e3: { role: 'file', name: '商品白底图' } }),
+        snapshotJson('after upload with 商品白底图预览', { e3: { role: 'file', name: '商品白底图' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/goods/create。\n\n目标：\n1. 自动上传“商品白底图”，图片来源 URL 为“https://example.com/product.png”。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(true);
+    expect(uploadStateChecks).toBe(3);
+    expect(result.report.steps[0].actionOutput).toContain('upload wait 2 商品白底图');
+    expect(result.report.steps[0].actionOutput).toContain('upload settled 商品白底图');
+  });
+
+  it('fails without retrying the upload when its loading state never finishes', async () => {
+    const outputDir = makeTempDir();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('image-bytes', { status: 200 })));
+    const agent = buildAgent({
+      evaluate: (script) => script.includes('uploadHelper.getUploadStateByField')
+        ? JSON.stringify({ found: true, pending: true, failed: false })
+        : JSON.stringify({ found: false }),
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before upload', { e3: { role: 'file', name: '商品白底图' } }),
+        snapshotJson('after timed out upload', { e3: { role: 'file', name: '商品白底图' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/goods/create。\n\n目标：\n1. 自动上传“商品白底图”，图片来源 URL 为“https://example.com/product.png”。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(false);
+    expect(result.report.steps[0].error).toBe('等待上传完成超时：商品白底图');
+    expect((agent.upload as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
   });
 
   it('uploads images from source-only natural language descriptions', async () => {

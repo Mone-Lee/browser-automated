@@ -40,11 +40,38 @@ export async function executeUploadAction(
 
   const filePath = await prepareUploadFile(action.source, outputDir);
   const output = agent.upload(ref, [filePath]);
+  const completionOutput = waitForUploadCompletion(agent, action.field);
   return [
     ...searchOutput,
     `upload @${ref} ${filePath}`,
     output,
+    completionOutput,
   ].filter(Boolean).join('\n').trim();
+}
+
+/** 上传命令返回后等待字段作用域内的加载态消失，避免后续步骤操作尚未就绪的表单。 */
+function waitForUploadCompletion(agent: BrowserAgent, field: string): string {
+  const waitLogs: string[] = [];
+  agent.waitMs(300);
+
+  for (let attempt = 1; attempt <= 20; attempt += 1) {
+    const script = `(() => {
+  const uploadHelper = ${uploadDomHelperSource()};
+  return JSON.stringify(uploadHelper.getUploadStateByField(${JSON.stringify(field)}));
+})()`;
+    const state = parseEvalJson(agent.evaluate(script));
+    if (state.failed) {
+      throw new Error(`上传失败：${field}`);
+    }
+    if (state.pending !== true) {
+      return [...waitLogs, `upload settled ${field}`].join('\n');
+    }
+
+    waitLogs.push(`upload wait ${attempt} ${field}`);
+    agent.waitMs(500);
+  }
+
+  throw new Error(`等待上传完成超时：${field}`);
 }
 
 /** Ant Upload 等组件会隐藏真实 file input，snapshot 缺失时改用 DOM 字段邻近关系定位。 */
@@ -134,7 +161,44 @@ function findUploadInputByField(field) {
   best.input.setAttribute('data-browser-opt-upload-id', id);
   return { found: true, selector: '[data-browser-opt-upload-id="' + id + '"]', matchedText: best.text };
 }
-return { findUploadInputByField };
+function getUploadStateByField(field) {
+  const target = findUploadInputByField(field);
+  if (!target.found || !target.selector) {
+    return { found: false, pending: false, failed: false };
+  }
+  const input = document.querySelector(target.selector);
+  if (!input) {
+    return { found: false, pending: false, failed: false };
+  }
+  const fieldText = normalizeBrowserOptUploadText(field);
+  const scope = browserOptUploadAncestorChain(input)
+    .find((element) => normalizeBrowserOptUploadText(element.textContent || '').includes(fieldText))
+    || input.parentElement;
+  if (!scope) {
+    return { found: true, pending: false, failed: false };
+  }
+  const visibleMatches = (selectors) => [...scope.querySelectorAll(selectors)].filter(browserOptUploadVisible);
+  const failed = visibleMatches([
+    '.ant-upload-list-item-error',
+    '.ant-progress-status-exception',
+    '.el-upload-list__item.is-fail',
+    '[class*="upload-error"]',
+    '[class*="upload-fail"]'
+  ].join(',')).length > 0;
+  const pending = visibleMatches([
+    '.ant-upload-list-item-uploading',
+    '.ant-upload-list-item-progress',
+    '.ant-progress-status-active',
+    '.ant-spin-spinning',
+    '.anticon-loading',
+    '.el-loading-mask',
+    '.el-icon-loading',
+    '[aria-busy="true"]',
+    '[class*="uploading"]'
+  ].join(',')).length > 0;
+  return { found: true, pending, failed };
+}
+return { findUploadInputByField, getUploadStateByField };
 })()
 `;
 }
@@ -164,7 +228,7 @@ function searchUploadInLongForm(agent: BrowserAgent, field: string): { ref: stri
   return null;
 }
 
-function parseEvalJson(raw: string): { found?: boolean; selector?: string } {
+function parseEvalJson(raw: string): { found?: boolean; selector?: string; pending?: boolean; failed?: boolean } {
   const decoded = JSON.parse(raw.trim()) as unknown;
   return typeof decoded === 'string'
     ? JSON.parse(decoded) as ReturnType<typeof parseEvalJson>
