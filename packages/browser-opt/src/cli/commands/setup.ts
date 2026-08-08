@@ -14,6 +14,7 @@ interface BrowserOptSetupOptions {
   installSystemDependencies: boolean;
   downloadBrowser: boolean;
   installSkill: boolean;
+  mode?: 'install' | 'setup' | 'update';
   preferCurrentInstallPrefix?: boolean;
   registry?: string;
   agent?: string;
@@ -36,6 +37,7 @@ const DEFAULT_NPM_REGISTRY = 'https://registry.npmjs.org/';
 /** 安装或更新 browser-opt 的外部运行时，并把随包发布的 Skill 放到目标 Agent 目录。 */
 export function setupBrowserOpt(options: BrowserOptSetupOptions): void {
   const installPrefix = options.preferCurrentInstallPrefix ? resolveCurrentInstallPrefix() : undefined;
+  let installedVersion: string | undefined;
   if (!options.installRuntime && options.downloadBrowser) {
     throw new Error('--download-browser 需要同时安装运行时，请移除 --skip-runtime。');
   }
@@ -43,7 +45,7 @@ export function setupBrowserOpt(options: BrowserOptSetupOptions): void {
     installBrowserOptRuntime(options.registry, installPrefix);
     installAgentBrowserRuntime(options.registry, installPrefix);
     verifyAgentBrowserRuntime();
-    printInstalledBrowserOptVersion(options.registry, installPrefix);
+    installedVersion = printInstalledBrowserOptVersion(options.registry, installPrefix);
   }
 
   let chromePath = options.installRuntime ? resolveSystemChromeExecutable() : null;
@@ -71,6 +73,9 @@ export function setupBrowserOpt(options: BrowserOptSetupOptions): void {
     console.log(`已安装 ${label}：${targetDir}`);
   }
   console.log(options.installRuntime ? `浏览器环境：${chromePath}` : '浏览器运行时：已跳过');
+  if (options.mode === 'update' && installedVersion) {
+    console.log(`update 后版本：${installedVersion}`);
+  }
   console.log('browser-opt 已就绪。');
 }
 
@@ -143,25 +148,29 @@ function verifyAgentBrowserRuntime(): void {
 }
 
 /** 读取本次 npm 全局安装落盘的精确 browser-opt 路径，并提示 PATH 是否仍指向别处。 */
-function printInstalledBrowserOptVersion(registry?: string, installPrefix?: string): void {
+function printInstalledBrowserOptVersion(registry?: string, installPrefix?: string): string | undefined {
   try {
     const installedBinaryPath = resolveInstalledBrowserOptBinary(registry, installPrefix);
-    if (!installedBinaryPath) {
-      return;
+    const resolvedShellPath = resolveShellBrowserOptPath();
+    const versionBinaryPath = installedBinaryPath ?? resolvedShellPath;
+    if (!versionBinaryPath) {
+      return undefined;
     }
-    const result = spawnSync(installedBinaryPath, ['--version'], { encoding: 'utf-8', stdio: 'pipe' });
+    const result = spawnSync(versionBinaryPath, ['--version'], { encoding: 'utf-8', stdio: 'pipe' });
     if (result.status === 0 && result.stdout.trim()) {
-      console.log(`browser-opt 已更新至版本：${result.stdout.trim()}`);
-      console.log(`browser-opt 安装路径：${installedBinaryPath}`);
-      const resolvedShellPath = resolveShellBrowserOptPath();
+      const installedVersion = result.stdout.trim();
+      console.log(`browser-opt 已更新至版本：${installedVersion}`);
+      console.log(`browser-opt 安装路径：${versionBinaryPath}`);
       if (resolvedShellPath && resolvedShellPath !== installedBinaryPath) {
         console.warn(`当前 shell 的 browser-opt 指向：${resolvedShellPath}`);
         console.warn('当前 shell 没有优先使用刚安装的 browser-opt；请调整 PATH、重开终端，或先直接运行上面的安装路径。');
       }
+      return installedVersion;
     }
   } catch {
     // 版本探测失败不影响安装结果。
   }
+  return undefined;
 }
 
 /**

@@ -23,8 +23,17 @@ function createSetupCommandStubs(agentBrowserLogPath: string, npmLogPath: string
   const agentBrowserCommandPath = path.join(directory, 'agent-browser');
   fs.writeFileSync(agentBrowserCommandPath, `#!/usr/bin/env node\nrequire('node:fs').appendFileSync(${JSON.stringify(agentBrowserLogPath)}, process.argv.slice(2).join(' ') + '\\n');\n`);
   fs.chmodSync(agentBrowserCommandPath, 0o755);
+  const browserOptCommandPath = path.join(directory, 'browser-opt');
+  fs.writeFileSync(
+    browserOptCommandPath,
+    `#!/usr/bin/env node\nif (process.argv.includes('--version')) {\n  process.stdout.write('9.9.9\\n');\n}\n`,
+  );
+  fs.chmodSync(browserOptCommandPath, 0o755);
   const npmCommandPath = path.join(directory, 'npm');
-  fs.writeFileSync(npmCommandPath, `#!/usr/bin/env node\nrequire('node:fs').appendFileSync(${JSON.stringify(npmLogPath)}, process.argv.slice(2).join(' ') + '\\n');\n`);
+  fs.writeFileSync(
+    npmCommandPath,
+    `#!/usr/bin/env node\nconst fs = require('node:fs');\nconst path = require('node:path');\nconst args = process.argv.slice(2);\nfs.appendFileSync(${JSON.stringify(npmLogPath)}, args.join(' ') + '\\n');\nif (args[0] === 'prefix' && args[1] === '-g') {\n  process.stdout.write(${JSON.stringify(directory)} + '\\n');\n}\n`,
+  );
   fs.chmodSync(npmCommandPath, 0o755);
   return directory;
 }
@@ -154,6 +163,8 @@ describe('browser-opt install', () => {
     ]);
     expect(npmCommands).toContain('prefix -g --registry=https://registry.npmjs.org/');
     expect(fs.existsSync(path.join(home, '.agents/skills/browser-opt/SKILL.md'))).toBe(true);
+    expect(result.stdout).toContain('browser-opt 已更新至版本：9.9.9');
+    expect(result.stdout).toContain('update 后版本：9.9.9');
   });
 
   it('keeps update compatible when npm_execpath is provided', () => {
