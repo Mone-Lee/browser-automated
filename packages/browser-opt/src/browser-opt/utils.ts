@@ -97,20 +97,21 @@ function splitCompoundSelectableStep(instruction: string): string[] {
 /** 从自然语言步骤中提炼结构化动作，供确定性执行层消费。 */
 export function parseDeterministicAction(instruction: string): DeterministicAction | null {
   const normalized = cleanInstructionPrefix(normalizeBrowserOptFlowText(instruction));
+  const actionText = maskQuotedSegments(normalized);
   const url = normalized.match(URL_RE)?.[0];
-  if (url && /访问|打开|open|goto|navigate/i.test(normalized)) {
+  if (url && /访问|打开|open|goto|navigate/i.test(actionText)) {
     return { type: 'open', url };
   }
 
-  if (isInspectInstruction(normalized)) {
+  if (isInspectInstruction(actionText)) {
     return { type: 'inspect' };
   }
 
-  if (/handoff|人工|手动|操作人员/.test(normalized) && /上传|选择.*(?:图片|文件|封面)/.test(normalized)) {
+  if (/handoff|人工|手动|操作人员/.test(actionText) && /上传|选择.*(?:图片|文件|封面)/.test(actionText)) {
     return { type: 'handoff', message: normalized };
   }
 
-  if (url && isUploadInstruction(normalized)) {
+  if (url && isUploadInstruction(actionText)) {
     return {
       type: 'upload',
       field: parseUploadFieldName(normalized) ?? '文件',
@@ -118,8 +119,8 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
     };
   }
 
-  const fillVerb = normalized.match(/输入|填写|填入|type|fill/i);
   const quoted = extractQuotedSegments(normalized);
+  const fillVerb = actionText.match(/输入|填写|填入|type|fill/i);
   if (fillVerb && quoted.length > 0) {
     const valueSegment = quoted[quoted.length - 1];
     const fieldSegment = quoted.find((segment) => segment.index < (fillVerb.index ?? 0));
@@ -130,7 +131,7 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
     };
   }
 
-  if (/点击|单击|click|tap|press/i.test(normalized)) {
+  if (/点击|单击|click|tap|press/i.test(actionText)) {
     const clickTarget = parseClickTarget(normalized);
     const target = clickTarget?.target
       ?? normalized
@@ -144,7 +145,7 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
     return action;
   }
 
-  const selectableTarget = parseSelectableTarget(normalized);
+  const selectableTarget = SELECTABLE_VERB_RE.test(actionText) ? parseSelectableTarget(normalized) : null;
   if (selectableTarget) {
     return {
       type: 'select-option',
@@ -181,6 +182,11 @@ function cleanInstructionPrefix(instruction: string): string {
   return instruction
     .replace(/^\s*(?:目标[:：]\s*)?\d+[\.)、]\s*/, '')
     .trim();
+}
+
+/** 动作分类时遮蔽引号内的字段和值，避免字段名中的“填写、选择、点击”等词被当成真实动词。 */
+function maskQuotedSegments(instruction: string): string {
+  return instruction.replace(/["“‘'][^"”’']+["”’']/g, (segment) => ' '.repeat(segment.length));
 }
 
 /** 识别带远程 URL 的图片/文件上传描述，兼容省略“上传”动词的口语写法。 */
@@ -246,7 +252,7 @@ function parseFieldName(instruction: string): string | null {
 
 /** 从“字段选择选项”类语句中同时提取字段名和选项，避免把字段误当成选项。 */
 function parseSelectableTarget(instruction: string): { field: string | null; option: string } | null {
-  const verb = instruction.match(SELECTABLE_VERB_RE);
+  const verb = maskQuotedSegments(instruction).match(SELECTABLE_VERB_RE);
   if (!verb) {
     return parseLooseSelectableTarget(instruction);
   }
@@ -368,6 +374,29 @@ export function findTextboxRef(snapshot: SnapshotEvidence, field: string): strin
   return null;
 }
 
+/** 读取指定输入框在 snapshot 中暴露的当前值；无法定位或快照未暴露值时返回 null。 */
+export function readTextboxValue(snapshot: SnapshotEvidence, field: string): string | null {
+  const ref = findTextboxRef(snapshot, field);
+  if (!ref) {
+    return null;
+  }
+
+  const line = snapshot.text
+    .split('\n')
+    .find((candidate) => candidate.includes(`ref=${ref}`) && /^\s*-\s*(?:textbox|searchbox|combobox|input|textarea)\b/i.test(candidate));
+  if (!line) {
+    return null;
+  }
+
+  const metadataEnd = line.lastIndexOf(']');
+  if (metadataEnd < 0) {
+    return null;
+  }
+
+  const separator = line.slice(metadataEnd + 1).match(/^\s*:\s?(.*)$/);
+  return separator ? separator[1] ?? '' : '';
+}
+
 /** 在当前快照中查找可点击元素，并按目标文案做最佳匹配。 */
 export function findClickableRef(snapshot: SnapshotEvidence, target: string, field?: string | null): string | null {
   const nodes = getSnapshotNodes(snapshot).filter((node) => !node.disabled && !isTextboxRole(node.role) && isClickableNode(node));
@@ -384,15 +413,28 @@ export function findSelectableOption(
   field: string | null,
   option: string,
 ): { ref: string | null; alreadySelected: boolean; role: string | null } {
+  const hasExpandableField = Boolean(field && findScopedSelectableFieldRef(snapshot.text, field));
   const scoped = findScopedOptionLabel(snapshot.text, field, option);
-  if (scoped) {
+  if (scoped && (!hasExpandableField || /option/i.test(scoped.role ?? ''))) {
     return scoped;
   }
 
   const nodes = getSnapshotNodes(snapshot);
-  const switchControl = findScopedSwitchControl(snapshot.text, field, nodes, option);
+  const switchControl = hasExpandableField ? null : findScopedSwitchControl(snapshot.text, field, nodes, option);
   if (switchControl) {
     return switchControl;
+  }
+
+  const dropdownOption = findBestNode(nodes.filter((node) => /option/i.test(node.role)), option);
+  if (dropdownOption?.checked) {
+    return { ref: dropdownOption.ref, alreadySelected: true, role: dropdownOption.role };
+  }
+  if (dropdownOption && !dropdownOption.disabled) {
+    return { ref: dropdownOption.ref, alreadySelected: false, role: dropdownOption.role };
+  }
+
+  if (hasExpandableField) {
+    return { ref: null, alreadySelected: false, role: null };
   }
 
   const selectable = findBestNode(nodes.filter((node) => isSelectableRole(node.role)), option);

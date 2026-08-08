@@ -426,9 +426,9 @@ function buildDateInputCandidates(date: string, field: string | null): string[] 
   return [isTimeLikeDateField(field) ? `${date} 00:00:00` : date];
 }
 
-/** 字段名含“时间/time”时更可能是 DateTimePicker。 */
+/** 只有字段明确表达日期时间或时间点语义时才按 DateTimePicker 填充，避免把泛称“时间”的日期字段误加时分秒。 */
 function isTimeLikeDateField(field: string | null): boolean {
-  return Boolean(field && /时间|开播|time/i.test(field));
+  return Boolean(field && /日期时间|时间点|开播|直播时间|date\s*time|datetime|timestamp/i.test(field));
 }
 
 /** 将常见中文和数字日期描述转成 DatePicker 默认可接受的 YYYY-MM-DD。 */

@@ -11,7 +11,13 @@ import {
   extractBrowserOptUrl,
   splitBrowserOptSteps,
 } from '../../packages/browser-opt/dist/browser-opt/runner/index.js';
-import { findClickableRef, findSelectableFieldRef, parseDeterministicAction } from '../../packages/browser-opt/dist/browser-opt/utils.js';
+import {
+  findClickableRef,
+  findSelectableFieldRef,
+  findSelectableOption,
+  parseDeterministicAction,
+  readTextboxValue,
+} from '../../packages/browser-opt/dist/browser-opt/utils.js';
 import type { BrowserAgent } from '#browser-core/agent';
 import type { AgentOptions } from '#browser-core';
 
@@ -191,6 +197,41 @@ describe('browser-opt parsing', () => {
       type: 'select-option',
       field: '业务类型',
       option: '安选公开',
+    });
+
+    expect(parseDeterministicAction('“填写出行人时间”选择“2026-08-30”')).toEqual({
+      type: 'select-option',
+      field: '填写出行人时间',
+      option: '2026-08-30',
+    });
+
+    expect(parseDeterministicAction('“填写方式”选择“自动”')).toEqual({
+      type: 'select-option',
+      field: '填写方式',
+      option: '自动',
+    });
+
+    expect(parseDeterministicAction('“选择说明”输入“测试内容”')).toEqual({
+      type: 'fill',
+      field: '选择说明',
+      value: '测试内容',
+    });
+
+    expect(parseDeterministicAction('点击“填写入口”')).toEqual({
+      type: 'click',
+      target: '填写入口',
+    });
+
+    expect(parseDeterministicAction('“上传地址”输入“https://example.com/image.png”')).toEqual({
+      type: 'fill',
+      field: '上传地址',
+      value: 'https://example.com/image.png',
+    });
+
+    expect(parseDeterministicAction('“打开链接”输入“https://example.com/page”')).toEqual({
+      type: 'fill',
+      field: '打开链接',
+      value: 'https://example.com/page',
     });
 
     expect(parseDeterministicAction('\\n2. 售后周期选择第一个选项')).toEqual({
@@ -747,7 +788,7 @@ describe('BrowserOptRunner', () => {
         snapshotJson('before visit'),
         snapshotJson('after visit'),
         snapshotJson('before input', { e2: { role: 'textbox', name: '直播间名称' } }),
-        snapshotJson('after 安选公开直播自动化', { e2: { role: 'textbox', name: '直播间名称' } }),
+        snapshotJson('- textbox "直播间名称" [ref=e2]: 安选公开直播自动化', { e2: { role: 'textbox', name: '直播间名称' } }),
       ],
     });
     const capturedOptions: AgentOptions[] = [];
