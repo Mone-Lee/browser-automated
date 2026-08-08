@@ -416,6 +416,22 @@ describe('browser-opt parsing', () => {
 
     expect(findClickableRef(snapshot, '确认')).toBeNull();
   });
+
+  it('does not fall through from a disabled target button to a following floating button', () => {
+    const snapshot = {
+      output: snapshotJson('', {
+        e43: { role: 'button', name: '下一步，完善商品信息' },
+        e2: { role: 'button', name: 'comment' },
+      }),
+      text: [
+        '- button "下一步，完善商品信息" [disabled, ref=e43]',
+        '- button "comment" [ref=e2]',
+      ].join('\n'),
+      nodeCount: 2,
+    };
+
+    expect(findClickableRef(snapshot, '下一步，完善商品信息')).toBeNull();
+  });
 });
 
 describe('BrowserOptRunner', () => {
@@ -1537,6 +1553,12 @@ describe('BrowserOptRunner', () => {
         if (script.includes('selectHelper.clickVisibleOption')) {
           return JSON.stringify({ found: true, clicked: true });
         }
+        if (script.includes('selectHelper.dismissActiveDropdown')) {
+          return JSON.stringify({ found: true, dismissed: true });
+        }
+        if (script.includes('selectHelper.hasVisibleDropdown')) {
+          return JSON.stringify({ dropdownOpen: false });
+        }
         if (script.includes('selectHelper.openDropdownByField')) {
           return JSON.stringify({ found: true, opened: true });
         }
@@ -1562,8 +1584,41 @@ describe('BrowserOptRunner', () => {
 
     expect(result.passed).toBe(true);
     expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
-    expect((agent.evaluate as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(2);
+    expect((agent.evaluate as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(4);
     expect(result.report.steps[0].actionOutput).toContain('select dom click 售后周期=提货当天');
+    expect(result.report.steps[0].actionOutput).toContain('dismiss active dropdown');
+  });
+
+  it('fails the selection step when the dropdown still covers the page after dismissal', async () => {
+    const outputDir = makeTempDir();
+    const snapshotText = '- combobox "* 供应商 :" [expanded=true, required, ref=e111]';
+    const agent = buildAgent({
+      evaluate: (script) => {
+        if (script.includes('selectHelper.openDropdownByField')) {
+          return JSON.stringify({ found: true, opened: true });
+        }
+        if (script.includes('selectHelper.clickVisibleOption')) {
+          return JSON.stringify({ found: true, clicked: true, selectedText: '广州澳创投资有限公司' });
+        }
+        if (script.includes('selectHelper.dismissActiveDropdown')) {
+          return JSON.stringify({ found: true, dismissed: true });
+        }
+        if (script.includes('selectHelper.hasVisibleDropdown')) {
+          return JSON.stringify({ dropdownOpen: true });
+        }
+        return JSON.stringify({ found: false });
+      },
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(snapshotText, { e111: { role: 'combobox', name: '* 供应商 :' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. “供应商”选择“广州澳创投资有限公司”', { outputDir });
+
+    expect(result.passed).toBe(false);
+    expect(result.report.steps[0].error).toContain('选中选项后下拉层仍未收起');
   });
 
   it('does not verify a combobox as a switch when a nearby switch exists', async () => {
@@ -1702,7 +1757,7 @@ describe('BrowserOptRunner', () => {
 
     expect(result.passed).toBe(true);
     expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
-    expect((agent.evaluate as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(4);
+    expect((agent.evaluate as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(5);
     expect(result.report.steps[0].actionOutput).toContain('select dom click 对接负责人=嘻嘻嘻 (嘻嘻嘻)');
   });
 

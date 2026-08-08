@@ -92,10 +92,12 @@ export function executeSelectOptionAction(
   }
 
   const output = agent.click(option.ref);
+  const dropdownCleanup = isDropdownOption(option.role) ? dismissActiveDropdown(agent) : null;
   return [
     ...searchOutput,
     `${formatSelectableActionName(option.role)} @${option.ref} ${fieldLabel}=${action.option}`,
     output,
+    dropdownCleanup,
   ].filter(Boolean).join('\n').trim();
 }
 
@@ -211,12 +213,49 @@ function clickDropdownDomTarget(agent: BrowserAgent, field: string, option: stri
     if (clicked.clicked === true) {
       agent.waitMs(300);
       const selectedText = clicked.selectedText ? ` (${clicked.selectedText})` : '';
-      return { attempted: true, output: `select dom click ${field}=${option}${selectedText}` };
+      const dropdownCleanup = dismissActiveDropdown(agent);
+      return {
+        attempted: true,
+        output: [`select dom click ${field}=${option}${selectedText}`, dropdownCleanup].filter(Boolean).join('\n'),
+      };
     }
     return { attempted: true, output: null };
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message === '选中选项后下拉层仍未收起') {
+      throw error;
+    }
     return { attempted: true, output: null };
   }
+}
+
+/** 选中下拉项后收起仍可见的活动弹层，避免它遮挡流程中的下一个控件。 */
+function dismissActiveDropdown(agent: BrowserAgent): string | null {
+  const script = `(() => {
+  const selectHelper = ${dropdownDomHelperSource()};
+  return JSON.stringify(selectHelper.dismissActiveDropdown());
+})()`;
+
+  let dropdownOpen = false;
+  try {
+    const dismissed = parseEvalJson(agent.evaluate(script));
+    if (dismissed.dismissed !== true) {
+      return null;
+    }
+    agent.waitMs(300);
+    const verifyScript = `(() => {
+  const selectHelper = ${dropdownDomHelperSource()};
+  return JSON.stringify(selectHelper.hasVisibleDropdown());
+})()`;
+    const verified = parseEvalJson(agent.evaluate(verifyScript));
+    dropdownOpen = verified.dropdownOpen === true;
+  } catch {
+    return null;
+  }
+
+  if (dropdownOpen) {
+    throw new Error('选中选项后下拉层仍未收起');
+  }
+  return 'dismiss active dropdown';
 }
 
 /** 长表单中字段可能不在当前可交互快照里，按视口上下搜索字段和目标选项。 */
@@ -326,6 +365,8 @@ function parseEvalJson(raw: string): {
   opened?: boolean;
   selectedText?: string;
   searched?: boolean;
+  dismissed?: boolean;
+  dropdownOpen?: boolean;
 } {
   const decoded = JSON.parse(raw.trim()) as unknown;
   return typeof decoded === 'string'
@@ -520,7 +561,26 @@ function searchActiveDropdown(option) {
   browserOptInputValue(input, option);
   return { searched: true };
 }
-return { openDropdownByField, clickVisibleOption, searchActiveDropdown };
+function dismissActiveDropdown() {
+  const containers = browserOptDropdownContainers();
+  if (containers.length === 0) {
+    document.querySelectorAll('[data-browser-opt-active-select="true"]').forEach((element) => element.removeAttribute('data-browser-opt-active-select'));
+    return { found: false, dismissed: false };
+  }
+  const active = document.querySelector('[data-browser-opt-active-select="true"]');
+  const focused = active?.querySelector('input:not([type="hidden"]), textarea, [tabindex]') || document.activeElement;
+  if (focused instanceof HTMLElement) {
+    focused.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Escape', code: 'Escape' }));
+    focused.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key: 'Escape', code: 'Escape' }));
+    focused.blur();
+  }
+  active?.removeAttribute('data-browser-opt-active-select');
+  return { found: true, dismissed: true };
+}
+function hasVisibleDropdown() {
+  return { dropdownOpen: browserOptDropdownContainers().length > 0 };
+}
+return { openDropdownByField, clickVisibleOption, searchActiveDropdown, dismissActiveDropdown, hasVisibleDropdown };
 })()
 `;
 }
@@ -604,6 +664,11 @@ return { findSwitchByField };
 
 function isSwitchSelectable(role: string | null): boolean {
   return Boolean(role && /switch/i.test(role));
+}
+
+/** 只有明确来自下拉列表的 option 才执行弹层收尾，避免影响单选和复选控件。 */
+function isDropdownOption(role: string | null): boolean {
+  return Boolean(role && /option/i.test(role));
 }
 
 /** 只有 snapshot 明确把字段暴露为 switch 时，才启用开关 DOM 兜底，避免大表单误碰邻近控件。 */

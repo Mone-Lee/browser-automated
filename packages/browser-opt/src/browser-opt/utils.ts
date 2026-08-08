@@ -542,6 +542,11 @@ function findFollowingClickableRef(text: string, anchorTarget: string, following
       continue;
     }
 
+    // 目标文案已经属于交互节点时，不再把后续无关控件当作它的点击入口。
+    if (isClickableNode(line.node)) {
+      continue;
+    }
+
     const following = findFirstFollowingClickableLine(lines, line, followingTarget);
     if (following) {
       return following.node.ref;
@@ -586,7 +591,7 @@ function findFirstFollowingClickableLine(
       break;
     }
 
-    if (isClickableNode(line.node) && !isTextboxRole(line.node.role) && matchesOptionalTarget(line.node, normalizedFollowingTarget)) {
+    if (!line.node.disabled && isClickableNode(line.node) && !isTextboxRole(line.node.role) && matchesOptionalTarget(line.node, normalizedFollowingTarget)) {
       return line;
     }
 
@@ -617,7 +622,7 @@ function findFirstDescendantClickableLine(
       break;
     }
 
-    if (isClickableNode(line.node) && !isTextboxRole(line.node.role) && matchesOptionalTarget(line.node, normalizedFollowingTarget)) {
+    if (!line.node.disabled && isClickableNode(line.node) && !isTextboxRole(line.node.role) && matchesOptionalTarget(line.node, normalizedFollowingTarget)) {
       return line;
     }
   }
