@@ -151,6 +151,7 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
       type: 'select-option',
       field: selectableTarget.field,
       option: selectableTarget.option,
+      ...(selectableTarget.endOption ? { endOption: selectableTarget.endOption } : {}),
     };
   }
 
@@ -250,8 +251,8 @@ function parseFieldName(instruction: string): string | null {
   return afterVerb || null;
 }
 
-/** 从“字段选择选项”类语句中同时提取字段名和选项，避免把字段误当成选项。 */
-function parseSelectableTarget(instruction: string): { field: string | null; option: string } | null {
+/** 从“字段选择选项”类语句中同时提取字段名和选项，并保留日期范围的结束值。 */
+function parseSelectableTarget(instruction: string): { field: string | null; option: string; endOption?: string } | null {
   const verb = maskQuotedSegments(instruction).match(SELECTABLE_VERB_RE);
   if (!verb) {
     return parseLooseSelectableTarget(instruction);
@@ -259,9 +260,16 @@ function parseSelectableTarget(instruction: string): { field: string | null; opt
 
   const quoted = extractQuotedSegments(instruction);
   if (quoted.length >= 2) {
+    const quotedField = quoted[0].index < (verb.index ?? 0);
+    const option = quoted[quotedField ? 1 : 0];
+    const rangeEnd = quoted[quotedField ? 2 : 1];
+    const rangeSeparator = rangeEnd
+      ? instruction.slice(option.index + option.value.length + 2, rangeEnd.index)
+      : '';
     return {
-      field: quoted[0].value,
-      option: quoted[1].value,
+      field: quotedField ? quoted[0].value : parseSelectableFieldName(instruction, option) ?? null,
+      option: option.value,
+      ...(rangeEnd && /(?:到|至|~|～|-)/.test(rangeSeparator) ? { endOption: rangeEnd.value } : {}),
     };
   }
 

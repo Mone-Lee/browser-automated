@@ -112,6 +112,21 @@ describe('browser-opt parsing', () => {
     expect(parseDeterministicAction('检查当前页面')).toBeNull();
   });
 
+  it('preserves both values when parsing a quoted date range', () => {
+    expect(parseDeterministicAction('“更新时间”选择“2026-08-06”到“2026-08-09”')).toEqual({
+      type: 'select-option',
+      field: '更新时间',
+      option: '2026-08-06',
+      endOption: '2026-08-09',
+    });
+    expect(parseDeterministicAction('更新时间选择“2026-08-06”到“2026-08-09”')).toEqual({
+      type: 'select-option',
+      field: '更新时间',
+      option: '2026-08-06',
+      endOption: '2026-08-09',
+    });
+  });
+
   it('splits numbered target steps', () => {
     const steps = splitBrowserOptSteps(`测试 https://example.com 的搜索功能。
 
@@ -1289,6 +1304,44 @@ describe('BrowserOptRunner', () => {
     expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect(result.report.steps[0].actionOutput).toContain('datepicker fill @e20 直播时间=2026-07-15 00:00:00');
     expect(result.report.steps[0].verification).toContain('已确认日期字段：直播时间=2026-07-15');
+  });
+
+  it('fills both RangePicker inputs and closes its panel before passing', async () => {
+    const outputDir = makeTempDir();
+    const rangeSnapshot = [
+      '- textbox "更新时间" [ref=e20]',
+      '- textbox "结束时间" [ref=e21]',
+    ].join('\n');
+    const refs = {
+      e20: { role: 'textbox', name: '更新时间', placeholder: '开始时间' },
+      e21: { role: 'textbox', name: '结束时间', placeholder: '结束时间' },
+    };
+    const evaluate = vi.fn((script: string) => {
+      if (script.includes("querySelectorAll('.ant-picker-dropdown")) {
+        return JSON.stringify({ found: true, open: false });
+      }
+      if (script.includes('values: inputs.slice')) {
+        return JSON.stringify({ found: true, values: ['2026-08-06', '2026-08-09'] });
+      }
+      return JSON.stringify({ found: true });
+    });
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(rangeSnapshot, refs),
+        snapshotJson(rangeSnapshot, refs),
+      ],
+      evaluate,
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. “更新时间”选择“2026-08-06”到“2026-08-09”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(1, 'e20', '2026-08-06');
+    expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(2, 'e21', '2026-08-09');
+    expect(evaluate.mock.calls.some(([script]) => script.includes("key: 'Escape'"))).toBe(true);
+    expect(result.report.steps[0].verification).toContain('已确认日期范围：更新时间=2026-08-06 到 2026-08-09');
   });
 
   it('uses the DatePicker path when the quoted field name contains the fill verb', async () => {

@@ -6,10 +6,22 @@ import type { DeterministicAction, SnapshotEvidence } from '../../../type.js';
 import { findTextboxRef } from '../../../utils.js';
 import { captureTransientSnapshot } from '../../evidence.js';
 
-/** 判断 select-option 动作是否应交给日期控件处理，并返回归一化后的 YYYY-MM-DD。 */
-export function resolveDateSelectOption(action: Extract<DeterministicAction, { type: 'select-option' }>): string | null {
-  const normalizedDate = normalizeDateOption(action.option);
-  return normalizedDate && isDateField(action.field) ? normalizedDate : null;
+interface DateSelection {
+  start: string;
+  end?: string;
+}
+
+/** 判断 select-option 动作是否应交给日期控件处理，并返回归一化后的日期或日期范围。 */
+export function resolveDateSelectOption(action: Extract<DeterministicAction, { type: 'select-option' }>): DateSelection | null {
+  const start = normalizeDateOption(action.option);
+  if (!start || !isDateField(action.field)) {
+    return null;
+  }
+  const end = action.endOption ? normalizeDateOption(action.endOption) : null;
+  if (action.endOption && !end) {
+    return null;
+  }
+  return end ? { start, end } : { start };
 }
 
 /** 执行 DatePicker 选择动作，优先直接填充，失败时再尝试 DOM setter 和面板点击。 */
@@ -17,13 +29,16 @@ export function executeDateSelectOptionAction(
   agent: BrowserAgent,
   action: Extract<DeterministicAction, { type: 'select-option' }>,
   snapshot: SnapshotEvidence,
-  normalizedDate: string,
+  selection: DateSelection,
 ): string {
-  const datePickerOutput = fillDatePickerTarget(agent, action, snapshot, normalizedDate);
+  const datePickerOutput = selection.end
+    ? fillDateRangePickerTarget(agent, action, snapshot, selection.start, selection.end)
+    : fillDatePickerTarget(agent, action, snapshot, selection.start);
   if (datePickerOutput) {
     return datePickerOutput;
   }
-  throw new Error(`无法设置日期字段：${action.field ?? '日期'} -> ${action.option}（已转换为 ${normalizedDate}）`);
+  const normalizedValue = selection.end ? `${selection.start} 到 ${selection.end}` : selection.start;
+  throw new Error(`无法设置日期字段：${action.field ?? '日期'} -> ${action.option}（已转换为 ${normalizedValue}）`);
 }
 
 /** 校验 DatePicker 选择结果，避免把不可选日期或临时输入态误判成已提交。 */
@@ -31,8 +46,16 @@ export function verifyDateSelectOptionActionEffect(
   agent: BrowserAgent,
   action: Extract<DeterministicAction, { type: 'select-option' }>,
   afterSnapshot: SnapshotEvidence,
-  normalizedDate: string,
+  selection: DateSelection,
 ): { passed: boolean; message: string } {
+  if (selection.end) {
+    const rangeState = verifyDatePickerDomRange(agent, action.field, selection.start, selection.end);
+    if (rangeState === true && inspectDatePickerPanelOpen(agent) === false) {
+      return { passed: true, message: `已确认日期范围：${action.field}=${selection.start} 到 ${selection.end}` };
+    }
+    return { passed: false, message: `动作后未确认日期范围或面板未关闭：${action.field}=${selection.start} 到 ${selection.end}` };
+  }
+  const normalizedDate = selection.start;
   if (isDatePickerConfirmDisabled(afterSnapshot.text)) {
     return { passed: false, message: formatDateUnavailableMessage(action.field, normalizedDate) };
   }
@@ -47,6 +70,147 @@ export function verifyDateSelectOptionActionEffect(
     return { passed: true, message: `已确认页面显示日期值：${action.field}=${normalizedDate}` };
   }
   return { passed: false, message: `动作后未确认日期字段：${action.field}=${normalizedDate}` };
+}
+
+/** RangePicker 必须填写两个输入框并关闭浮层，避免只写入起始日期后误报成功。 */
+function fillDateRangePickerTarget(
+  agent: BrowserAgent,
+  action: Extract<DeterministicAction, { type: 'select-option' }>,
+  snapshot: SnapshotEvidence,
+  startDate: string,
+  endDate: string,
+): string | null {
+  const startRef = action.field ? findTextboxRef(snapshot, action.field) : null;
+  const endRef = findTextboxRef(snapshot, '结束时间');
+  const output: string[] = [];
+
+  if (startRef && endRef && startRef !== endRef) {
+    output.push(`range picker fill start @${startRef} ${startDate}`, agent.fill(startRef, startDate));
+    output.push(`range picker fill end @${endRef} ${endDate}`, agent.fill(endRef, endDate));
+    commitDatePickerRangeDomValue(agent, action.field);
+  } else if (!fillDatePickerDomRangeTarget(agent, action.field, startDate, endDate)) {
+    return null;
+  } else {
+    output.push(`range picker dom fill ${action.field ?? '日期'}=${startDate} 到 ${endDate}`);
+  }
+
+  agent.waitMs(300);
+  dismissDatePickerPanel(agent, action.field);
+  agent.waitMs(300);
+  if (verifyDatePickerDomRange(agent, action.field, startDate, endDate) !== true) {
+    return null;
+  }
+  if (inspectDatePickerPanelOpen(agent) !== false) {
+    return null;
+  }
+  return output.filter(Boolean).join('\n').trim();
+}
+
+/** ref 不完整时通过原生 setter 同时写入 RangePicker 的两个输入框。 */
+function fillDatePickerDomRangeTarget(agent: BrowserAgent, field: string | null, startDate: string, endDate: string): boolean {
+  const script = `(() => {
+  const dateHelper = ${datePickerDomHelperSource()};
+  const inputs = dateHelper.findDateInputsByField(${JSON.stringify(field)});
+  if (inputs.length < 2 || inputs.some((input) => input.disabled)) {
+    return JSON.stringify({ found: inputs.length, filled: false });
+  }
+  [${JSON.stringify(startDate)}, ${JSON.stringify(endDate)}].forEach((value, index) => {
+    const input = inputs[index];
+    input.focus();
+    dateHelper.setNativeInputValue(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  return JSON.stringify({ found: inputs.length, filled: true, values: inputs.slice(0, 2).map((input) => input.value) });
+})()
+`;
+
+  try {
+    return parseEvalJson(agent.evaluate(script)).filled === true;
+  } catch {
+    return false;
+  }
+}
+
+/** 完成范围输入后用 Enter 提交结束值，再把焦点移出控件。 */
+function commitDatePickerRangeDomValue(agent: BrowserAgent, field: string | null): void {
+  const script = `(() => {
+  const dateHelper = ${datePickerDomHelperSource()};
+  const inputs = dateHelper.findDateInputsByField(${JSON.stringify(field)});
+  const endInput = inputs[1];
+  if (!endInput) {
+    return JSON.stringify({ found: false });
+  }
+  endInput.focus();
+  endInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+  endInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }));
+  endInput.blur();
+  return JSON.stringify({ found: true, values: inputs.slice(0, 2).map((input) => input.value) });
+})()
+`;
+
+  try {
+    agent.evaluate(script);
+  } catch {
+    // 提交动作失败时继续由范围值和面板状态校验决定结果。
+  }
+}
+
+/** 通过 Escape 和外部点击关闭 DatePicker 浮层，确保下一步不会被日历遮挡。 */
+function dismissDatePickerPanel(agent: BrowserAgent, field: string | null): void {
+  const script = `(() => {
+  const dateHelper = ${datePickerDomHelperSource()};
+  const inputs = dateHelper.findDateInputsByField(${JSON.stringify(field)});
+  const active = document.activeElement;
+  active?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+  inputs.forEach((input) => input.blur());
+  document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+  document.body.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  return JSON.stringify({ dismissed: true });
+})()
+`;
+
+  try {
+    agent.evaluate(script);
+  } catch {
+    // 关闭失败会在后续面板状态校验中返回失败，不在这里吞掉成功条件。
+  }
+}
+
+/** 同时读取范围控件的起止值，snapshot 未暴露 value 时仍可可靠确认。 */
+function verifyDatePickerDomRange(agent: BrowserAgent, field: string | null, startDate: string, endDate: string): boolean | null {
+  const script = `(() => {
+  const dateHelper = ${datePickerDomHelperSource()};
+  const inputs = dateHelper.findDateInputsByField(${JSON.stringify(field)});
+  return JSON.stringify({ found: inputs.length >= 2, values: inputs.slice(0, 2).map((input) => input.value || input.getAttribute('value') || '') });
+})()
+`;
+
+  try {
+    const parsed = parseEvalJson(agent.evaluate(script));
+    return parsed.found === true && parsed.values?.[0]?.includes(startDate) === true && parsed.values?.[1]?.includes(endDate) === true;
+  } catch {
+    return null;
+  }
+}
+
+/** 检查是否仍有可见日期浮层，范围动作只有在浮层关闭后才算完成。 */
+function inspectDatePickerPanelOpen(agent: BrowserAgent): boolean | null {
+  const script = `(() => {
+  const dateHelper = ${datePickerDomHelperSource()};
+  const open = [...document.querySelectorAll('.ant-picker-dropdown, .datepicker-dropdown, [class*="picker-dropdown"]')]
+    .some((element) => dateHelper.browserOptDateVisible(element) && !element.classList.contains('ant-picker-dropdown-hidden'));
+  return JSON.stringify({ found: true, open });
+})()
+`;
+
+  try {
+    return parseEvalJson(agent.evaluate(script)).open === true;
+  } catch {
+    return null;
+  }
 }
 
 /** DatePicker 不是普通选项控件，先归一化日期并直接输入，最后才兜底点击面板。 */
@@ -299,6 +463,8 @@ function parseEvalJson(raw: string): {
   disabled?: boolean;
   reason?: string;
   readOnly?: boolean;
+  open?: boolean;
+  values?: string[];
 } {
   const decoded = JSON.parse(raw.trim()) as unknown;
   return typeof decoded === 'string'
@@ -324,6 +490,9 @@ const browserOptDateInputs = (root = document) => [...root.querySelectorAll('inp
     return input.type === 'date' || text.includes('日期') || text.includes('时间') || text.includes('date') || text.includes('time') || className.includes('picker');
   });
 function findDateInputByField(field) {
+  return findDateInputsByField(field)[0] || null;
+}
+function findDateInputsByField(field) {
   const fieldText = normalizeBrowserOptDateText(field);
   if (fieldText) {
     const labels = [...document.querySelectorAll('label')]
@@ -333,16 +502,17 @@ function findDateInputByField(field) {
       const forId = label.getAttribute('for');
       const byId = forId ? document.getElementById(forId) : null;
       if (byId?.tagName === 'INPUT' && browserOptDateVisible(byId)) {
-        return byId;
+        const picker = byId.closest('.ant-picker, .datepicker, .date-picker');
+        return picker ? browserOptDateInputs(picker) : [byId];
       }
       const formItem = label.closest('.ant-form-item, .form-item, [class*="form-item"]');
-      const scoped = formItem ? browserOptDateInputs(formItem)[0] : null;
-      if (scoped) {
+      const scoped = formItem ? browserOptDateInputs(formItem) : [];
+      if (scoped.length > 0) {
         return scoped;
       }
     }
   }
-  return browserOptDateInputs()[0] || null;
+  return browserOptDateInputs();
 }
 function setNativeInputValue(input, value) {
   const prototype = Object.getPrototypeOf(input);
@@ -408,6 +578,7 @@ return {
   browserOptDateVisible,
   clickDateCell,
   findDateInputByField,
+  findDateInputsByField,
   inspectDateCell,
   inspectDatePickerCommitButton,
   setNativeInputValue,
