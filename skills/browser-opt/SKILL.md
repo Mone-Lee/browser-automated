@@ -1,7 +1,6 @@
 ---
 name: browser-opt
-description: Execute natural-language browser flows with agent-browser and produce simplified PASS/FAIL results.
-summary: Run deterministic browser execution loops with screenshots, JSON snapshots, retries, and concise success output.
+description: Execute natural-language browser flows with agent-browser and produce simplified PASS/FAIL results, or inspect and update the installed browser-opt npm package version. Use for browser flows, version queries, update checks, and npm package updates.
 ---
 
 # browser-opt skill
@@ -9,6 +8,35 @@ summary: Run deterministic browser execution loops with screenshots, JSON snapsh
 This skill is the deterministic browser execution entrypoint. It is intentionally separate from `browser-e2e`: `browser-opt` runs the flow now and reports evidence; it does not match generated tests or create Playwright code.
 
 By default, the calling AI is responsible for understanding the page from `snapshot --json`; `agent-browser` only executes deterministic commands such as `open`, `fill @ref`, `click @ref`, screenshots, and waits. Do not use `agent-browser chat` unless the user explicitly asks for the legacy chat mode or passes `--agent-chat`.
+
+## npm package version management
+
+Treat explicit version queries and update requests as package management. Do not open Chrome,
+start a browser run, or perform the normal pre-run update check for these requests.
+
+- To view the installed `browser-opt` package version, run `browser-opt --version`.
+- To compare the installed version with the current npm registry version, run
+  `browser-opt check-update --no-cache --json`. Use `--no-cache` for an explicit user query so
+  the answer is not taken from the short-lived background cache. Report `currentVersion`,
+  `latestVersion`, and `status`. If the status is `unknown`, report the returned error and do not
+  claim that the package is current.
+- To update the npm package to the latest version, first resolve the current `browser-opt`
+  executable and its real target. If it points into a local development repository, preserve the
+  local link and report that package update is blocked by local-source mode; in that repository,
+  use `npm run browser-opt:use-npm` only when the user explicitly wants to leave local-source mode.
+  Otherwise run `browser-opt update`.
+- After an update, run `browser-opt --version` and
+  `browser-opt check-update --no-cache --json` again. Report the installed version and whether it
+  matches npm. If `update` reports that the shell still resolves a stale executable, report both
+  paths and versions instead of claiming the shell is already using the update.
+
+Examples:
+
+```text
+/browser-opt 查看当前安装的 npm 包版本
+/browser-opt 检查 browser-opt 是否有新版本
+/browser-opt 更新 browser-opt npm 包到最新版
+```
 
 Natural-language steps that explicitly ask to open developer tools are mapped to
 CDP's experimental `Target.openDevTools` command. This opens native DevTools for

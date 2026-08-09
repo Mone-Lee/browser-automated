@@ -1,14 +1,17 @@
 {
   "name": "browser-opt",
   "version": "0.2.0",
-  "description": "Run immediate or project-saved natural-language browser workflows with simplified PASS/FAIL results",
+  "description": "Run natural-language browser workflows and inspect or update the installed browser-opt npm package version",
   "triggers": [
     "browser-opt",
     "natural language browser flow",
     "execute browser flow",
     "自然语言执行浏览器流程",
     "执行已保存的浏览器流程",
-    "运行 workflow"
+    "运行 workflow",
+    "查看 browser-opt 版本",
+    "检查 browser-opt npm 最新版本",
+    "更新 browser-opt npm 包"
   ],
   "inputs": {
     "type": "object",
