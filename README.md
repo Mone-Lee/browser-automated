@@ -192,6 +192,38 @@ npm pack --dry-run -w browser-opt
 npm pack --dry-run -w browser-e2e
 ```
 
+### 在其他项目调试本地 browser-opt
+
+在本仓库根目录执行下面的命令，将当前 Node/NVM 环境中的全局 `browser-opt` 切换到本地源码构建：
+
+```bash
+npm run browser-opt:use-local
+npm run browser-opt:status
+```
+
+之后切换到任意其他项目，继续直接调用 `browser-opt` 即可，不需要修改其他项目的依赖：
+
+```bash
+cd /path/to/another-project
+browser-opt --version
+browser-opt check-update --json
+```
+
+本地源码再次修改后，重新执行 `npm run browser-opt:use-local`，它会刷新 `dist` 并保持全局软链。调试完成后恢复 npm 最新版：
+
+```bash
+npm run browser-opt:use-npm
+npm run browser-opt:status
+```
+
+`browser-opt:status` 会同时检查软链目标和执行权限；若显示“不可执行”，重新运行 `npm run browser-opt:use-local` 即可修复本地构建入口权限，不要用 `npx browser-opt@latest install` 覆盖本地调试链接。
+
+需要恢复指定 npm 版本时，可把版本号透传给切换脚本：
+
+```bash
+npm run browser-opt:use-npm -- 1.0.21
+```
+
 只改共享底层代码并需要刷新某个 CLI 的本地构建产物时：
 
 ```bash

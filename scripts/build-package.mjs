@@ -3,7 +3,7 @@
  * browser-core 只保留源码职责，不作为独立 npm package 参与安装和发布。
  */
 import { execFileSync } from 'node:child_process';
-import { rmSync } from 'node:fs';
+import { chmodSync, rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -38,3 +38,7 @@ if (typecheckOnly) {
   packageArgs.push('--noEmit');
 }
 execFileSync(process.execPath, packageArgs, { cwd: repositoryRoot, stdio: 'inherit' });
+
+if (!typecheckOnly && process.platform !== 'win32') {
+  chmodSync(resolve(outputDir, 'cli', `${packageName}.js`), 0o755);
+}

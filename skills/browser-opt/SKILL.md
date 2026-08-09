@@ -61,6 +61,9 @@ Every execution must follow these rules:
   `outdated`, tell the user the current and latest versions and recommend
   `browser-opt update`; if the shell still points to a stale binary or `update` 不可用，再回退到 `npx browser-opt@latest install`；然后继续
   requested workflow unless the user asks to update first. If it returns `unknown`, continue without blocking.
+- 如果 `browser-opt` 因执行权限失败，先检查命令软链的真实目标。真实目标位于本地开发仓库时，禁止运行
+  `npx browser-opt@latest install` 覆盖本地链接；应在该仓库重新运行 `npm run browser-opt:use-local`，再确认
+  `browser-opt:status` 显示“本地源码”。
 - Always open the actual system Chrome browser for the run. Do not open or operate inside the agent tool's built-in browser, including the Copilot/Codex in-app browser or any agent-browser dashboard/preview window.
 - Strictly run an `open -> snapshot --json -> deterministic act -> re-snapshot` loop.
 - Take a screenshot for every step.

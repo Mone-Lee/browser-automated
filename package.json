@@ -12,6 +12,9 @@
   "scripts": {
     "build": "npm run build:core && npm run build --workspaces",
     "build:core": "tsc -p packages/browser-core/tsconfig.json",
+    "browser-opt:status": "node scripts/switch-browser-opt.mjs status",
+    "browser-opt:use-local": "node scripts/switch-browser-opt.mjs local",
+    "browser-opt:use-npm": "node scripts/switch-browser-opt.mjs npm",
     "lockfile:check": "node scripts/check-lockfile.mjs",
     "test": "npm run build && vitest run",
     "test:watch": "vitest",
