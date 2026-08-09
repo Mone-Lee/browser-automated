@@ -504,7 +504,7 @@ describe('browser-opt CLI', () => {
     expect(commands.split('\n').filter((command) => /\bopen https:\/\/example\.com\b/.test(command))).toHaveLength(1);
   }, 20_000);
 
-  it('reuses a stable browser session when rerunning the same saved Workflow', () => {
+  it('uses a fresh browser session when rerunning the same saved Workflow', () => {
     const workflowDir = makeTempDir();
     const firstOutputDir = makeTempDir();
     const secondOutputDir = makeTempDir();
@@ -550,8 +550,42 @@ describe('browser-opt CLI', () => {
     const secondSessions = extractLoggedSessions(fs.readFileSync(secondCommandLog, 'utf-8'));
     expect(new Set(firstSessions).size).toBe(1);
     expect(new Set(secondSessions).size).toBe(1);
-    expect(firstSessions[0]).toBe(secondSessions[0]);
+    expect(firstSessions[0]).not.toBe(secondSessions[0]);
     expect(firstSessions[0]).toMatch(/^browser-opt-[a-f0-9]{16}$/);
+    expect(secondSessions[0]).toMatch(/^browser-opt-[a-f0-9]{16}$/);
+  });
+
+  it('reuses an explicitly configured browser session for a saved Workflow', () => {
+    const workflowDir = makeTempDir();
+    const outputDir = makeTempDir();
+    const commandLog = path.join(makeTempDir(), 'agent-browser.log');
+    const stateDir = makeTempDir();
+    fs.writeFileSync(path.join(stateDir, 'browser-opt-default.json'), JSON.stringify({ cookies: [], origins: [] }));
+    expect(runCli([
+      'browser-opt',
+      'save',
+      '显式会话流程',
+      '--flow',
+      '测试 https://example.com。\\n1. 验证页面包含 "Example"。',
+      '--workflow-dir',
+      workflowDir,
+    ]).status).toBe(0);
+
+    const result = runCli([
+      'browser-opt',
+      'run',
+      '--workflow-id',
+      '显式会话流程',
+      '--workflow-dir',
+      workflowDir,
+      '--output-dir',
+      outputDir,
+      '--session',
+      'caller-managed-session',
+    ], { AGENT_BROWSER_LOG: commandLog, BROWSER_OPT_AUTH_STATE_DIR: stateDir });
+
+    expect(result.status).toBe(0);
+    expect(new Set(extractLoggedSessions(fs.readFileSync(commandLog, 'utf-8')))).toEqual(new Set(['caller-managed-session']));
   });
 
   it('runs a selected saved Workflow by stable ID', () => {

@@ -6,7 +6,7 @@ import {
   browserOptTemplate,
   extractBrowserOptUrl,
 } from '../../browser-opt/utils.js';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import {
   findBrowserOptWorkflowById,
@@ -145,7 +145,6 @@ export async function cmdBrowserOpt(args: string[]): Promise<void> {
 async function executeBrowserOptFlow(
   text: string,
   flags: Record<string, string | boolean>,
-  identity?: string,
 ): Promise<void> {
   const liveViewport = resolveLiveViewport(flags);
   const requestedProfile = resolveProfile(flags) ?? DEFAULT_BROWSER_PROFILE;
@@ -157,7 +156,7 @@ async function executeBrowserOptFlow(
   const { BrowserOptRunner } = await import('../../browser-opt/runner/index.js');
   const runner = new BrowserOptRunner();
   const runnerOptions: BrowserOptRunnerOptions = {
-    sessionId: resolveBrowserOptSessionId(flags, identity),
+    sessionId: resolveBrowserOptSessionId(flags),
     profile: authState.profile,
     statePath: authState.statePath,
     authStateSavePath: authState.authStateSavePath,
@@ -248,7 +247,7 @@ async function runWorkflowCommand(query: string, flags: Record<string, string | 
       printAvailableWorkflows(loaded.workflows);
       process.exit(BROWSER_OPT_EXIT_CODE_NOT_FOUND);
     }
-    await executeBrowserOptFlow(renderBrowserOptWorkflowFlow(workflow), flags, workflow.id);
+    await executeBrowserOptFlow(renderBrowserOptWorkflowFlow(workflow), flags);
     return;
   }
   if (!query.trim()) {
@@ -265,7 +264,7 @@ async function runWorkflowCommand(query: string, flags: Record<string, string | 
     printWorkflowMatch(result);
     process.exit(BROWSER_OPT_EXIT_CODE_NOT_FOUND);
   }
-  await executeBrowserOptFlow(renderBrowserOptWorkflowFlow(result.matched.workflow), flags, result.matched.workflow.id);
+  await executeBrowserOptFlow(renderBrowserOptWorkflowFlow(result.matched.workflow), flags);
 }
 
 /** 后台启动可跨 Codex turn 恢复的即时流程或 Workflow，handoff 期间不依赖临时 PTY 会话。 */
@@ -564,19 +563,14 @@ function defaultBrowserOptStatePath(profile: string): string {
   return path.join(stateDir, `browser-opt-${stateName}.json`);
 }
 
-/** 即时流程使用独立 session；只有显式 session 或已保存 Workflow 才跨执行保持稳定。 */
-function resolveBrowserOptSessionId(flags: Record<string, string | boolean>, identity?: string): string {
+/** 每次独立执行默认创建新 session；只有调用方显式指定时才复用已有浏览器。 */
+function resolveBrowserOptSessionId(flags: Record<string, string | boolean>): string {
   const configuredSession = getStringFlag(flags, 'session')?.trim();
   if (configuredSession) {
     return configuredSession;
   }
 
-  if (!identity) {
-    return `browser-opt-${randomUUID().replaceAll('-', '').slice(0, 16)}`;
-  }
-
-  const seed = `${process.cwd()}\n${identity}`;
-  return `browser-opt-${createHash('sha256').update(seed).digest('hex').slice(0, 16)}`;
+  return `browser-opt-${randomUUID().replaceAll('-', '').slice(0, 16)}`;
 }
 
 /** 读取终端输入，供 handoff 暂停点等待用户确认继续。 */
