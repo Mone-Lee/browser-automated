@@ -15,6 +15,7 @@ import {
   findClickableRef,
   findSelectableFieldRef,
   findSelectableOption,
+  isVerificationStep,
   parseDeterministicAction,
   readTextboxValue,
 } from '../../packages/browser-opt/dist/browser-opt/utils.js';
@@ -80,6 +81,7 @@ function buildAgent(options: {
     }),
     fill: vi.fn(() => 'filled'),
     click: vi.fn(() => 'clicked'),
+    check: vi.fn(() => 'checked'),
     upload: vi.fn(() => 'uploaded'),
     handoff: vi.fn(() => 'HANDOFF: waiting'),
     resume: vi.fn(() => 'RESUME_FALLBACK: continuing session browser-opt-test-session without an explicit resume command.'),
@@ -124,6 +126,17 @@ describe('browser-opt parsing', () => {
       field: '更新时间',
       option: '2026-08-06',
       endOption: '2026-08-09',
+    });
+  });
+
+  it('parses ordered table row checkbox instructions as collection actions', () => {
+    expect(parseDeterministicAction('列表勾选前10条数据')).toEqual({
+      type: 'check-table-rows',
+      count: 10,
+    });
+    expect(parseDeterministicAction('在查询结果表格中，从第一条数据行开始，按当前显示顺序逐行勾选前 10 个“行选择复选框”')).toEqual({
+      type: 'check-table-rows',
+      count: 10,
     });
   });
 
@@ -284,6 +297,14 @@ describe('browser-opt parsing', () => {
     });
   });
 
+  it('does not treat a prerequisite phrase as a verification assertion', () => {
+    expect(isVerificationStep('仅当上述验证通过后，点击“导出”按钮')).toBe(false);
+    expect(parseDeterministicAction('仅当上述验证通过后，点击“导出”按钮')).toEqual({
+      type: 'click',
+      target: '导出',
+    });
+  });
+
   it('does not fall back to the first clickable node when a click target is missing', () => {
     const snapshot = {
       output: snapshotJson('', {
@@ -315,6 +336,18 @@ describe('browser-opt parsing', () => {
     };
 
     expect(readTextboxValue(snapshot, '商品长标题')).toBe('完整自动化创建药品分类商品');
+  });
+
+  it('returns null when the matched textbox snapshot line omits its value', () => {
+    const snapshot = {
+      output: snapshotJson('', {
+        e1: { role: 'textbox', name: '供应商名称' },
+      }),
+      text: '- textbox "供应商名称" [ref=e1]',
+      nodeCount: 1,
+    };
+
+    expect(readTextboxValue(snapshot, '供应商名称')).toBeNull();
   });
 
   it('does not reuse an unrelated switch option when the target field is a dropdown', () => {
@@ -648,10 +681,35 @@ describe('BrowserOptRunner', () => {
 
     expect(result.passed).toBe(true);
     expect(evaluate).toHaveBeenCalledTimes(1);
+    expect((evaluate.mock.calls[0]?.[0] as string)).toContain("element.closest('[role=\"combobox\"], .ant-select, .el-select')");
+    expect((evaluate.mock.calls[0]?.[0] as string)).toContain('if (!preserveFocus)');
     expect((agent.fill as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect((agent.waitMs as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(300);
     expect(result.report.steps[0].actionOutput).toContain('fill dom 商品标题 "芝麻丸礼盒"');
     expect(result.report.steps[0].verification).toContain('已确认输入值：商品标题=芝麻丸礼盒');
+  });
+
+  it('uses the field-scoped DOM value when snapshot omits the filled textbox value', async () => {
+    const outputDir = makeTempDir();
+    const textboxSnapshot = '- textbox "供应商名称" [ref=e1]';
+    const evaluate = vi.fn(() => JSON.stringify({ found: true, value: '广州澳创投资有限公司' }));
+    const agent = buildAgent({
+      evaluate,
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(textboxSnapshot, { e1: { role: 'textbox', name: '供应商名称' } }),
+        snapshotJson(textboxSnapshot, { e1: { role: 'textbox', name: '供应商名称' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. “供应商名称”输入“广州澳创投资有限公司”。', {
+      outputDir,
+    });
+
+    expect(result.passed).toBe(true);
+    expect(evaluate).toHaveBeenCalledTimes(1);
+    expect(result.report.steps[0].verification).toContain('已通过 DOM 确认输入值：供应商名称=广州澳创投资有限公司');
   });
 
   it('re-snapshots before filling a field that appears after an SPA transition', async () => {
@@ -1593,6 +1651,73 @@ describe('BrowserOptRunner', () => {
     expect(result.passed).toBe(true);
     expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect(result.report.steps[0].actionOutput).toContain('selection skipped');
+  });
+
+  it('checks the first N table row checkboxes without clicking the header select-all checkbox', async () => {
+    const outputDir = makeTempDir();
+    const beforeRows = Array.from({ length: 12 }, (_, index) => [
+      `- row "数据 ${index + 1}" [ref=r${index + 1}]`,
+      `  - cell "" [ref=c${index + 1}]`,
+      `    - checkbox "" [checked=false, ref=e${index + 1}]`,
+    ].join('\n')).join('\n');
+    const afterRows = beforeRows.replace(
+      /checkbox "" \[checked=false, ref=e(\d+)\]/g,
+      (line, value: string) => Number(value) <= 10 ? line.replace('checked=false', 'checked=true') : line,
+    );
+    const tableHeader = [
+      '- row "商品信息" [ref=header]',
+      '  - columnheader "" [ref=header-cell]',
+      '    - checkbox "Select all" [checked=false, ref=select-all]',
+    ].join('\n');
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(`${tableHeader}\n${beforeRows}`),
+        snapshotJson(`${tableHeader}\n${beforeRows}`),
+        snapshotJson(`${tableHeader}\n${afterRows}`),
+        snapshotJson(`${tableHeader}\n${afterRows}`),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 在查询结果表格中按顺序勾选前 10 个“行选择复选框”。', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.check as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(10);
+    expect((agent.check as ReturnType<typeof vi.fn>)).not.toHaveBeenCalledWith('select-all');
+    expect((agent.check as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(1, 'e1');
+    expect((agent.check as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(10, 'e10');
+    expect(result.report.steps[0].verification).toContain('表格前 10 条数据行');
+  });
+
+  it('re-snapshots the table and retries a row whose selection was lost during async refresh', async () => {
+    const outputDir = makeTempDir();
+    const makeRows = (prefix: string, selectedIndexes: number[]) => Array.from({ length: 12 }, (_, index) => [
+      `- row "${prefix} ${index + 1}" [ref=${prefix}-r${index + 1}]`,
+      `  - cell "" [ref=${prefix}-c${index + 1}]`,
+      `    - checkbox "" [checked=${selectedIndexes.includes(index + 1)}, ref=${prefix}-e${index + 1}]`,
+    ].join('\n')).join('\n');
+    const oldRows = makeRows('old', []);
+    const refreshedRows = makeRows('new', [1, 2, 3, 4, 5, 6, 7, 9, 10]);
+    const completedRows = makeRows('new', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(oldRows),
+        snapshotJson(oldRows),
+        snapshotJson(refreshedRows),
+        snapshotJson(completedRows),
+        snapshotJson(completedRows),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 在查询结果表格中按顺序勾选前 10 个“行选择复选框”。', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.check as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(11);
+    expect((agent.check as ReturnType<typeof vi.fn>)).toHaveBeenLastCalledWith('new-e8');
+    expect(result.report.steps[0].actionOutput).toContain('selection retry 1');
   });
 
   it('toggles a switch field to the requested yes-no state', async () => {
@@ -3108,6 +3233,46 @@ describe('BrowserOptRunner', () => {
     expect(reportMarkdown).toContain('## Failed Steps');
     expect(reportMarkdown).toContain('1. 验证页面包含 "Dashboard"。');
     expect(reportMarkdown).not.toContain('2. 验证页面包含 "Example"。:');
+  });
+
+  it('blocks a high-impact action when any preceding step failed', async () => {
+    const outputDir = makeTempDir();
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before failed assertion'),
+        snapshotJson('after failed assertion'),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 验证页面包含“已选择 10 条”。\n2. 点击“导出”按钮。', { outputDir });
+
+    expect(result.passed).toBe(false);
+    expect(result.report.steps).toHaveLength(1);
+    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(result.report.logs.join('\n')).toContain('high-impact-action-blocked');
+    expect(result.report.logs.join('\n')).toContain('前置步骤失败');
+  });
+
+  it('stops before confirmation when a high-impact action itself fails', async () => {
+    const outputDir = makeTempDir();
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before submit', { e1: { role: 'button', name: '提交' } }),
+        snapshotJson('after submit without success', { e1: { role: 'button', name: '提交' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 点击“提交”并验证页面包含“成功”。\n2. 点击“确认”按钮。', { outputDir });
+
+    expect(result.passed).toBe(false);
+    expect(result.report.steps).toHaveLength(1);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e1');
+    expect(result.report.logs.join('\n')).toContain('high-impact-action-failed');
   });
 
   it('throws a template error when no URL can be extracted', async () => {

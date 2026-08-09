@@ -101,6 +101,7 @@ export type DeterministicAction =
   | { type: 'inspect' }
   | { type: 'fill'; field: string; value: string }
   | { type: 'click'; target: string; field?: string | null }
+  | { type: 'check-table-rows'; count: number }
   | { type: 'select-option'; field: string | null; option: string; endOption?: string }
   | { type: 'upload'; field: string; source: string }
   | { type: 'handoff'; message: string }

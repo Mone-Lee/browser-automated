@@ -119,6 +119,11 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
     };
   }
 
+  const tableRowCheckboxCount = parseTableRowCheckboxCount(normalized);
+  if (tableRowCheckboxCount !== null) {
+    return { type: 'check-table-rows', count: tableRowCheckboxCount };
+  }
+
   const quoted = extractQuotedSegments(normalized);
   const fillVerb = actionText.match(/输入|填写|填入|type|fill/i);
   if (fillVerb && quoted.length > 0) {
@@ -161,6 +166,27 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
   }
 
   return null;
+}
+
+/** 识别表格或列表中按显示顺序勾选前 N 条数据的集合动作。 */
+function parseTableRowCheckboxCount(instruction: string): number | null {
+  if (!/(?:表格|列表|数据行)/.test(instruction) || !/(?:勾选|选中|勾上|check)/i.test(instruction)) {
+    return null;
+  }
+
+  const count = instruction.match(/前\s*(\d+)\s*(?:条|个|行)/)?.[1];
+  if (!count) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(count, 10);
+  return parsed > 0 ? parsed : null;
+}
+
+/** 判断步骤是否会触发导出、删除或提交等需要前置条件保护的高影响操作。 */
+export function isHighImpactInstruction(instruction: string): boolean {
+  const action = parseDeterministicAction(instruction);
+  return action?.type === 'click' && /导出|删除|提交|发布|保存|确认|支付|退款|上架|下架/.test(instruction);
 }
 
 /** 识别明确要求打开当前页面开发者工具的中英文表达，避免把普通“检查页面”误判为 inspect。 */
@@ -402,7 +428,7 @@ export function readTextboxValue(snapshot: SnapshotEvidence, field: string): str
   }
 
   const separator = line.slice(metadataEnd + 1).match(/^\s*:\s?(.*)$/);
-  return separator ? separator[1] ?? '' : '';
+  return separator ? separator[1] ?? '' : null;
 }
 
 /** 在当前快照中查找可点击元素，并按目标文案做最佳匹配。 */
@@ -958,7 +984,11 @@ function findFirstStringProperty(value: unknown, keys: string[]): string | null 
 
 /** 判断一条自然语言步骤是否主要承担验证职责。 */
 export function isVerificationStep(instruction: string): boolean {
-  return /验证|断言|检查|verify|assert|expect|should|包含|存在|至少\s*\d+/i.test(instruction);
+  const normalized = instruction.replace(
+    /^\s*(?:仅当|如果|若)?(?:上述|前置|上一步)?验证通过后[，,]?\s*/,
+    '',
+  );
+  return /验证|断言|检查|verify|assert|expect|should|包含|存在|至少\s*\d+/i.test(normalized);
 }
 
 /** 对步骤执行后的页面状态做验证，生成可直接写入报告的结果说明。 */

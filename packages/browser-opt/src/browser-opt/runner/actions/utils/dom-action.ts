@@ -9,6 +9,7 @@ interface FieldScopedDomResult {
   clicked?: boolean;
   filled?: boolean;
   targetText?: string;
+  value?: string;
 }
 
 export function clickFieldScopedDomTarget(agent: BrowserAgent, field: string, target: string): string | null {
@@ -43,6 +44,21 @@ export function fillFieldScopedDomTarget(agent: BrowserAgent, field: string, val
       return `fill dom ${field} ${JSON.stringify(value)}`;
     }
     return null;
+  } catch {
+    return null;
+  }
+}
+
+/** 读取字段对应输入控件的真实 DOM 值，供 snapshot 未暴露值时做后置校验。 */
+export function readFieldScopedDomValue(agent: BrowserAgent, field: string): string | null {
+  const script = `(() => {
+  const helper = ${fieldScopedDomHelperSource()};
+  return JSON.stringify(helper.readFieldScopedValue(${JSON.stringify(field)}));
+})()`;
+
+  try {
+    const parsed = parseEvalJson(agent.evaluate(script));
+    return parsed.found && typeof parsed.value === 'string' ? parsed.value : null;
   } catch {
     return null;
   }
@@ -112,6 +128,7 @@ const dispatchMouse = (element) => {
 const dispatchValue = (element, value) => {
   element.scrollIntoView({ block: 'center', inline: 'nearest' });
   element.focus?.();
+  const preserveFocus = Boolean(element.closest('[role="combobox"], .ant-select, .el-select'));
   if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
     const proto = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
@@ -121,7 +138,9 @@ const dispatchValue = (element, value) => {
   }
   element.dispatchEvent(new Event('input', { bubbles: true }));
   element.dispatchEvent(new Event('change', { bubbles: true }));
-  element.blur?.();
+  if (!preserveFocus) {
+    element.blur?.();
+  }
 };
 const candidates = () => [...document.body.querySelectorAll('*')].filter((element) => visible(element));
 const fieldElements = (field) => {
@@ -201,7 +220,17 @@ function fillFieldScopedTarget(field, value) {
   }
   return { found: result.fields.length > 0, filled: false };
 }
-return { clickFieldScopedTarget, fillFieldScopedTarget };
+function readFieldScopedValue(field) {
+  const result = scopedTarget(field, inputLike);
+  if (!result.element) {
+    return { found: false };
+  }
+  const value = result.element instanceof HTMLInputElement || result.element instanceof HTMLTextAreaElement
+    ? result.element.value
+    : result.element.textContent || '';
+  return { found: true, value };
+}
+return { clickFieldScopedTarget, fillFieldScopedTarget, readFieldScopedValue };
 })()
 `;
 }

@@ -17,6 +17,7 @@ import {
   browserOptTemplate,
   extractBrowserOptUrl,
   findTextboxRef,
+  isHighImpactInstruction,
   renderMarkdownReport,
   resolveOutputDir,
   splitBrowserOptSteps,
@@ -69,6 +70,7 @@ export class BrowserOptRunner {
     let handoffTriggered = false;
     let fatalError: string | undefined;
     let authStateFallbackUsed = false;
+    let hasFailedStep = false;
     logAuthStateMode(logs, options);
     const openedWithProfile = Boolean(options.profile && !options.statePath);
     let agent = this.agentFactory({
@@ -197,6 +199,12 @@ export class BrowserOptRunner {
       }
 
       for (let index = 0; index < steps.length && !handoffTriggered; index++) {
+        if (hasFailedStep && isHighImpactInstruction(steps[index])) {
+          fatalError = `已阻止高影响步骤 ${index + 1}：前置步骤失败，未执行“${steps[index]}”。`;
+          logs.push(`high-impact-action-blocked: ${fatalError}`);
+          break;
+        }
+
         const result = await executeStep(agent, outputDir, index + 1, steps[index], {
           useAgentChat: options.useAgentChat ?? false,
           alreadyOpenedUrl: index === 0 ? url : undefined,
@@ -209,6 +217,14 @@ export class BrowserOptRunner {
         logs.push(...result.logs);
         if (result.handoffTriggered) {
           handoffTriggered = true;
+        }
+        if (!result.passed && !result.handoffTriggered) {
+          hasFailedStep = true;
+          if (isHighImpactInstruction(steps[index])) {
+            fatalError = `高影响步骤 ${index + 1} 执行失败，已停止后续操作。`;
+            logs.push(`high-impact-action-failed: ${fatalError}`);
+            break;
+          }
         }
       }
     } catch (err) {

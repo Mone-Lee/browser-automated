@@ -9,6 +9,7 @@ import { executeFillAction, verifyFillActionEffect } from './utils/fill-action.j
 import { executeHandoffAction } from './utils/handoff-action.js';
 import { executeOpenAction } from './utils/open-action.js';
 import { executeSelectOptionAction, verifySelectOptionActionEffect } from './utils/select-option-action.js';
+import { executeTableRowCheckboxAction, verifyTableRowCheckboxActionEffect } from './utils/table-row-checkbox-action.js';
 import { executeUploadAction } from './utils/upload-action.js';
 
 /** 将自然语言动作直接映射到确定性命令，避免默认依赖 agent-browser chat。 */
@@ -40,6 +41,10 @@ export async function executeDeterministicInstruction(
     return executeClickAction(agent, action, snapshot);
   }
 
+  if (action.type === 'check-table-rows') {
+    return executeTableRowCheckboxAction(agent, action, snapshot);
+  }
+
   if (action.type === 'select-option') {
     return executeSelectOptionAction(agent, action, snapshot, options);
   }
@@ -62,11 +67,15 @@ export function verifyDeterministicActionEffect(
   afterSnapshot: SnapshotEvidence,
 ): { passed: boolean; message: string } {
   if (action.type === 'fill') {
-    return verifyFillActionEffect(action, afterSnapshot);
+    return verifyFillActionEffect(agent, action, afterSnapshot);
   }
 
   if (action.type === 'select-option') {
     return verifySelectOptionActionEffect(agent, action, afterSnapshot);
+  }
+
+  if (action.type === 'check-table-rows') {
+    return verifyTableRowCheckboxActionEffect(action, afterSnapshot);
   }
 
   return { passed: true, message: '动作步骤已完成，已重新 snapshot。' };
