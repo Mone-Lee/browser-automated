@@ -384,6 +384,11 @@ export class BrowserAgent {
     return this.run(['click', `@${ref.replace(/^@/, '')}`]);
   }
 
+  /** 通过 ref 将复选框置为选中状态，避免普通点击在状态已变化时发生反向切换。 */
+  check(ref: string): string {
+    return this.run(['check', `@${ref.replace(/^@/, '')}`]);
+  }
+
   /** 通过 ref 填充输入框，例如 snapshot 结果中的 e10。 */
   fill(ref: string, value: string): string {
     return this.run(['fill', `@${ref.replace(/^@/, '')}`, value]);

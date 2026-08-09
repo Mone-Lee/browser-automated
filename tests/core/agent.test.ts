@@ -33,6 +33,21 @@ beforeEach(() => {
 });
 
 describe('BrowserAgent', () => {
+  describe('check()', () => {
+    it('uses the idempotent agent-browser checkbox command', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult(''));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session' });
+      agent.check('e8');
+
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'agent-browser',
+        expect.arrayContaining(['check', '@e8']),
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+    });
+  });
+
   describe('inspect()', () => {
     it('opens native DevTools for the active page through CDP', async () => {
       const sentMessages: Array<{ id: number; method: string; params?: Record<string, string> }> = [];
