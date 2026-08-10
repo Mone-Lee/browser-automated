@@ -65,7 +65,8 @@ export function captureSettledSnapshot(
 }
 
 export function isBlankInitialSnapshot(snapshot: SnapshotEvidence): boolean {
-  return snapshot.nodeCount === 0 && snapshot.text.trim() === '(no interactive elements)';
+  const text = snapshot.text.trim();
+  return snapshot.nodeCount === 0 && text === '(no interactive elements)';
 }
 
 /** 空白活动页持续不退场时，尝试切换到同一会话中已经打开的业务页或登录页。 */
