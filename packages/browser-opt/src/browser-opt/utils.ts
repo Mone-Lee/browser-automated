@@ -48,7 +48,8 @@ export function splitBrowserOptSteps(text: string): string[] {
     .map((line) => line.match(/^(?:目标[:：]\s*)?(\d+)[\.)、]\s*(.+)$/))
     .filter((match): match is RegExpMatchArray => Boolean(match?.[2]))
     .map((match) => match[2].trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .flatMap((line) => splitCompoundSelectableStep(line));
 
   if (numbered.length > 0) {
     return numbered;
@@ -73,25 +74,45 @@ export function splitBrowserOptSteps(text: string): string[] {
   return compact ? [compact] : [];
 }
 
-/** 将“字段选择 A 和 B”拆成两条独立选择步骤，避免只执行最后一个选项。 */
+/**
+ * 将“字段选择 A 和 B”拆成多个独立选择步骤，并保留原始选择意图。
+ * 取消多个选项时从后向前执行，兼容后置选项依赖前置选项的联动约束。
+ */
 function splitCompoundSelectableStep(instruction: string): string[] {
-  const verb = instruction.match(SELECTABLE_VERB_RE);
+  const verb = maskQuotedSegments(instruction).match(SELECTABLE_VERB_RE);
   const quoted = extractQuotedSegments(instruction);
   if (!verb || quoted.length < 2) {
     return [instruction];
   }
 
-  const field = parseSelectableFieldName(instruction, quoted[0]);
+  const quotedField = quoted[0].index < (verb.index ?? 0);
+  const field = quotedField ? quoted[0].value : parseSelectableFieldName(instruction, quoted[0]);
+  const optionSegments = quoted.slice(quotedField ? 1 : 0);
   if (!field) {
     return [instruction];
   }
 
-  const betweenOptions = instruction.slice(quoted[0].index + quoted[0].value.length, quoted[1].index);
-  if (!/[和及、,，]/.test(betweenOptions)) {
+  const hasOptionSeparator = optionSegments.slice(1).every((segment, index) => {
+    const previous = optionSegments[index];
+    return previous
+      ? /[和及、,，]/.test(instruction.slice(previous.index + previous.value.length + 2, segment.index))
+      : false;
+  });
+  if (optionSegments.length < 2 || !hasOptionSeparator) {
     return [instruction];
   }
 
-  return quoted.map((segment) => `${field}选择“${segment.value}”`);
+  const selectionMode = parseSelectionMode(instruction);
+  const orderedOptions = selectionMode === 'deselect'
+    ? [...optionSegments].reverse()
+    : optionSegments;
+  const selectionVerb = selectionMode === 'deselect'
+    ? '取消勾选'
+    : selectionMode === 'exclusive'
+      ? '仅勾选'
+      : verb[0];
+  const fieldExpression = selectionMode === 'select' ? field : `“${field}”`;
+  return orderedOptions.map((segment) => `${fieldExpression}${selectionVerb}“${segment.value}”`);
 }
 
 /** 从自然语言步骤中提炼结构化动作，供确定性执行层消费。 */
@@ -152,11 +173,13 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
 
   const selectableTarget = SELECTABLE_VERB_RE.test(actionText) ? parseSelectableTarget(normalized) : null;
   if (selectableTarget) {
+    const selectionMode = parseSelectionMode(normalized);
     return {
       type: 'select-option',
       field: selectableTarget.field,
       option: selectableTarget.option,
       ...(selectableTarget.endOption ? { endOption: selectableTarget.endOption } : {}),
+      ...(selectionMode === 'select' ? {} : { mode: selectionMode }),
     };
   }
 
@@ -166,6 +189,17 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
   }
 
   return null;
+}
+
+/** 识别复选类步骤要求的最终状态，避免把“取消”或“仅保留”退化成普通勾选。 */
+function parseSelectionMode(instruction: string): 'select' | 'deselect' | 'exclusive' {
+  if (/取消(?:勾选|选中|选择)|不勾选|uncheck|deselect/i.test(instruction)) {
+    return 'deselect';
+  }
+  if (/(?:仅|只)(?:勾选|选中|选择)|only\s+(?:check|select)/i.test(instruction)) {
+    return 'exclusive';
+  }
+  return 'select';
 }
 
 /** 识别表格或列表中按显示顺序勾选前 N 条数据的集合动作。 */

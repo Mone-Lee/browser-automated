@@ -102,7 +102,13 @@ export type DeterministicAction =
   | { type: 'fill'; field: string; value: string }
   | { type: 'click'; target: string; field?: string | null }
   | { type: 'check-table-rows'; count: number }
-  | { type: 'select-option'; field: string | null; option: string; endOption?: string }
+  | {
+      type: 'select-option';
+      field: string | null;
+      option: string;
+      endOption?: string;
+      mode?: 'select' | 'deselect' | 'exclusive';
+    }
   | { type: 'upload'; field: string; source: string }
   | { type: 'handoff'; message: string }
   | { type: 'assert-text'; text: string };

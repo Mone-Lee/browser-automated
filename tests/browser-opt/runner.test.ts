@@ -140,6 +140,21 @@ describe('browser-opt parsing', () => {
     });
   });
 
+  it('preserves checkbox final-state intent for exclusive and deselect instructions', () => {
+    expect(parseDeterministicAction('“售后服务”仅勾选“支持7天无理由退换”')).toEqual({
+      type: 'select-option',
+      field: '售后服务',
+      option: '支持7天无理由退换',
+      mode: 'exclusive',
+    });
+    expect(parseDeterministicAction('在“售后服务”中取消勾选“支持换货服务”')).toEqual({
+      type: 'select-option',
+      field: '售后服务',
+      option: '支持换货服务',
+      mode: 'deselect',
+    });
+  });
+
   it('splits numbered target steps', () => {
     const steps = splitBrowserOptSteps(`测试 https://example.com 的搜索功能。
 
@@ -148,6 +163,29 @@ describe('browser-opt parsing', () => {
 2. 验证页面包含 "Example"。`);
 
     expect(steps).toEqual(['打开首页。', '验证页面包含 "Example"。']);
+  });
+
+  it('splits numbered multi-checkbox deselection and preserves reverse dependency order', () => {
+    const steps = splitBrowserOptSteps(`测试 https://example.com。\n\n目标：\n1. “售后服务”取消勾选“支持7天无理由退换”和“支持换货服务”`);
+
+    expect(steps).toEqual([
+      '“售后服务”取消勾选“支持换货服务”',
+      '“售后服务”取消勾选“支持7天无理由退换”',
+    ]);
+    expect(steps.map((step) => parseDeterministicAction(step))).toEqual([
+      {
+        type: 'select-option',
+        field: '售后服务',
+        option: '支持换货服务',
+        mode: 'deselect',
+      },
+      {
+        type: 'select-option',
+        field: '售后服务',
+        option: '支持7天无理由退换',
+        mode: 'deselect',
+      },
+    ]);
   });
 
   it('splits flows that contain escaped newline literals', () => {
