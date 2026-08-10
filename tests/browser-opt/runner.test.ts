@@ -80,6 +80,7 @@ function buildAgent(options: {
       return filePath ?? '/tmp/screenshot.png';
     }),
     fill: vi.fn(() => 'filled'),
+    press: vi.fn(() => 'pressed'),
     click: vi.fn(() => 'clicked'),
     check: vi.fn(() => 'checked'),
     upload: vi.fn(() => 'uploaded'),
@@ -333,6 +334,39 @@ describe('browser-opt parsing', () => {
     expect(parseDeterministicAction('验证页面显示已选分类“药品/OTC药品/感冒发烧”。')).toEqual({
       type: 'assert-text',
       text: '药品/OTC药品/感冒发烧',
+    });
+  });
+
+  it('recognizes a trailing key press as part of a fill action', () => {
+    expect(parseDeterministicAction('在“第 2 个规格类型配置块的规格值输入框”中输入“XL”，并按 Enter 键确认。')).toEqual({
+      type: 'fill',
+      field: '第 2 个规格类型配置块的规格值输入框',
+      value: 'XL',
+      pressKey: 'Enter',
+    });
+
+    expect(parseDeterministicAction('“规格值输入框”输入“绿色”后回车确认')).toEqual({
+      type: 'fill',
+      field: '规格值输入框',
+      value: '绿色',
+      pressKey: 'Enter',
+    });
+
+    expect(parseDeterministicAction('在“搜索框”输入“browser-opt”后按 Tab 键')).toEqual({
+      type: 'fill',
+      field: '搜索框',
+      value: 'browser-opt',
+      pressKey: 'Tab',
+    });
+  });
+
+  it('recognizes standalone special keys and key combinations', () => {
+    expect(parseDeterministicAction('按 Escape 键')).toEqual({ type: 'press-key', key: 'Escape' });
+    expect(parseDeterministicAction('按下方向键')).toEqual({ type: 'press-key', key: 'ArrowDown' });
+    expect(parseDeterministicAction('按 F5 键')).toEqual({ type: 'press-key', key: 'F5' });
+    expect(parseDeterministicAction('按 Ctrl+Shift+S')).toEqual({
+      type: 'press-key',
+      key: 'Control+Shift+S',
     });
   });
 
@@ -739,11 +773,37 @@ describe('BrowserOptRunner', () => {
     expect(result.passed).toBe(true);
     expect(evaluate).toHaveBeenCalledTimes(1);
     expect((evaluate.mock.calls[0]?.[0] as string)).toContain("element.closest('[role=\"combobox\"], .ant-select, .el-select')");
-    expect((evaluate.mock.calls[0]?.[0] as string)).toContain('if (!preserveFocus)');
+    expect((evaluate.mock.calls[0]?.[0] as string)).toContain('if (!preserveFocus && !keepFocus)');
     expect((agent.fill as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect((agent.waitMs as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(300);
     expect(result.report.steps[0].actionOutput).toContain('fill dom 商品标题 "芝麻丸礼盒"');
     expect(result.report.steps[0].verification).toContain('已确认输入值：商品标题=芝麻丸礼盒');
+  });
+
+  it('submits DOM fallback inputs with Enter when requested', async () => {
+    const outputDir = makeTempDir();
+    const evaluate = vi.fn(() => JSON.stringify({ found: true, filled: true, targetText: '规格值输入框' }));
+    const agent = buildAgent({
+      evaluate,
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('- StaticText "规格值输入框"', {}),
+        snapshotJson('- StaticText "规格值输入框"', {}),
+        snapshotJson('- StaticText "XL"', {}),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com。\n\n目标：\n1. 在“规格值输入框”中输入“XL”后回车确认。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(true);
+    expect((agent.fill as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect((agent.press as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('Enter');
+    expect((evaluate.mock.calls[0]?.[0] as string)).toContain('fillFieldScopedTarget("规格值输入框", "XL", true)');
+    expect((evaluate.mock.calls[0]?.[0] as string)).toContain('if (!preserveFocus && !keepFocus)');
   });
 
   it('uses the field-scoped DOM value when snapshot omits the filled textbox value', async () => {
@@ -792,6 +852,47 @@ describe('BrowserOptRunner', () => {
     expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e1', '完整自动化创建药品分类商品');
     expect((agent.evaluate as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect(result.report.steps[0].actionOutput).toContain('fill delayed @e1');
+  });
+
+  it('presses Enter after filling a field and verifies the submitted value', async () => {
+    const outputDir = makeTempDir();
+    const fieldSnapshot = '- textbox "规格值输入框" [ref=e1]';
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(fieldSnapshot, { e1: { role: 'textbox', name: '规格值输入框' } }),
+        snapshotJson('- StaticText "XL"\n' + fieldSnapshot, { e1: { role: 'textbox', name: '规格值输入框' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com。\n\n目标：\n1. 在“规格值输入框”中输入“XL”，并按 Enter 键确认。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(true);
+    expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e1', 'XL');
+    expect((agent.press as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('Enter');
+    expect(result.report.steps[0].verification).toContain('已确认输入并按 Enter 提交');
+  });
+
+  it('executes standalone key combinations', async () => {
+    const outputDir = makeTempDir();
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('- textbox "编辑器" [ref=e1]', { e1: { role: 'textbox', name: '编辑器' } }),
+        snapshotJson('- textbox "编辑器" [ref=e1]', { e1: { role: 'textbox', name: '编辑器' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 按 Ctrl+A', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.press as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('Control+A');
+    expect((agent.fill as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
   });
 
   it('retries a next-step button until an asynchronous page gate allows the transition', async () => {

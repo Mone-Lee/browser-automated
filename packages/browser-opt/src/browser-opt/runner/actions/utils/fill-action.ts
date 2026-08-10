@@ -29,12 +29,14 @@ export function executeFillAction(
     if (ref) {
       agent.scrollIntoView(ref);
       const output = agent.fill(ref, action.value);
-      return `fill delayed @${ref} ${JSON.stringify(action.value)}\n${output}`.trim();
+      const pressOutput = action.pressKey ? agent.press(action.pressKey) : '';
+      return `fill delayed @${ref} ${JSON.stringify(action.value)}\n${output}\n${pressOutput}`.trim();
     }
 
-    const domOutput = fillFieldScopedDomTarget(agent, action.field, action.value);
+    const domOutput = fillFieldScopedDomTarget(agent, action.field, action.value, Boolean(action.pressKey));
     if (domOutput) {
-      return domOutput;
+      const pressOutput = action.pressKey ? agent.press(action.pressKey) : '';
+      return `${domOutput}\n${pressOutput}`.trim();
     }
 
     throw new Error(`无法找到输入框：${action.field}`);
@@ -42,7 +44,8 @@ export function executeFillAction(
 
   agent.scrollIntoView(ref);
   const output = agent.fill(ref, action.value);
-  return `fill @${ref} ${JSON.stringify(action.value)}\n${output}`.trim();
+  const pressOutput = action.pressKey ? agent.press(action.pressKey) : '';
+  return `fill @${ref} ${JSON.stringify(action.value)}\n${output}\n${pressOutput}`.trim();
 }
 
 /** 确认目标输入框已写入预期值，避免命令成功返回但受控表单没有接收输入时误报通过。 */
@@ -52,6 +55,10 @@ export function verifyFillActionEffect(
   afterSnapshot: SnapshotEvidence,
 ): { passed: boolean; message: string } {
   const actualValue = readTextboxValue(afterSnapshot, action.field);
+  if (action.pressKey === 'Enter' && afterSnapshot.text.includes(action.value)) {
+    return { passed: true, message: `已确认输入并按 Enter 提交：${action.field}=${action.value}` };
+  }
+
   if (actualValue === action.value) {
     return { passed: true, message: `已确认输入值：${action.field}=${action.value}` };
   }

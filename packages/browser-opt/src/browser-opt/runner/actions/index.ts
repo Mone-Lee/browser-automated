@@ -37,6 +37,10 @@ export async function executeDeterministicInstruction(
     return executeFillAction(agent, action, snapshot);
   }
 
+  if (action.type === 'press-key') {
+    return agent.press(action.key);
+  }
+
   if (action.type === 'click') {
     return executeClickAction(agent, action, snapshot);
   }

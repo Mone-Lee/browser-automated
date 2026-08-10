@@ -31,10 +31,15 @@ export function clickFieldScopedDomTarget(agent: BrowserAgent, field: string, ta
   }
 }
 
-export function fillFieldScopedDomTarget(agent: BrowserAgent, field: string, value: string): string | null {
+export function fillFieldScopedDomTarget(
+  agent: BrowserAgent,
+  field: string,
+  value: string,
+  preserveFocus = false,
+): string | null {
   const script = `(() => {
   const helper = ${fieldScopedDomHelperSource()};
-  return JSON.stringify(helper.fillFieldScopedTarget(${JSON.stringify(field)}, ${JSON.stringify(value)}));
+  return JSON.stringify(helper.fillFieldScopedTarget(${JSON.stringify(field)}, ${JSON.stringify(value)}, ${preserveFocus}));
 })()`;
 
   try {
@@ -125,7 +130,7 @@ const dispatchMouse = (element) => {
   element.dispatchEvent(new MouseEvent('mouseup', init));
   element.dispatchEvent(new MouseEvent('click', init));
 };
-const dispatchValue = (element, value) => {
+const dispatchValue = (element, value, keepFocus = false) => {
   element.scrollIntoView({ block: 'center', inline: 'nearest' });
   element.focus?.();
   const preserveFocus = Boolean(element.closest('[role="combobox"], .ant-select, .el-select'));
@@ -138,7 +143,7 @@ const dispatchValue = (element, value) => {
   }
   element.dispatchEvent(new Event('input', { bubbles: true }));
   element.dispatchEvent(new Event('change', { bubbles: true }));
-  if (!preserveFocus) {
+  if (!preserveFocus && !keepFocus) {
     element.blur?.();
   }
 };
@@ -212,10 +217,10 @@ function clickFieldScopedTarget(field, target) {
   }
   return { found: result.fields.length > 0, clicked: false };
 }
-function fillFieldScopedTarget(field, value) {
+function fillFieldScopedTarget(field, value, preserveFocus) {
   const result = scopedTarget(field, inputLike);
   if (result.element) {
-    dispatchValue(result.element, value);
+    dispatchValue(result.element, value, preserveFocus);
     return { found: true, filled: true, targetText: textOf(result.element) };
   }
   return { found: result.fields.length > 0, filled: false };

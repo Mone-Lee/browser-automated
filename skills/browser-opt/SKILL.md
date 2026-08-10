@@ -7,7 +7,15 @@ description: Execute natural-language browser flows with agent-browser and produ
 
 This skill is the deterministic browser execution entrypoint. It is intentionally separate from `browser-e2e`: `browser-opt` runs the flow now and reports evidence; it does not match generated tests or create Playwright code.
 
-By default, the calling AI is responsible for understanding the page from `snapshot --json`; `agent-browser` only executes deterministic commands such as `open`, `fill @ref`, `click @ref`, screenshots, and waits. Do not use `agent-browser chat` unless the user explicitly asks for the legacy chat mode or passes `--agent-chat`.
+By default, the calling AI is responsible for understanding the page from `snapshot --json`; `agent-browser` only executes deterministic commands such as `open`, `fill @ref`, `click @ref`, `press`, screenshots, and waits. Do not use `agent-browser chat` unless the user explicitly asks for the legacy chat mode or passes `--agent-chat`.
+
+Keyboard steps support `Enter`, `Tab`, `Escape`, `Backspace`, `Delete`, `Space`, arrow keys, `Home`, `End`, `PageUp`, `PageDown`, `F1`-`F12`, and modifier combinations such as `Control+a` or `Control+Shift+s`. A key press may be a standalone step or follow a fill in the same step:
+
+```text
+在“规格值输入框”中输入“XL”，并按 Enter 键确认。
+按 Escape 键。
+按 Ctrl+A。
+```
 
 ## npm package version management
 

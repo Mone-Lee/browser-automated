@@ -154,11 +154,18 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
   if (fillVerb && quoted.length > 0) {
     const valueSegment = quoted[quoted.length - 1];
     const fieldSegment = quoted.find((segment) => segment.index < (fillVerb.index ?? 0));
+    const pressKey = parseKeyboardKey(actionText);
     return {
       type: 'fill',
       field: fieldSegment?.value ?? parseFieldName(normalized) ?? '文本',
       value: valueSegment?.value ?? '',
+      ...(pressKey ? { pressKey } : {}),
     };
+  }
+
+  const pressKey = parseKeyboardKey(actionText);
+  if (pressKey) {
+    return { type: 'press-key', key: pressKey };
   }
 
   if (/点击|单击|click|tap|press/i.test(actionText)) {
@@ -193,6 +200,66 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
   }
 
   return null;
+}
+
+/** 将中英文按键描述规范化为 agent-browser press 接受的键名。 */
+function parseKeyboardKey(text: string): string | null {
+  const chineseKeyAliases: Array<[RegExp, string]> = [
+    [/(?:按(?:下)?\s*)?回车(?:键|确认)?/, 'Enter'],
+    [/按(?:下)?\s*制表键/, 'Tab'],
+    [/按(?:下)?\s*(?:退出|取消)键/, 'Escape'],
+    [/按(?:下)?\s*退格键/, 'Backspace'],
+    [/按(?:下)?\s*删除键/, 'Delete'],
+    [/按(?:下)?\s*空格键/, 'Space'],
+    [/按\s*上方向键|按下\s*上方向键/, 'ArrowUp'],
+    [/按\s*下方向键|按下\s*下方向键/, 'ArrowDown'],
+    [/按\s*左方向键|按下\s*左方向键/, 'ArrowLeft'],
+    [/按\s*右方向键|按下\s*右方向键/, 'ArrowRight'],
+  ];
+  const chineseKey = chineseKeyAliases.find(([pattern]) => pattern.test(text));
+  if (chineseKey) {
+    return chineseKey[1];
+  }
+
+  const match = text.match(/(?:按(?:下)?|press)\s*([A-Za-z0-9]+(?:\s*\+\s*[A-Za-z0-9]+)*)(?:\s*键)?/i);
+  if (!match?.[1]) {
+    return null;
+  }
+
+  const aliases: Record<string, string> = {
+    ctrl: 'Control',
+    control: 'Control',
+    alt: 'Alt',
+    shift: 'Shift',
+    meta: 'Meta',
+    command: 'Meta',
+    cmd: 'Meta',
+    enter: 'Enter',
+    return: 'Enter',
+    tab: 'Tab',
+    escape: 'Escape',
+    esc: 'Escape',
+    backspace: 'Backspace',
+    delete: 'Delete',
+    space: 'Space',
+    arrowup: 'ArrowUp',
+    arrowdown: 'ArrowDown',
+    arrowleft: 'ArrowLeft',
+    arrowright: 'ArrowRight',
+    home: 'Home',
+    end: 'End',
+    pageup: 'PageUp',
+    pagedown: 'PageDown',
+  };
+  const tokens = match[1].split(/\s*\+\s*/);
+  const normalizedTokens = tokens.map((token) => aliases[token.toLowerCase()] ?? token);
+  const baseKey = normalizedTokens.at(-1) ?? '';
+  const modifiers = normalizedTokens.slice(0, -1);
+  const validModifiers = modifiers.every((token) => ['Control', 'Alt', 'Shift', 'Meta'].includes(token));
+  const validBaseKey = /^[A-Za-z0-9]$/.test(baseKey)
+    || /^F(?:[1-9]|1[0-2])$/i.test(baseKey)
+    || Object.values(aliases).includes(baseKey);
+  return validModifiers && validBaseKey ? normalizedTokens.join('+') : null;
 }
 
 /** 识别复选类步骤要求的最终状态，避免把“取消”或“仅保留”退化成普通勾选。 */

@@ -99,7 +99,8 @@ export interface SnapshotNode {
 export type DeterministicAction =
   | { type: 'open'; url: string }
   | { type: 'inspect' }
-  | { type: 'fill'; field: string; value: string }
+  | { type: 'fill'; field: string; value: string; pressKey?: string }
+  | { type: 'press-key'; key: string }
   | { type: 'click'; target: string; field?: string | null }
   | { type: 'check-table-rows'; count: number; target?: never }
   | { type: 'check-table-rows'; target: 'select-all'; count?: never }

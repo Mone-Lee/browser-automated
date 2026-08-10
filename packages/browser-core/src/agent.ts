@@ -394,6 +394,11 @@ export class BrowserAgent {
     return this.run(['fill', `@${ref.replace(/^@/, '')}`, value]);
   }
 
+  /** 向当前获得焦点的元素发送按键，用于提交依赖键盘事件的输入控件。 */
+  press(key: string): string {
+    return this.run(['press', key]);
+  }
+
   /** 仅在目标位于当前视口外时将其滚动到可交互区域。 */
   scrollIntoView(refOrSelector: string): string {
     const target = /^@/.test(refOrSelector)
