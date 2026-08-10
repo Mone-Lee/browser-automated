@@ -24,7 +24,7 @@ export function resolveDateSelectOption(action: Extract<DeterministicAction, { t
   return end ? { start, end } : { start };
 }
 
-/** 执行 DatePicker 选择动作，优先直接填充，失败时再尝试 DOM setter 和面板点击。 */
+/** 执行 DatePicker 选择动作，ref 路径按需滚动后填充，失败时再尝试 DOM setter 和面板点击。 */
 export function executeDateSelectOptionAction(
   agent: BrowserAgent,
   action: Extract<DeterministicAction, { type: 'select-option' }>,
@@ -85,7 +85,9 @@ function fillDateRangePickerTarget(
   const output: string[] = [];
 
   if (startRef && endRef && startRef !== endRef) {
+    agent.scrollIntoView(startRef);
     output.push(`range picker fill start @${startRef} ${startDate}`, agent.fill(startRef, startDate));
+    agent.scrollIntoView(endRef);
     output.push(`range picker fill end @${endRef} ${endDate}`, agent.fill(endRef, endDate));
     commitDatePickerRangeDomValue(agent, action.field);
   } else if (!fillDatePickerDomRangeTarget(agent, action.field, startDate, endDate)) {
@@ -224,6 +226,7 @@ function fillDatePickerTarget(
   const candidates = buildDateInputCandidates(normalizedDate, action.field);
   if (ref) {
     for (const candidate of candidates) {
+      agent.scrollIntoView(ref);
       const output = agent.fill(ref, candidate);
       commitDatePickerDomValue(agent, action.field);
       agent.waitMs(300);
@@ -261,6 +264,7 @@ function selectDatePickerPanelTarget(
   field: string | null,
   expectedDate: string,
 ): string | null {
+  agent.scrollIntoView(ref);
   const openOutput = agent.click(ref);
   agent.waitMs(300);
   const script = `(() => {

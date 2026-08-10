@@ -394,6 +394,16 @@ export class BrowserAgent {
     return this.run(['fill', `@${ref.replace(/^@/, '')}`, value]);
   }
 
+  /** 仅在目标位于当前视口外时将其滚动到可交互区域。 */
+  scrollIntoView(refOrSelector: string): string {
+    const target = /^@/.test(refOrSelector)
+      ? refOrSelector
+      : /^[a-z]\d+$/i.test(refOrSelector)
+        ? `@${refOrSelector}`
+        : refOrSelector;
+    return this.run(['scrollintoview', target]);
+  }
+
   /** 通过 ref 或选择器把本地文件上传到文件选择控件。 */
   upload(refOrSelector: string, filePaths: string[]): string {
     const target = /^@/.test(refOrSelector)

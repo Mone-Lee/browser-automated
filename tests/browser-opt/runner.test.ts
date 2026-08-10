@@ -88,6 +88,7 @@ function buildAgent(options: {
     stateSave: vi.fn(() => 'state saved'),
     stateLoad: vi.fn(() => 'state loaded'),
     scroll: vi.fn(() => 'scrolled'),
+    scrollIntoView: vi.fn(() => 'scrolled into view'),
     evaluate: vi.fn(options.evaluate ?? (() => JSON.stringify({ found: true, checked: true, desired: true }))),
     chatJson: vi.fn(options.chat ?? (() => ({ raw: '{"success":true}', data: { success: true } }))),
     waitMs: vi.fn(() => 'waited'),
@@ -769,6 +770,7 @@ describe('BrowserOptRunner', () => {
 
     expect(result.passed).toBe(true);
     expect((agent.waitMs as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(500);
+    expect(agent.scrollIntoView).toHaveBeenCalledWith('e1');
     expect((agent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e1', '完整自动化创建药品分类商品');
     expect((agent.evaluate as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect(result.report.steps[0].actionOutput).toContain('fill delayed @e1');
@@ -791,6 +793,9 @@ describe('BrowserOptRunner', () => {
     const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 点击“下一步，完善商品信息”', { outputDir });
 
     expect(result.passed).toBe(true);
+    expect(agent.scrollIntoView).toHaveBeenCalledTimes(2);
+    expect(agent.scrollIntoView).toHaveBeenNthCalledWith(1, 'e1');
+    expect(agent.scrollIntoView).toHaveBeenNthCalledWith(2, 'e1');
     expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(2);
     expect((agent.waitMs as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(2);
     expect(result.report.steps[0].actionOutput).toContain('page transition retry 1 @e1');

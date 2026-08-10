@@ -14,7 +14,7 @@ import {
   verifyDateSelectOptionActionEffect,
 } from './date-action.js';
 
-/** 执行选项选择动作，包含 switch、原生单选复选框和长表单滚动搜索兜底。 */
+/** 选择前按需滚动目标，包含 switch、原生单选复选框和长表单滚动搜索兜底。 */
 export function executeSelectOptionAction(
   agent: BrowserAgent,
   action: Extract<DeterministicAction, { type: 'select-option' }>,
@@ -68,6 +68,7 @@ export function executeSelectOptionAction(
   if (!option.ref) {
     const fieldRef = findSelectableFieldRef(searchSnapshot, action.field);
     if (fieldRef) {
+      agent.scrollIntoView(fieldRef);
       searchOutput.push(`open select @${fieldRef}\n${agent.click(fieldRef)}`.trim());
       agent.waitMs(300);
       const openedSnapshot = captureTransientSnapshot(agent);
@@ -94,6 +95,7 @@ export function executeSelectOptionAction(
   if (!option.ref) {
     const fieldRef = findSelectableFieldRef(searchSnapshot, action.field);
     if (fieldRef) {
+      agent.scrollIntoView(fieldRef);
       searchOutput.push(`open select @${fieldRef}\n${agent.click(fieldRef)}`.trim());
       agent.waitMs(300);
       const openedSnapshot = captureTransientSnapshot(agent);
@@ -109,6 +111,7 @@ export function executeSelectOptionAction(
     throw new Error(`无法可靠执行“仅勾选”：未能在 DOM 中确认 ${fieldLabel} 的复选框分组`);
   }
 
+  agent.scrollIntoView(option.ref);
   const output = agent.click(option.ref);
   const dropdownCleanup = isDropdownOption(option.role) ? dismissActiveDropdown(agent) : null;
   return [

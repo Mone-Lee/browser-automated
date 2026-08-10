@@ -8,7 +8,7 @@ import { captureTransientSnapshot } from '../../evidence.js';
 import { buildLoginHandoffActionOutput, isLoginLikeSnapshot } from '../../handoff.js';
 import { fillFieldScopedDomTarget, readFieldScopedDomValue } from './dom-action.js';
 
-/** 执行输入动作，登录页阻塞时转为 handoff，避免误报找不到业务字段。 */
+/** 输入前按需滚动目标，登录页阻塞时转为 handoff，避免误报找不到业务字段。 */
 export function executeFillAction(
   agent: BrowserAgent,
   action: Extract<DeterministicAction, { type: 'fill' }>,
@@ -27,6 +27,7 @@ export function executeFillAction(
     const settledSnapshot = captureTransientSnapshot(agent);
     ref = findTextboxRef(settledSnapshot, action.field);
     if (ref) {
+      agent.scrollIntoView(ref);
       const output = agent.fill(ref, action.value);
       return `fill delayed @${ref} ${JSON.stringify(action.value)}\n${output}`.trim();
     }
@@ -39,6 +40,7 @@ export function executeFillAction(
     throw new Error(`无法找到输入框：${action.field}`);
   }
 
+  agent.scrollIntoView(ref);
   const output = agent.fill(ref, action.value);
   return `fill @${ref} ${JSON.stringify(action.value)}\n${output}`.trim();
 }

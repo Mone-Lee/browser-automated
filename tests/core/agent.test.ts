@@ -48,6 +48,29 @@ describe('BrowserAgent', () => {
     });
   });
 
+  describe('scrollIntoView()', () => {
+    it('scrolls refs and selectors into the viewport without rewriting selectors', () => {
+      mockSpawnSync.mockReturnValue(makeOkResult('scrolled'));
+
+      const agent = new BrowserAgent({ sessionId: 'test-session' });
+      agent.scrollIntoView('e8');
+      agent.scrollIntoView('[data-upload="main"]');
+
+      expect(mockSpawnSync).toHaveBeenNthCalledWith(
+        1,
+        'agent-browser',
+        ['--session', 'test-session', 'scrollintoview', '@e8'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+      expect(mockSpawnSync).toHaveBeenNthCalledWith(
+        2,
+        'agent-browser',
+        ['--session', 'test-session', 'scrollintoview', '[data-upload="main"]'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+    });
+  });
+
   describe('inspect()', () => {
     it('opens native DevTools for the active page through CDP', async () => {
       const sentMessages: Array<{ id: number; method: string; params?: Record<string, string> }> = [];

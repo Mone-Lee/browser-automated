@@ -11,7 +11,7 @@ interface RowCheckbox {
   checked: boolean;
 }
 
-/** 勾选表格前 N 个数据行复选框，不操作表头全选框或表格外筛选控件。 */
+/** 按需滚动并勾选表格前 N 个数据行复选框，不操作表头全选框或表格外筛选控件。 */
 export function executeTableRowCheckboxAction(
   agent: BrowserAgent,
   action: Extract<DeterministicAction, { type: 'check-table-rows' }>,
@@ -38,6 +38,7 @@ export function executeTableRowCheckboxAction(
         outputs.push(`checkbox skipped @${checkbox.ref}: already checked`);
         continue;
       }
+      agent.scrollIntoView(checkbox.ref);
       outputs.push(`check @${checkbox.ref}\n${agent.check(checkbox.ref)}`);
     }
 

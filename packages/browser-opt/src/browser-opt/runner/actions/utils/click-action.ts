@@ -7,7 +7,7 @@ import { findClickableRef } from '../../../utils.js';
 import { captureTransientSnapshot } from '../../evidence.js';
 import { clickFieldScopedDomTarget } from './dom-action.js';
 
-/** 执行点击动作；“下一步”类过渡按钮会等待离开当前页面并在异步门禁期间重试。 */
+/** 点击前按需滚动目标；“下一步”类过渡按钮会等待离开当前页面并在异步门禁期间重试。 */
 export function executeClickAction(
   agent: BrowserAgent,
   action: Extract<DeterministicAction, { type: 'click' }>,
@@ -15,6 +15,7 @@ export function executeClickAction(
 ): string {
   const ref = findClickableRef(snapshot, action.target, action.field);
   if (ref) {
+    agent.scrollIntoView(ref);
     const output = agent.click(ref);
     if (isPageTransitionClick(action.target)) {
       return waitForPageTransition(agent, action, ref, output);
@@ -47,6 +48,7 @@ function waitForPageTransition(
       outputs.push(`page transition confirmed after ${attempt}s`);
       return outputs.filter(Boolean).join('\n').trim();
     }
+    agent.scrollIntoView(ref);
     outputs.push(`page transition retry ${attempt} @${ref}`, agent.click(ref));
   }
 
