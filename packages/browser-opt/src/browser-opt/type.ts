@@ -109,7 +109,8 @@ export type DeterministicAction =
       endOption?: string;
       mode?: 'select' | 'deselect' | 'exclusive';
     }
-  | { type: 'upload'; field: string; source: string }
+  | { type: 'upload'; field: string; source: string; sources?: never }
+  | { type: 'upload'; field: string; sources: string[]; source?: never }
   | { type: 'handoff'; message: string }
   | { type: 'assert-text'; text: string };
 

@@ -8,7 +8,17 @@ import type { DeterministicAction, SnapshotEvidence, DeterministicExecutionOptio
 import { findUploadRef } from '../../../utils.js';
 import { captureTransientSnapshot } from '../../evidence.js';
 
-/** 执行上传动作，优先使用快照 ref，再用隐藏 input 和长表单滚动搜索兜底。 */
+interface UploadDomTarget {
+  selector: string;
+  scrollSelector?: string;
+}
+
+interface BatchUploadDomTarget {
+  selectors: string[];
+  scrollSelector?: string;
+}
+
+/** 执行上传动作，先展示可见上传区域，再使用快照 ref、隐藏 input 或长表单搜索结果上传。 */
 export async function executeUploadAction(
   agent: BrowserAgent,
   action: Extract<DeterministicAction, { type: 'upload' }>,
@@ -16,12 +26,19 @@ export async function executeUploadAction(
   outputDir: string,
   options: DeterministicExecutionOptions,
 ): Promise<string> {
+  const sources = action.sources ?? [action.source];
+  if (sources.length > 1) {
+    return executeBatchUploadAction(agent, action.field, sources, outputDir);
+  }
+
   let ref = findUploadRef(snapshot, action.field);
+  let scrollTarget = ref;
   const searchOutput: string[] = [];
   if (!ref) {
     const domTarget = findHiddenUploadInputSelector(agent, action.field);
     if (domTarget) {
       ref = domTarget.selector;
+      scrollTarget = domTarget.scrollSelector ?? null;
       searchOutput.push(`upload dom selector ${domTarget.selector}`);
     }
   }
@@ -30,6 +47,7 @@ export async function executeUploadAction(
     const scrolled = searchUploadInLongForm(agent, action.field);
     if (scrolled) {
       ref = scrolled.ref;
+      scrollTarget = scrolled.ref;
       searchOutput.push(...scrolled.logs);
     }
   }
@@ -38,7 +56,10 @@ export async function executeUploadAction(
     throw new Error(`无法找到上传控件：${action.field}`);
   }
 
-  const filePath = await prepareUploadFile(action.source, outputDir);
+  if (scrollTarget) {
+    agent.scrollIntoView(scrollTarget);
+  }
+  const filePath = await prepareUploadFile(sources[0], outputDir);
   const output = agent.upload(ref, [filePath]);
   const completionOutput = waitForUploadCompletion(agent, action.field);
   return [
@@ -47,6 +68,34 @@ export async function executeUploadAction(
     output,
     completionOutput,
   ].filter(Boolean).join('\n').trim();
+}
+
+/** 批量上传前滚动字段容器一次，再按 input 的 DOM 顺序逐槽位绑定图片。 */
+async function executeBatchUploadAction(
+  agent: BrowserAgent,
+  field: string,
+  sources: string[],
+  outputDir: string,
+): Promise<string> {
+  const { selectors, scrollSelector } = findBatchUploadInputSelectors(agent, field, sources.length);
+  if (selectors.length < sources.length) {
+    throw new Error(`上传槽位不足：${field}需要 ${sources.length} 个，找到 ${selectors.length} 个`);
+  }
+
+  if (scrollSelector) {
+    agent.scrollIntoView(scrollSelector);
+  }
+  const filePaths = await Promise.all(sources.map((source) => prepareUploadFile(source, outputDir)));
+  const output: string[] = [`upload batch slots ${selectors.join(', ')}`];
+  for (const [index, filePath] of filePaths.entries()) {
+    const selector = selectors[index];
+    output.push(
+      `upload slot ${index + 1} @${selector} ${filePath}`,
+      agent.upload(selector, [filePath]),
+      waitForUploadCompletion(agent, field),
+    );
+  }
+  return output.filter(Boolean).join('\n').trim();
 }
 
 /** 上传命令返回后等待字段作用域内的加载态消失，避免后续步骤操作尚未就绪的表单。 */
@@ -74,8 +123,8 @@ function waitForUploadCompletion(agent: BrowserAgent, field: string): string {
   throw new Error(`等待上传完成超时：${field}`);
 }
 
-/** Ant Upload 等组件会隐藏真实 file input，snapshot 缺失时改用 DOM 字段邻近关系定位。 */
-function findHiddenUploadInputSelector(agent: BrowserAgent, field: string): { selector: string } | null {
+/** Ant Upload 等组件会隐藏真实 file input，同时返回用于滚动的可见字段容器。 */
+function findHiddenUploadInputSelector(agent: BrowserAgent, field: string): UploadDomTarget | null {
   const script = `(() => {
   const uploadHelper = ${uploadDomHelperSource()};
   const result = uploadHelper.findUploadInputByField(${JSON.stringify(field)});
@@ -85,9 +134,28 @@ function findHiddenUploadInputSelector(agent: BrowserAgent, field: string): { se
 
   try {
     const parsed = parseEvalJson(agent.evaluate(script));
-    return parsed.found && parsed.selector ? { selector: parsed.selector } : null;
+    return parsed.found && parsed.selector
+      ? { selector: parsed.selector, scrollSelector: parsed.scrollSelector }
+      : null;
   } catch {
     return null;
+  }
+}
+
+/** 批量上传前一次性标记字段内的全部目标 input，确保素材与槽位按页面顺序一一对应。 */
+function findBatchUploadInputSelectors(agent: BrowserAgent, field: string, count: number): BatchUploadDomTarget {
+  const script = `(() => {
+  const uploadHelper = ${uploadDomHelperSource()};
+  const result = uploadHelper.findUploadInputsByField(${JSON.stringify(field)}, ${count});
+  return JSON.stringify(result);
+})()
+`;
+
+  try {
+    const parsed = parseEvalJson(agent.evaluate(script));
+    return { selectors: parsed.selectors ?? [], scrollSelector: parsed.scrollSelector };
+  } catch {
+    return { selectors: [] };
   }
 }
 
@@ -138,7 +206,7 @@ const browserOptUploadContext = (input, fieldText) => {
 
   return { text: normalizeBrowserOptUploadText(chain.map((element) => element.textContent || '').join(' ')), depth: 99, source: 'none' };
 };
-function findUploadInputByField(field) {
+function findUploadInputsByField(field, limit) {
   const fieldText = normalizeBrowserOptUploadText(field);
   const inputs = [...document.querySelectorAll('input[type="file"]')];
   const candidates = inputs.map((input, index) => {
@@ -149,17 +217,38 @@ function findUploadInputByField(field) {
     const score = context.text.includes(fieldText) ? 3 : fieldText.includes(context.text) && context.text ? 2 : 0;
     return { input, index, text: context.text, depth: context.depth, score, visible: Boolean(rect && rect.width > 0 && rect.height > 0) };
   }).sort((a, b) => b.score - a.score || a.depth - b.depth || Number(b.visible) - Number(a.visible) || a.index - b.index);
-  const best = candidates[0];
-  if (!best || best.score <= 0) {
+  let selected = candidates.filter((candidate) => candidate.score > 0);
+  if (selected.length === 0) {
     if (inputs.length === 1) {
-      inputs[0].setAttribute('data-browser-opt-upload-id', 'browser-opt-upload-0');
-      return { found: true, selector: '[data-browser-opt-upload-id="browser-opt-upload-0"]', fallbackSingleInput: true };
+      selected = candidates.slice(0, 1);
+    } else {
+      return { found: false, selectors: [], count: inputs.length };
     }
-    return { found: false, count: inputs.length };
   }
-  const id = 'browser-opt-upload-' + best.index;
-  best.input.setAttribute('data-browser-opt-upload-id', id);
-  return { found: true, selector: '[data-browser-opt-upload-id="' + id + '"]', matchedText: best.text };
+  const selectors = selected.slice(0, limit).map((candidate) => {
+    const id = 'browser-opt-upload-' + candidate.index;
+    candidate.input.setAttribute('data-browser-opt-upload-id', id);
+    return '[data-browser-opt-upload-id="' + id + '"]';
+  });
+  const firstSelected = selected[0];
+  const scrollElement = firstSelected
+    ? browserOptUploadAncestorChain(firstSelected.input)
+      .find((element) => browserOptUploadVisible(element) && normalizeBrowserOptUploadText(element.textContent || '').includes(fieldText))
+      || browserOptUploadAncestorChain(firstSelected.input).find((element) => browserOptUploadVisible(element))
+    : null;
+  let scrollSelector;
+  if (scrollElement) {
+    const scrollId = 'browser-opt-upload-scroll-' + firstSelected.index;
+    scrollElement.setAttribute('data-browser-opt-upload-scroll-target', scrollId);
+    scrollSelector = '[data-browser-opt-upload-scroll-target="' + scrollId + '"]';
+  }
+  return { found: selectors.length > 0, selectors, count: selected.length, scrollSelector };
+}
+function findUploadInputByField(field) {
+  const result = findUploadInputsByField(field, 1);
+  return result.found
+    ? { found: true, selector: result.selectors[0], count: result.count, scrollSelector: result.scrollSelector }
+    : result;
 }
 function getUploadStateByField(field) {
   const target = findUploadInputByField(field);
@@ -198,7 +287,7 @@ function getUploadStateByField(field) {
   ].join(',')).length > 0;
   return { found: true, pending, failed };
 }
-return { findUploadInputByField, getUploadStateByField };
+return { findUploadInputByField, findUploadInputsByField, getUploadStateByField };
 })()
 `;
 }
@@ -228,7 +317,14 @@ function searchUploadInLongForm(agent: BrowserAgent, field: string): { ref: stri
   return null;
 }
 
-function parseEvalJson(raw: string): { found?: boolean; selector?: string; pending?: boolean; failed?: boolean } {
+function parseEvalJson(raw: string): {
+  found?: boolean;
+  selector?: string;
+  selectors?: string[];
+  scrollSelector?: string;
+  pending?: boolean;
+  failed?: boolean;
+} {
   const decoded = JSON.parse(raw.trim()) as unknown;
   return typeof decoded === 'string'
     ? JSON.parse(decoded) as ReturnType<typeof parseEvalJson>

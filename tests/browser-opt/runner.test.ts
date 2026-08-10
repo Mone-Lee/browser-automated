@@ -248,6 +248,20 @@ describe('browser-opt parsing', () => {
     });
   });
 
+  it('keeps every URL in slot order for batch image uploads', () => {
+    expect(parseDeterministicAction(
+      '自动批量上传“商品主图”，图片来源 URL 按槽位顺序依次为：“https://example.com/1.jpg”、“https://example.com/2.jpg”、“https://example.com/3.jpg”',
+    )).toEqual({
+      type: 'upload',
+      field: '商品主图',
+      sources: [
+        'https://example.com/1.jpg',
+        'https://example.com/2.jpg',
+        'https://example.com/3.jpg',
+      ],
+    });
+  });
+
   it('recognizes curly and straight single quotes across deterministic action types', () => {
     expect(parseDeterministicAction('直播间名称输入‘自动化直播间’')).toEqual({
       type: 'fill',
@@ -2912,6 +2926,46 @@ describe('BrowserOptRunner', () => {
     expect(uploadedPath).toContain(path.join('uploads', '82243689cae75e27b3867a5cbdd4292b.png'));
   expect(fs.readFileSync(uploadedPath, 'utf-8')).toBe('image-bytes');
   expect(result.report.steps[0].actionOutput).toContain('upload @e3');
+  });
+
+  it('uploads batch images to distinct slots in page order', async () => {
+    const outputDir = makeTempDir();
+    const fetchMock = vi.fn(async (source: string | URL | Request) => new Response(`image:${String(source)}`, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const selectors = [
+      '[data-browser-opt-upload-id="browser-opt-upload-2"]',
+      '[data-browser-opt-upload-id="browser-opt-upload-3"]',
+      '[data-browser-opt-upload-id="browser-opt-upload-4"]',
+    ];
+    const scrollSelector = '[data-browser-opt-upload-scroll-target="browser-opt-upload-scroll-2"]';
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before batch upload'),
+        snapshotJson('after batch upload with three previews'),
+      ],
+      evaluate: (script) => script.includes('uploadHelper.findUploadInputsByField')
+        ? JSON.stringify({ found: true, selectors, count: selectors.length, scrollSelector })
+        : JSON.stringify({ found: true, pending: false, failed: false }),
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/goods/create。\n\n目标：\n1. 自动批量上传“商品主图”，图片来源 URL 按槽位顺序依次为：“https://example.com/1.jpg”、“https://example.com/2.jpg”、“https://example.com/3.jpg”。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(agent.scrollIntoView).toHaveBeenCalledOnce();
+    expect(agent.scrollIntoView).toHaveBeenCalledWith(scrollSelector);
+    expect((agent.upload as ReturnType<typeof vi.fn>).mock.calls.map(([selector]) => selector)).toEqual(selectors);
+    expect((agent.upload as ReturnType<typeof vi.fn>).mock.calls.map(([, paths]) => path.basename(paths[0]))).toEqual([
+      '1.jpg',
+      '2.jpg',
+      '3.jpg',
+    ]);
+    expect(result.report.steps[0].actionOutput).toContain('upload slot 3');
   });
 
   it('waits until the scoped upload loading state disappears', async () => {

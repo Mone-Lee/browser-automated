@@ -119,7 +119,8 @@ function splitCompoundSelectableStep(instruction: string): string[] {
 export function parseDeterministicAction(instruction: string): DeterministicAction | null {
   const normalized = cleanInstructionPrefix(normalizeBrowserOptFlowText(instruction));
   const actionText = maskQuotedSegments(normalized);
-  const url = normalized.match(URL_RE)?.[0];
+  const urls = [...normalized.matchAll(new RegExp(URL_RE.source, 'gi'))].map((match) => match[0]);
+  const url = urls[0];
   if (url && /访问|打开|open|goto|navigate/i.test(actionText)) {
     return { type: 'open', url };
   }
@@ -136,7 +137,7 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
     return {
       type: 'upload',
       field: parseUploadFieldName(normalized) ?? '文件',
-      source: url,
+      ...(urls.length > 1 ? { sources: urls } : { source: url }),
     };
   }
 
