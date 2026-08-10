@@ -29,11 +29,7 @@ export function executeSelectOptionAction(
   let option = findSelectableOption(snapshot, action.field, action.option);
   let searchSnapshot = snapshot;
   const fieldLabel = action.field ?? '选项';
-  if (option.alreadySelected) {
-    if (!isSwitchSelectable(option.role)) {
-      return `selection skipped: ${fieldLabel} 已是 ${action.option}`;
-    }
-
+  if (option.alreadySelected && isSwitchSelectable(option.role)) {
     const domState = action.field ? verifySwitchDomState(agent, action.field, action.option) : null;
     if (domState === true) {
       return `selection skipped: ${fieldLabel} 已是 ${action.option}`;
@@ -48,9 +44,20 @@ export function executeSelectOptionAction(
     return switchDomTarget;
   }
 
-  const nativeSelectableDomTarget = clickNativeSelectableDomTarget(agent, option.role, action.option);
+  const hasExpandableField = Boolean(findSelectableFieldRef(searchSnapshot, action.field));
+  const shouldSearchNativeDom = /radio|checkbox/i.test(option.role ?? '') || !hasExpandableField;
+  const nativeSelectableDomTarget = shouldSearchNativeDom
+    ? clickNativeSelectableDomTarget(agent, action)
+    : null;
   if (nativeSelectableDomTarget) {
     return nativeSelectableDomTarget;
+  }
+
+  if (option.alreadySelected && action.mode !== 'deselect') {
+    return `selection skipped: ${fieldLabel} 已是 ${action.option}`;
+  }
+  if (!option.alreadySelected && action.mode === 'deselect' && option.ref) {
+    return `selection skipped: ${fieldLabel} 已取消 ${action.option}`;
   }
 
   const searchOutput: string[] = [];
@@ -77,6 +84,13 @@ export function executeSelectOptionAction(
     }
   }
 
+  if (/radio|checkbox/i.test(option.role ?? '')) {
+    const revealedNativeTarget = clickNativeSelectableDomTarget(agent, action);
+    if (revealedNativeTarget) {
+      return [...searchOutput, revealedNativeTarget].filter(Boolean).join('\n').trim();
+    }
+  }
+
   if (!option.ref) {
     const fieldRef = findSelectableFieldRef(searchSnapshot, action.field);
     if (fieldRef) {
@@ -89,6 +103,10 @@ export function executeSelectOptionAction(
 
   if (!option.ref) {
     throw new Error(`无法找到选项：${fieldLabel} -> ${action.option}`);
+  }
+
+  if (action.mode === 'exclusive' && /checkbox/i.test(option.role ?? '')) {
+    throw new Error(`无法可靠执行“仅勾选”：未能在 DOM 中确认 ${fieldLabel} 的复选框分组`);
   }
 
   const output = agent.click(option.ref);
@@ -124,6 +142,17 @@ export function verifySelectOptionActionEffect(
     return { passed: false, message: `无法可靠确认开关状态：${action.field}=${action.option}` };
   }
 
+  if (/radio|checkbox/i.test(selected.role ?? '') || action.mode === 'deselect' || action.mode === 'exclusive') {
+    const domState = verifyNativeSelectableDomState(agent, action);
+    if (domState === true) {
+      const intent = action.mode === 'exclusive' ? '仅勾选' : action.mode === 'deselect' ? '取消勾选' : '勾选';
+      return { passed: true, message: `已通过 DOM 确认${intent}状态：${action.field ?? '选项'}=${action.option}` };
+    }
+    if (domState === false || action.mode === 'deselect' || action.mode === 'exclusive') {
+      return { passed: false, message: `DOM 确认复选状态未达到目标：${action.field ?? '选项'}=${action.option}` };
+    }
+  }
+
   if (selected.alreadySelected) {
     return { passed: true, message: `已确认选择状态：${action.field ?? '选项'}=${action.option}` };
   }
@@ -139,32 +168,227 @@ export function verifySelectOptionActionEffect(
   return { passed: false, message: `动作后未确认目标已选中：${action.field ?? '选项'}=${action.option}` };
 }
 
-/** radio/checkbox 的无障碍 ref 可能指向隐藏 input，文案唯一时改点真实 label 以触发组件事件。 */
-function clickNativeSelectableDomTarget(agent: BrowserAgent, role: string | null, option: string): string | null {
-  if (!/radio|checkbox/i.test(role ?? '')) {
-    return null;
-  }
-
+/**
+ * radio/checkbox 可能位于当前交互快照之外，直接从完整 DOM 按字段和选项定位真实 label。
+ * 定位成功后先滚入视口再点击，既覆盖长表单，也避免无障碍 ref 指向隐藏 input。
+ */
+function clickNativeSelectableDomTarget(
+  agent: BrowserAgent,
+  action: Extract<DeterministicAction, { type: 'select-option' }>,
+): string | null {
+  const field = action.field;
+  const option = action.option;
+  const mode = action.mode ?? 'select';
   const script = `(() => {
   const normalize = (value) => (value || '').replace(/\\s+/g, '').trim();
+  const isVisible = (element) => {
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0;
+  };
   const target = normalize(${JSON.stringify(option)});
-  const labels = [...document.querySelectorAll('label')].filter((label) => normalize(label.textContent) === target);
-  if (labels.length !== 1) {
-    return JSON.stringify({ matchedCount: labels.length, clicked: false });
+  const field = normalize(${JSON.stringify(field)});
+  const mode = ${JSON.stringify(mode)};
+  const candidates = [...document.querySelectorAll('label')]
+    .map((label) => ({
+      label,
+      input: label.querySelector('input[type="radio"], input[type="checkbox"]'),
+    }))
+    .filter(({ label, input }) => input && isVisible(label) && normalize(label.textContent) === target);
+  if (candidates.length === 0) {
+    return JSON.stringify({ matchedCount: 0, clicked: false });
   }
-  const input = labels[0].querySelector('input[type="radio"], input[type="checkbox"]');
+
+  const fieldNodes = field
+    ? [...document.querySelectorAll('label, [class*="label"], [class*="form-item"], [class*="formItem"], dt, th')]
+      .filter((element) => isVisible(element) && normalize(element.textContent).includes(field))
+    : [];
+  const distance = (left, right) => {
+    const a = left.getBoundingClientRect();
+    const b = right.getBoundingClientRect();
+    return Math.abs((a.left + a.right - b.left - b.right) / 2)
+      + Math.abs((a.top + a.bottom - b.top - b.bottom) / 2);
+  };
+  const scoped = candidates
+    .map((candidate) => ({
+      ...candidate,
+      fieldDistance: fieldNodes.length > 0
+        ? Math.min(...fieldNodes.map((fieldNode) => distance(fieldNode, candidate.label)))
+        : 0,
+    }))
+    .sort((a, b) => a.fieldDistance - b.fieldDistance);
+  if (scoped.length > 1 && (!field || scoped[0].fieldDistance === scoped[1].fieldDistance)) {
+    return JSON.stringify({ matchedCount: scoped.length, clicked: false, ambiguous: true });
+  }
+
+  const { label, input } = scoped[0];
   if (!input || input.disabled) {
-    return JSON.stringify({ matchedCount: 1, clicked: false, disabled: Boolean(input?.disabled) });
+    return JSON.stringify({ matchedCount: scoped.length, clicked: false, disabled: Boolean(input?.disabled) });
   }
-  labels[0].click();
-  return JSON.stringify({ matchedCount: 1, clicked: true, checked: input.checked });
+  label.scrollIntoView({ block: 'center', inline: 'nearest' });
+  const group = (() => {
+    let current = label.parentElement;
+    for (let depth = 0; current && depth < 8; depth += 1, current = current.parentElement) {
+      const checkboxes = [...current.querySelectorAll('input[type="checkbox"]')].filter((item) => !item.disabled);
+      if (checkboxes.includes(input) && checkboxes.length > 1 && (!field || normalize(current.textContent).includes(field))) {
+        return checkboxes;
+      }
+    }
+    return [input];
+  })();
+  const clickInputLabel = (targetInput) => {
+    const targetLabel = targetInput.closest('label') || document.querySelector('label[for="' + CSS.escape(targetInput.id) + '"]');
+    (targetLabel || targetInput).click();
+  };
+  let clickCount = 0;
+  if (mode === 'exclusive') {
+    if (input.type !== 'checkbox' || group.length < 2) {
+      return JSON.stringify({ matchedCount: scoped.length, clicked: false, groupFound: false });
+    }
+    for (const sibling of group) {
+      if (sibling !== input && sibling.checked) {
+        clickInputLabel(sibling);
+        clickCount += 1;
+      }
+    }
+  }
+  const desiredChecked = mode !== 'deselect';
+  if (input.checked !== desiredChecked) {
+    clickInputLabel(input);
+    clickCount += 1;
+  }
+  const otherSelectedCount = group.filter((item) => item !== input && item.checked).length;
+  const reached = input.checked === desiredChecked && (mode !== 'exclusive' || otherSelectedCount === 0);
+  return JSON.stringify({
+    matchedCount: scoped.length,
+    clicked: clickCount > 0,
+    checked: input.checked,
+    alreadySelected: clickCount === 0 && reached,
+    groupFound: group.length > 1,
+    otherSelectedCount,
+    reached,
+  });
 })()`;
 
   try {
     const parsed = parseEvalJson(agent.evaluate(script));
-    return parsed.matchedCount === 1 && parsed.clicked === true
-      ? `selectable dom click ${option}`
-      : null;
+    const reached = parsed.reached ?? (mode === 'select' && parsed.checked === true);
+    if (reached !== true) {
+      return null;
+    }
+    // 页面异步水合期间，复选框可能会先短暂显示为未选中，再恢复到真实已选状态。
+    // 已达到目标时仍等待一次重渲染并复查(parseEvalJson)，避免把水合瞬间的未选中误判为需要继续点击。
+    if (parsed.alreadySelected === true) {
+      agent.waitMs(300);
+      revealNativeSelectableDomTarget(agent, field, option);
+      agent.waitMs(200);
+      const settled = parseEvalJson(agent.evaluate(script));
+      if (settled.clicked === true && settled.reached === true) {
+        agent.waitMs(300);
+        revealNativeSelectableDomTarget(agent, field, option);
+        agent.waitMs(200);
+        return `selectable dom ${mode} ${field ?? '选项'}=${option}`;
+      }
+      if (settled.alreadySelected !== true || settled.reached !== true) {
+        return null;
+      }
+      return `selectable dom revealed: ${field ?? '选项'} 已达到 ${option}`;
+    }
+    if (parsed.clicked === true) {
+      agent.waitMs(300);
+      revealNativeSelectableDomTarget(agent, field, option);
+      agent.waitMs(200);
+      return `selectable dom ${mode} ${field ?? '选项'}=${option}`;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** 组件状态更新可能触发表单重渲染并复位滚动位置，动作完成后重新把目标控件滚入视口。 */
+function revealNativeSelectableDomTarget(agent: BrowserAgent, field: string | null, option: string): boolean {
+  const script = `(() => {
+  const normalize = (value) => (value || '').replace(/\\s+/g, '').trim();
+  const isVisible = (element) => {
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0;
+  };
+  const target = normalize(${JSON.stringify(option)});
+  const field = normalize(${JSON.stringify(field)});
+  const candidates = [...document.querySelectorAll('label')]
+    .filter((label) => label.querySelector('input[type="radio"], input[type="checkbox"]'))
+    .filter(isVisible)
+    .filter((label) => normalize(label.textContent) === target);
+  if (candidates.length === 0) return JSON.stringify({ revealed: false });
+  const fieldNodes = field
+    ? [...document.querySelectorAll('label, [class*="label"], [class*="form-item"], [class*="formItem"], dt, th')]
+      .filter((element) => isVisible(element) && normalize(element.textContent).includes(field))
+    : [];
+  const distance = (left, right) => {
+    const a = left.getBoundingClientRect();
+    const b = right.getBoundingClientRect();
+    return Math.abs((a.left + a.right - b.left - b.right) / 2)
+      + Math.abs((a.top + a.bottom - b.top - b.bottom) / 2);
+  };
+  const targetLabel = candidates
+    .map((label) => ({
+      label,
+      fieldDistance: fieldNodes.length > 0 ? Math.min(...fieldNodes.map((fieldNode) => distance(fieldNode, label))) : 0,
+    }))
+    .sort((a, b) => a.fieldDistance - b.fieldDistance)[0]?.label;
+  if (!targetLabel) return JSON.stringify({ revealed: false });
+  targetLabel.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+  return JSON.stringify({ revealed: true });
+})()`;
+
+  try {
+    return parseEvalJson(agent.evaluate(script)).revealed === true;
+  } catch {
+    return false;
+  }
+}
+
+/** 直接读取 DOM 中目标复选框及同组状态，验证“取消”与“仅勾选”的最终语义。 */
+function verifyNativeSelectableDomState(
+  agent: BrowserAgent,
+  action: Extract<DeterministicAction, { type: 'select-option' }>,
+): boolean | null {
+  const script = `(() => {
+  const normalize = (value) => (value || '').replace(/\\s+/g, '').trim();
+  const isVisible = (element) => {
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0;
+  };
+  const target = normalize(${JSON.stringify(action.option)});
+  const field = normalize(${JSON.stringify(action.field)});
+  const mode = ${JSON.stringify(action.mode ?? 'select')};
+  const candidates = [...document.querySelectorAll('label')]
+    .map((label) => ({ label, input: label.querySelector('input[type="radio"], input[type="checkbox"]') }))
+    .filter(({ label, input }) => input && isVisible(label) && normalize(label.textContent) === target);
+  if (candidates.length !== 1) return JSON.stringify({ found: false });
+  const { label, input } = candidates[0];
+  let group = [input];
+  for (let current = label.parentElement, depth = 0; current && depth < 8; current = current.parentElement, depth += 1) {
+    const checkboxes = [...current.querySelectorAll('input[type="checkbox"]')].filter((item) => !item.disabled);
+    if (checkboxes.includes(input) && checkboxes.length > 1 && (!field || normalize(current.textContent).includes(field))) {
+      group = checkboxes;
+      break;
+    }
+  }
+  const desiredChecked = mode !== 'deselect';
+  const otherSelectedCount = group.filter((item) => item !== input && item.checked).length;
+  return JSON.stringify({
+    found: true,
+    reached: input.checked === desiredChecked && (mode !== 'exclusive' || group.length > 1 && otherSelectedCount === 0),
+  });
+})()`;
+
+  try {
+    const parsed = parseEvalJson(agent.evaluate(script));
+    return parsed.found === true && typeof parsed.reached === 'boolean' ? parsed.reached : null;
   } catch {
     return null;
   }
@@ -362,6 +586,12 @@ function parseEvalJson(raw: string): {
   switchId?: string;
   matchedCount?: number;
   disabled?: boolean;
+  ambiguous?: boolean;
+  alreadySelected?: boolean;
+  groupFound?: boolean;
+  otherSelectedCount?: number;
+  reached?: boolean;
+  revealed?: boolean;
   opened?: boolean;
   selectedText?: string;
   searched?: boolean;

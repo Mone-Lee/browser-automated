@@ -1691,6 +1691,128 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps[0].actionOutput).toContain('selection skipped');
   });
 
+  it('finds an offscreen checkbox through the DOM and scrolls it into view before clicking', async () => {
+    const outputDir = makeTempDir();
+    const beforeSnapshot = '- generic "商品品牌" [ref=e11]';
+    const selectedSnapshot = [
+      '- StaticText "售后服务" [ref=f1]',
+      '- LabelText "支持7天无理由退换" [ref=e41] clickable [onclick]',
+      '  - checkbox "支持7天无理由退换" [checked=true, ref=e42]',
+    ].join('\n');
+    const evaluate = vi.fn((script: string) => {
+      if (script.includes('clickCount')) {
+        return JSON.stringify({ matchedCount: 1, clicked: true, checked: true, reached: true, groupFound: true });
+      }
+      return JSON.stringify({ found: true, reached: true });
+    });
+    const agent = buildAgent({
+      evaluate,
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(beforeSnapshot, { e11: { role: 'generic', name: '商品品牌' } }),
+        snapshotJson(selectedSnapshot, {
+          f1: { role: 'StaticText', name: '售后服务' },
+          e41: { role: 'LabelText', name: '支持7天无理由退换' },
+          e42: { role: 'checkbox', name: '支持7天无理由退换', checked: true },
+        }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com。\n\n目标：\n1. “售后服务”仅勾选“支持7天无理由退换”',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(true);
+    expect((agent.scroll as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(result.report.steps[0].actionOutput).toContain('selectable dom exclusive 售后服务=支持7天无理由退换');
+    const domScript = evaluate.mock.calls.map(([script]) => String(script)).find((script) => script.includes("document.querySelectorAll('label')"));
+    expect(domScript).toContain("scrollIntoView({ block: 'center', inline: 'nearest' })");
+    expect(domScript).toContain('isVisible(label)');
+  });
+
+  it('rechecks an initially deselected checkbox after async form hydration', async () => {
+    const outputDir = makeTempDir();
+    const checkboxSnapshot = [
+      '- StaticText "售后服务" [ref=f1]',
+      '- LabelText "支持换货服务" [ref=e41] clickable [onclick]',
+      '  - checkbox "支持换货服务" [checked=true, ref=e42]',
+    ].join('\n');
+    let actionEvaluationCount = 0;
+    const evaluate = vi.fn((script: string) => {
+      if (script.includes('clickCount')) {
+        actionEvaluationCount += 1;
+        return actionEvaluationCount === 1
+          ? JSON.stringify({ matchedCount: 1, clicked: false, checked: false, reached: true, alreadySelected: true })
+          : JSON.stringify({ matchedCount: 1, clicked: true, checked: false, reached: true });
+      }
+      if (script.includes('revealed')) {
+        return JSON.stringify({ revealed: true });
+      }
+      return JSON.stringify({ found: true, reached: true });
+    });
+    const refs = {
+      f1: { role: 'StaticText', name: '售后服务' },
+      e41: { role: 'LabelText', name: '支持换货服务' },
+      e42: { role: 'checkbox', name: '支持换货服务', checked: true },
+    };
+    const agent = buildAgent({
+      evaluate,
+      snapshots: [snapshotJson('open'), snapshotJson(checkboxSnapshot, refs), snapshotJson(checkboxSnapshot, refs)],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com。\n\n目标：\n1. “售后服务”取消勾选“支持换货服务”',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(true);
+    expect(actionEvaluationCount).toBe(2);
+    expect(result.report.steps[0].actionOutput).toContain('selectable dom deselect 售后服务=支持换货服务');
+  });
+
+  it('fails exclusive checkbox verification when another enabled option remains selected', async () => {
+    const outputDir = makeTempDir();
+    const checkboxSnapshot = [
+      '- StaticText "售后服务" [ref=f1]',
+      '- LabelText "支持7天无理由退换" [ref=e41] clickable [onclick]',
+      '  - checkbox "支持7天无理由退换" [checked=true, ref=e42]',
+      '- LabelText "支持换货服务" [ref=e43] clickable [onclick]',
+      '  - checkbox "支持换货服务" [checked=true, ref=e44]',
+    ].join('\n');
+    const evaluate = vi.fn((script: string) => {
+      if (script.includes('const mode = "exclusive"') && script.includes('clickCount')) {
+        return JSON.stringify({ matchedCount: 1, clicked: false, checked: true, reached: true, groupFound: true });
+      }
+      if (script.includes('const mode = "exclusive"')) {
+        return JSON.stringify({ found: true, reached: false });
+      }
+      return JSON.stringify({ found: false });
+    });
+    const refs = {
+      f1: { role: 'StaticText', name: '售后服务' },
+      e41: { role: 'LabelText', name: '支持7天无理由退换' },
+      e42: { role: 'checkbox', name: '支持7天无理由退换' },
+      e43: { role: 'LabelText', name: '支持换货服务' },
+      e44: { role: 'checkbox', name: '支持换货服务' },
+    };
+    const agent = buildAgent({
+      evaluate,
+      snapshots: [snapshotJson('open'), snapshotJson(checkboxSnapshot, refs), snapshotJson(checkboxSnapshot, refs)],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com。\n\n目标：\n1. “售后服务”仅勾选“支持7天无理由退换”',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(false);
+    expect(result.report.steps[0].verification).toContain('DOM 确认复选状态未达到目标');
+  });
+
   it('checks the first N table row checkboxes without clicking the header select-all checkbox', async () => {
     const outputDir = makeTempDir();
     const beforeRows = Array.from({ length: 12 }, (_, index) => [
