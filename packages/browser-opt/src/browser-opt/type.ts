@@ -101,7 +101,8 @@ export type DeterministicAction =
   | { type: 'inspect' }
   | { type: 'fill'; field: string; value: string }
   | { type: 'click'; target: string; field?: string | null }
-  | { type: 'check-table-rows'; count: number }
+  | { type: 'check-table-rows'; count: number; target?: never }
+  | { type: 'check-table-rows'; target: 'select-all'; count?: never }
   | {
       type: 'select-option';
       field: string | null;

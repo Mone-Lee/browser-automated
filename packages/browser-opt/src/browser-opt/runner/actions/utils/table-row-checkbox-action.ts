@@ -11,7 +11,12 @@ interface RowCheckbox {
   checked: boolean;
 }
 
-/** 按需滚动并勾选表格前 N 个数据行复选框，不操作表头全选框或表格外筛选控件。 */
+interface TableCheckboxes {
+  selectAll: RowCheckbox | null;
+  rows: RowCheckbox[];
+}
+
+/** 按需勾选表头全选框，或逐行勾选表格前 N 个数据行复选框。 */
 export function executeTableRowCheckboxAction(
   agent: BrowserAgent,
   action: Extract<DeterministicAction, { type: 'check-table-rows' }>,
@@ -20,6 +25,38 @@ export function executeTableRowCheckboxAction(
   const outputs: string[] = [];
   agent.waitMs(500);
   let currentSnapshot = captureTransientSnapshot(agent);
+
+  if (action.target === 'select-all') {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const checkbox = findTableCheckboxes(currentSnapshot.text).selectAll;
+      if (!checkbox) {
+        if (attempt === 3) {
+          throw new Error('未找到表格顶部的全选复选框。');
+        }
+        outputs.push(`selection retry ${attempt}: 表格仍在刷新，等待后重新获取全选复选框`);
+        agent.waitMs(500);
+        currentSnapshot = captureTransientSnapshot(agent);
+        continue;
+      }
+
+      if (!checkbox.checked) {
+        agent.scrollIntoView(checkbox.ref);
+        outputs.push(`check @${checkbox.ref}\n${agent.check(checkbox.ref)}`);
+      } else {
+        outputs.push(`checkbox skipped @${checkbox.ref}: already checked`);
+      }
+
+      agent.waitMs(300);
+      currentSnapshot = captureTransientSnapshot(agent);
+      if (verifyTableRowCheckboxActionEffect(action, currentSnapshot).passed) {
+        outputs.push(`selection confirmed after attempt ${attempt}`);
+        return outputs.join('\n');
+      }
+      outputs.push(`selection retry ${attempt}: 全选状态未生效，基于最新表格重试`);
+    }
+
+    return outputs.join('\n');
+  }
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     const checkboxes = findTableRowCheckboxes(currentSnapshot.text);
@@ -54,11 +91,18 @@ export function executeTableRowCheckboxAction(
   return outputs.join('\n');
 }
 
-/** 验证前 N 个数据行均已勾选，并防止额外行被意外选中。 */
+/** 验证表头全选框，或前 N 个数据行的最终勾选状态。 */
 export function verifyTableRowCheckboxActionEffect(
   action: Extract<DeterministicAction, { type: 'check-table-rows' }>,
   snapshot: SnapshotEvidence,
 ): { passed: boolean; message: string } {
+  if (action.target === 'select-all') {
+    const checkbox = findTableCheckboxes(snapshot.text).selectAll;
+    return checkbox?.checked
+      ? { passed: true, message: '已确认表格顶部的全选复选框处于选中状态。' }
+      : { passed: false, message: '表格顶部的全选复选框未处于选中状态。' };
+  }
+
   const checkboxes = findTableRowCheckboxes(snapshot.text);
   const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
   const firstRowsSelected = checkboxes.length >= action.count
@@ -74,11 +118,21 @@ export function verifyTableRowCheckboxActionEffect(
   };
 }
 
-/** 从无障碍树中提取数据行内部的复选框，并显式排除表头全选框。 */
-function findTableRowCheckboxes(snapshotText: string): RowCheckbox[] {
-  const checkboxes: RowCheckbox[] = [];
-  let rowIndent: number | null = null;
-  let rowHasCheckbox = false;
+/** 从无障碍树中区分表头全选框与数据行复选框，兼容无文本的表头复选框。 */
+function findTableCheckboxes(snapshotText: string): TableCheckboxes {
+  const result: TableCheckboxes = { selectAll: null, rows: [] };
+  let currentRow: { indent: number; checkbox: RowCheckbox | null; isHeader: boolean } | null = null;
+
+  const flushRow = () => {
+    if (!currentRow?.checkbox) {
+      return;
+    }
+    if (currentRow.isHeader) {
+      result.selectAll ??= currentRow.checkbox;
+    } else {
+      result.rows.push(currentRow.checkbox);
+    }
+  };
 
   for (const line of snapshotText.split('\n')) {
     const node = line.match(/^(\s*)-\s+([^\s]+)\b(.*)$/);
@@ -89,21 +143,19 @@ function findTableRowCheckboxes(snapshotText: string): RowCheckbox[] {
     const indent = node[1]?.length ?? 0;
     const role = node[2]?.toLowerCase() ?? '';
     const metadata = node[3] ?? '';
+    if (currentRow && indent <= currentRow.indent) {
+      flushRow();
+      currentRow = null;
+    }
     if (role === 'row') {
-      rowIndent = indent;
-      rowHasCheckbox = false;
+      currentRow = { indent, checkbox: null, isHeader: false };
       continue;
     }
-    if (rowIndent !== null && indent <= rowIndent) {
-      rowIndent = null;
-      rowHasCheckbox = false;
+    if (currentRow && role === 'columnheader') {
+      currentRow.isHeader = true;
+      continue;
     }
-    if (
-      rowIndent === null
-      || rowHasCheckbox
-      || !/^(?:checkbox|menuitemcheckbox)$/.test(role)
-      || /"Select all"/i.test(metadata)
-    ) {
+    if (!/^(?:checkbox|menuitemcheckbox)$/.test(role)) {
       continue;
     }
 
@@ -111,9 +163,24 @@ function findTableRowCheckboxes(snapshotText: string): RowCheckbox[] {
     if (!ref) {
       continue;
     }
-    checkboxes.push({ ref, checked: /\bchecked=true\b/.test(metadata) });
-    rowHasCheckbox = true;
+    const checkbox = { ref, checked: /\bchecked=true\b/.test(metadata) };
+    if (/"(?:Select all|全选)"/i.test(metadata)) {
+      result.selectAll ??= checkbox;
+      if (currentRow) {
+        currentRow.isHeader = true;
+      }
+      continue;
+    }
+    if (currentRow && !currentRow.checkbox) {
+      currentRow.checkbox = checkbox;
+    }
   }
 
-  return checkboxes;
+  flushRow();
+  return result;
+}
+
+/** 提取数据行内部的首个复选框，并排除表头全选框。 */
+function findTableRowCheckboxes(snapshotText: string): RowCheckbox[] {
+  return findTableCheckboxes(snapshotText).rows;
 }

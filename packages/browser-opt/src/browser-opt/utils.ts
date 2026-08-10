@@ -141,9 +141,12 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
     };
   }
 
-  const tableRowCheckboxCount = parseTableRowCheckboxCount(normalized);
-  if (tableRowCheckboxCount !== null) {
-    return { type: 'check-table-rows', count: tableRowCheckboxCount };
+  const tableRowCheckboxTarget = parseTableRowCheckboxTarget(normalized);
+  if (tableRowCheckboxTarget === 'select-all') {
+    return { type: 'check-table-rows', target: 'select-all' };
+  }
+  if (tableRowCheckboxTarget !== null) {
+    return { type: 'check-table-rows', count: tableRowCheckboxTarget };
   }
 
   const quoted = extractQuotedSegments(normalized);
@@ -203,10 +206,14 @@ function parseSelectionMode(instruction: string): 'select' | 'deselect' | 'exclu
   return 'select';
 }
 
-/** 识别表格或列表中按显示顺序勾选前 N 条数据的集合动作。 */
-function parseTableRowCheckboxCount(instruction: string): number | null {
+/** 识别表格或列表的全选框，以及按显示顺序勾选前 N 条数据的集合动作。 */
+function parseTableRowCheckboxTarget(instruction: string): number | 'select-all' | null {
   if (!/(?:表格|列表|数据行)/.test(instruction) || !/(?:勾选|选中|勾上|check)/i.test(instruction)) {
     return null;
+  }
+
+  if (/(?:顶部|表头)?.*全选(?:复选框)?/.test(instruction)) {
+    return 'select-all';
   }
 
   const count = instruction.match(/前\s*(\d+)\s*(?:条|个|行)/)?.[1];

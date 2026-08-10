@@ -139,6 +139,10 @@ describe('browser-opt parsing', () => {
       type: 'check-table-rows',
       count: 10,
     });
+    expect(parseDeterministicAction('勾选表格顶部的全选复选框')).toEqual({
+      type: 'check-table-rows',
+      target: 'select-all',
+    });
   });
 
   it('preserves checkbox final-state intent for exclusive and deselect instructions', () => {
@@ -1867,6 +1871,39 @@ describe('BrowserOptRunner', () => {
     expect((agent.check as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(1, 'e1');
     expect((agent.check as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(10, 'e10');
     expect(result.report.steps[0].verification).toContain('表格前 10 条数据行');
+  });
+
+  it('checks an unlabeled select-all checkbox inside the table header', async () => {
+    const outputDir = makeTempDir();
+    const beforeTable = [
+      '- row "商品信息" [ref=header]',
+      '  - checkbox "" [checked=false, ref=select-all]',
+      '  - columnheader "商品信息" [ref=header-cell]',
+      '- row "数据 1" [ref=r1]',
+      '  - cell "" [ref=c1]',
+      '    - checkbox "" [checked=false, ref=e1]',
+    ].join('\n');
+    const afterTable = beforeTable.replace(
+      'checkbox "" [checked=false, ref=select-all]',
+      'checkbox "" [checked=true, ref=select-all]',
+    );
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(beforeTable),
+        snapshotJson(beforeTable),
+        snapshotJson(afterTable),
+        snapshotJson(afterTable),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 勾选表格顶部的全选复选框。', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.check as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((agent.check as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('select-all');
+    expect(result.report.steps[0].verification).toContain('全选复选框处于选中状态');
   });
 
   it('re-snapshots the table and retries a row whose selection was lost during async refresh', async () => {
