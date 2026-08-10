@@ -2321,6 +2321,61 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps[0].actionOutput).toContain('select dom click 对接负责人=嘻嘻嘻 (嘻嘻嘻)');
   });
 
+  it('scrolls a non-searchable dropdown until the requested option is rendered', async () => {
+    const outputDir = makeTempDir();
+    const closedSnapshot = '- combobox "* 运费模板 :" [expanded=false, required, ref=e544]';
+    const selectedSnapshot = '- combobox "* 运费模板 :" [expanded=false, required, ref=e544]: 按商品重量';
+    let scrollCount = 0;
+    const agent = buildAgent({
+      evaluate: (script) => {
+        if (script.includes('selectHelper.openDropdownByField')) {
+          return JSON.stringify({ found: true, opened: true });
+        }
+        if (script.includes('selectHelper.searchActiveDropdown')) {
+          return JSON.stringify({ searched: false });
+        }
+        if (script.includes('selectHelper.scrollActiveDropdown')) {
+          scrollCount += 1;
+          return JSON.stringify(scrollCount === 1
+            ? { found: false, clicked: false, scrolled: true, reachedEnd: false }
+            : { found: true, clicked: true, selectedText: '按商品重量' });
+        }
+        if (script.includes('selectHelper.clickVisibleOption')) {
+          return JSON.stringify({ found: false, clicked: false });
+        }
+        if (script.includes('selectHelper.dismissActiveDropdown')) {
+          return JSON.stringify({ found: true, dismissed: true });
+        }
+        if (script.includes('selectHelper.hasVisibleDropdown')) {
+          return JSON.stringify({ dropdownOpen: false });
+        }
+        return JSON.stringify({ found: false });
+      },
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(closedSnapshot, { e544: { role: 'combobox', name: '* 运费模板 :' } }),
+        snapshotJson(selectedSnapshot, { e544: { role: 'combobox', name: '* 运费模板 :', value: '按商品重量' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. “运费模板”选择“按商品重量”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect(scrollCount).toBe(2);
+    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalledWith('e544');
+    expect(result.report.steps[0].actionOutput).toContain('select dom click 运费模板=按商品重量 (按商品重量)');
+    const scrollScript = (agent.evaluate as ReturnType<typeof vi.fn>).mock.calls
+      .map(([script]) => String(script))
+      .find((script) => script.includes('selectHelper.scrollActiveDropdown')) ?? '';
+    const searchScript = (agent.evaluate as ReturnType<typeof vi.fn>).mock.calls
+      .map(([script]) => String(script))
+      .find((script) => script.includes('selectHelper.searchActiveDropdown')) ?? '';
+    expect(searchScript).toContain('input.readOnly || input.disabled');
+    expect(scrollScript).toContain('.rc-virtual-list-holder');
+    expect(scrollScript).toContain("dispatchEvent(new Event('scroll', { bubbles: true }))");
+  });
+
   it('selects an ordinal dropdown option without requiring the option text upfront', async () => {
     const outputDir = makeTempDir();
     const closedSnapshot = [

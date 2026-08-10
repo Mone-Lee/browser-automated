@@ -434,6 +434,20 @@ function clickDropdownDomTarget(agent: BrowserAgent, field: string, option: stri
         Object.assign(clicked, parseEvalJson(agent.evaluate(retryClickScript)));
       }
     }
+    if (clicked.clicked !== true) {
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const scrollScript = `(() => {
+  const selectHelper = ${dropdownDomHelperSource()};
+  return JSON.stringify(selectHelper.scrollActiveDropdown(${JSON.stringify(option)}));
+})()`;
+        const scrolled = parseEvalJson(agent.evaluate(scrollScript));
+        Object.assign(clicked, scrolled);
+        if (scrolled.clicked === true || scrolled.scrolled !== true) {
+          break;
+        }
+        agent.waitMs(200);
+      }
+    }
     if (clicked.clicked === true) {
       agent.waitMs(300);
       const selectedText = clicked.selectedText ? ` (${clicked.selectedText})` : '';
@@ -595,6 +609,7 @@ function parseEvalJson(raw: string): {
   opened?: boolean;
   selectedText?: string;
   searched?: boolean;
+  scrolled?: boolean;
   dismissed?: boolean;
   dropdownOpen?: boolean;
 } {
@@ -793,8 +808,43 @@ function searchActiveDropdown(option) {
   if (!(input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement)) {
     return { searched: false };
   }
+  if (input.readOnly || input.disabled) {
+    return { searched: false };
+  }
   browserOptInputValue(input, option);
   return { searched: true };
+}
+function scrollActiveDropdown(option) {
+  const clicked = clickVisibleOption(option);
+  if (clicked.clicked) {
+    return clicked;
+  }
+  const active = document.querySelector('[data-browser-opt-active-select="true"]');
+  const activeRect = active?.getBoundingClientRect();
+  const root = browserOptDropdownContainers()
+    .map((item) => ({ ...item, distance: activeRect ? browserOptCenterDistance(activeRect, item.rect) : 0 }))
+    .sort((a, b) => a.distance - b.distance)[0]?.element;
+  if (!root) {
+    return { found: false, clicked: false, scrolled: false };
+  }
+  const preferred = root.querySelector('.rc-virtual-list-holder, .ant-select-dropdown-menu, .el-scrollbar__wrap');
+  const candidates = [preferred, root, ...root.querySelectorAll('[role="listbox"], [class*="virtual-list"], [class*="scroll"]')]
+    .filter((element, index, items) => element instanceof HTMLElement && items.indexOf(element) === index)
+    .filter((element) => element.scrollHeight > element.clientHeight + 1);
+  const scrollable = candidates[0];
+  if (!scrollable) {
+    return { found: false, clicked: false, scrolled: false };
+  }
+  const previousTop = scrollable.scrollTop;
+  const maxTop = Math.max(scrollable.scrollHeight - scrollable.clientHeight, 0);
+  scrollable.scrollTop = Math.min(previousTop + Math.max(Math.floor(scrollable.clientHeight * 0.8), 120), maxTop);
+  scrollable.dispatchEvent(new Event('scroll', { bubbles: true }));
+  return {
+    found: false,
+    clicked: false,
+    scrolled: scrollable.scrollTop > previousTop,
+    reachedEnd: scrollable.scrollTop >= maxTop,
+  };
 }
 function dismissActiveDropdown() {
   const containers = browserOptDropdownContainers();
@@ -815,7 +865,7 @@ function dismissActiveDropdown() {
 function hasVisibleDropdown() {
   return { dropdownOpen: browserOptDropdownContainers().length > 0 };
 }
-return { openDropdownByField, clickVisibleOption, searchActiveDropdown, dismissActiveDropdown, hasVisibleDropdown };
+return { openDropdownByField, clickVisibleOption, searchActiveDropdown, scrollActiveDropdown, dismissActiveDropdown, hasVisibleDropdown };
 })()
 `;
 }
