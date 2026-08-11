@@ -3500,6 +3500,56 @@ describe('BrowserOptRunner', () => {
     );
   });
 
+  it('matches a hidden upload input by its table column header', async () => {
+    const outputDir = makeTempDir();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('image-bytes', { status: 200 })));
+    let lookupCount = 0;
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('价格设置表格', { e1: { role: 'table', name: '价格设置' } }),
+        snapshotJson('规格图片上传完成', { e1: { role: 'table', name: '价格设置' } }),
+      ],
+      evaluate: (script) => {
+        if (script.includes('uploadHelper.diagnoseUploadByField(')) {
+          return JSON.stringify({ diagnostic: {} });
+        }
+        if (script.includes('uploadHelper.revealTableUploadInputByField(')) {
+          return JSON.stringify({ found: true, revealed: true });
+        }
+        if (script.includes('uploadHelper.findUploadInputByField(')) {
+          lookupCount += 1;
+          return JSON.stringify(lookupCount === 1
+            ? { found: false }
+            : { found: true, selector: '[data-browser-opt-upload-id="browser-opt-upload-0"]' });
+        }
+        return JSON.stringify({ found: true, pending: false, failed: false });
+      },
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/goods/create。\n\n目标：\n1. 价格设置表格第 1 行“规格图片”列自动上传，图片来源 URL 为“https://example.com/spec.png”。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(true);
+    const scripts = (agent.evaluate as ReturnType<typeof vi.fn>).mock.calls
+      .map(([script]) => String(script));
+    const lookupScript = scripts.find((script) => script.includes('uploadHelper.findUploadInputByField(')) ?? '';
+    const revealScript = scripts.find((script) => script.includes('uploadHelper.revealTableUploadInputByField(')) ?? '';
+    expect(lookupScript).toContain("input.closest('td, th, [role=\"cell\"], [role=\"gridcell\"], .ant-table-cell')");
+    expect(lookupScript).toContain("source: 'table-geometry'");
+    expect(lookupScript).toContain('browserOptUploadCellIdentities(header)');
+    expect(lookupScript).toContain("root.matches('.ant-table-virtual')");
+    expect(lookupScript).toContain("input.closest('td, th, [role=\"cell\"], [role=\"gridcell\"], .ant-table-cell')");
+    expect(lookupScript).toContain("table.querySelectorAll('thead tr')");
+    expect(lookupScript).toContain('headerCells[cell.cellIndex]');
+    expect(revealScript).toContain('browserOptUploadHorizontalOverlap(headerRect, cell.getBoundingClientRect())');
+    expect(revealScript).toContain("root.querySelectorAll('tbody tr, [role=\"row\"], .ant-table-tbody-virtual-holder-inner .ant-table-row')");
+    expect(result.report.steps[0].actionOutput).toContain('upload reveal table input 规格图片');
+  });
+
   it('hands off after upload when the page enters an image crop workflow', async () => {
     const outputDir = makeTempDir();
     const fetchMock = vi.fn(async () => new Response('image-bytes', { status: 200 }));

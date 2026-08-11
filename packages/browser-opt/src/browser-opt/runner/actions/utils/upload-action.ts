@@ -43,6 +43,17 @@ export async function executeUploadAction(
     }
   }
 
+  if (!ref && revealTableUploadInput(agent, action.field)) {
+    searchOutput.push(`upload reveal table input ${action.field}`);
+    agent.waitMs(300);
+    const domTarget = findHiddenUploadInputSelector(agent, action.field);
+    if (domTarget) {
+      ref = domTarget.selector;
+      scrollTarget = domTarget.scrollSelector ?? null;
+      searchOutput.push(`upload dom selector ${domTarget.selector}`);
+    }
+  }
+
   if (!ref && options.allowViewportSearch) {
     const scrolled = searchUploadInLongForm(agent, action.field);
     if (scrolled) {
@@ -53,7 +64,7 @@ export async function executeUploadAction(
   }
 
   if (!ref) {
-    throw new Error(`无法找到上传控件：${action.field}`);
+    throw new Error(`无法找到上传控件：${action.field}；DOM诊断：${diagnoseUploadTarget(agent, action.field)}`);
   }
 
   if (scrollTarget) {
@@ -142,6 +153,34 @@ function findHiddenUploadInputSelector(agent: BrowserAgent, field: string): Uplo
   }
 }
 
+/** 表格上传组件可能在点击单元格入口后才创建 file input，按列头定位首行入口并触发一次。 */
+function revealTableUploadInput(agent: BrowserAgent, field: string): boolean {
+  const script = `(() => {
+  const uploadHelper = ${uploadDomHelperSource()};
+  return JSON.stringify(uploadHelper.revealTableUploadInputByField(${JSON.stringify(field)}));
+})()`;
+
+  try {
+    return parseEvalJson(agent.evaluate(script)).revealed === true;
+  } catch {
+    return false;
+  }
+}
+
+/** 上传定位最终失败时记录表头、数据行和 file input 的真实结构，避免仅凭快照反复猜测。 */
+function diagnoseUploadTarget(agent: BrowserAgent, field: string): string {
+  const script = `(() => {
+  const uploadHelper = ${uploadDomHelperSource()};
+  return JSON.stringify(uploadHelper.diagnoseUploadByField(${JSON.stringify(field)}));
+})()`;
+
+  try {
+    return JSON.stringify(parseEvalJson(agent.evaluate(script)).diagnostic ?? {});
+  } catch (error) {
+    return JSON.stringify({ error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
 /** 批量上传前一次性标记字段内的全部目标 input，确保素材与槽位按页面顺序一一对应。 */
 function findBatchUploadInputSelectors(agent: BrowserAgent, field: string, count: number): BatchUploadDomTarget {
   const script = `(() => {
@@ -178,13 +217,84 @@ const browserOptUploadAncestorChain = (element) => {
   }
   return chain;
 };
+const browserOptUploadTableRoot = (element) => element.closest('.ant-table, .el-table, [role="table"], [role="grid"]')
+  || element.closest('table')?.parentElement;
+const browserOptUploadTableRows = (root) => root ? [...root.querySelectorAll('tbody tr, [role="row"], .ant-table-tbody-virtual-holder-inner .ant-table-row')] : [];
+const browserOptUploadRowCells = (row) => [...row.querySelectorAll(':scope > td, :scope > th, :scope > [role="cell"], :scope > [role="gridcell"], :scope > .ant-table-cell')];
+const browserOptUploadHorizontalOverlap = (left, right) => Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
+const browserOptUploadCellIdentities = (cell) => {
+  const identities = [];
+  for (const name of ['data-column-key', 'data-field', 'data-prop', 'data-index', 'aria-colindex']) {
+    const value = cell.getAttribute(name);
+    if (value) identities.push(name + '=' + value);
+  }
+  for (const token of cell.classList || []) {
+    if (/column|(^|[-_])col([-_]|\\d)|cell[-_]\\d/i.test(token) && !/^(ant-table-cell|el-table__cell)$/.test(token)) {
+      identities.push('class=' + token);
+    }
+  }
+  const table = cell.closest('table');
+  const index = cell.cellIndex;
+  const col = table && index >= 0 ? table.querySelectorAll('colgroup col')[index] : null;
+  if (col) {
+    for (const name of ['name', 'class', 'data-column-key', 'data-index']) {
+      const value = col.getAttribute(name);
+      if (value) identities.push('col-' + name + '=' + value);
+    }
+  }
+  return [...new Set(identities)];
+};
+const browserOptUploadHeadersForCell = (cell) => {
+  const root = browserOptUploadTableRoot(cell);
+  if (!root) return [];
+  const cellRect = cell.getBoundingClientRect();
+  const identities = browserOptUploadCellIdentities(cell);
+  const headers = [...root.querySelectorAll('thead th, thead td, [role="columnheader"]')]
+    .filter((header) => browserOptUploadVisible(header));
+  if (root.matches('.ant-table-virtual')) {
+    const row = cell.closest('.ant-table-row');
+    const columnIndex = row ? browserOptUploadRowCells(row).indexOf(cell) : -1;
+    const header = columnIndex >= 0 ? headers[columnIndex] : null;
+    if (header) return [header];
+  }
+  const identityHeaders = identities.length === 0 ? [] : headers
+    .filter((header) => browserOptUploadCellIdentities(header).some((identity) => identities.includes(identity)));
+  if (identityHeaders.length > 0) return identityHeaders;
+  return headers
+    .map((header) => ({ header, overlap: browserOptUploadHorizontalOverlap(header.getBoundingClientRect(), cellRect) }))
+    .filter((item) => item.overlap > 0)
+    .sort((a, b) => b.overlap - a.overlap)
+    .map((item) => item.header);
+};
 const browserOptUploadContext = (input, fieldText) => {
   const chain = browserOptUploadAncestorChain(input);
+  const cell = input.closest('td, th, [role="cell"], [role="gridcell"], .ant-table-cell');
+  const table = cell?.closest('table');
+  if (cell) {
+    const geometricHeader = browserOptUploadHeadersForCell(cell)
+      .find((header) => normalizeBrowserOptUploadText(header.textContent || '').includes(fieldText));
+    if (geometricHeader) {
+      return { text: normalizeBrowserOptUploadText(geometricHeader.textContent || ''), depth: 0.125, source: 'table-geometry' };
+    }
+  }
+
   const directMatch = chain
     .map((element, depth) => ({ element, depth, text: normalizeBrowserOptUploadText(element.textContent || '') }))
     .find((item) => item.text.includes(fieldText));
   if (directMatch) {
     return { text: directMatch.text, depth: directMatch.depth, source: 'ancestor' };
+  }
+
+  if (cell && table) {
+    const headerRows = [...table.querySelectorAll('thead tr')];
+    const headerCells = headerRows.length > 0
+      ? [...headerRows[headerRows.length - 1].querySelectorAll('th, td')]
+      : [];
+    const header = headerCells[cell.cellIndex];
+    const headerText = normalizeBrowserOptUploadText(header?.textContent || '');
+    if (headerText.includes(fieldText)) {
+      return { text: headerText, depth: 0.25, source: 'table-header' };
+    }
   }
 
   for (const item of chain.map((element, depth) => ({ element, depth }))) {
@@ -287,7 +397,81 @@ function getUploadStateByField(field) {
   ].join(',')).length > 0;
   return { found: true, pending, failed };
 }
-return { findUploadInputByField, findUploadInputsByField, getUploadStateByField };
+function revealTableUploadInputByField(field) {
+  const fieldText = normalizeBrowserOptUploadText(field);
+  const headers = [...document.querySelectorAll('thead th, thead td, [role="columnheader"]')]
+    .filter((element) => browserOptUploadVisible(element))
+    .filter((element) => normalizeBrowserOptUploadText(element.textContent || '').includes(fieldText));
+  for (const header of headers) {
+    const component = browserOptUploadTableRoot(header);
+    const headerRect = header.getBoundingClientRect();
+    const rows = browserOptUploadTableRows(component);
+    const headerIdentities = browserOptUploadCellIdentities(header);
+    const identityCells = headerIdentities.length === 0 ? [] : rows
+      .flatMap((row) => browserOptUploadRowCells(row)
+        .filter((cell) => browserOptUploadCellIdentities(cell).some((identity) => headerIdentities.includes(identity))));
+    const sameTextHeaders = component ? [...component.querySelectorAll('thead th, thead td, [role="columnheader"]')]
+      .filter((item) => normalizeBrowserOptUploadText(item.textContent || '') === normalizeBrowserOptUploadText(header.textContent || '')) : [];
+    const geometricCells = sameTextHeaders.length > 1 ? [] : rows
+      .flatMap((row) => browserOptUploadRowCells(row)
+        .map((cell) => ({ cell, rowTop: row.getBoundingClientRect().top, overlap: browserOptUploadHorizontalOverlap(headerRect, cell.getBoundingClientRect()) })))
+      .filter((item) => item.overlap > 0)
+      .sort((a, b) => b.overlap - a.overlap || a.rowTop - b.rowTop)
+      .map((item) => item.cell);
+    const headerCells = [...(header.parentElement?.children || [])];
+    const columnIndex = header.cellIndex >= 0 ? header.cellIndex : headerCells.indexOf(header);
+    const ownTable = header.closest('table');
+    const indexedRows = ownTable?.querySelector('tbody tr') ? [...ownTable.querySelectorAll('tbody tr')] : rows;
+    const indexedCells = columnIndex < 0 ? [] : indexedRows
+      .map((row) => browserOptUploadRowCells(row)[columnIndex]).filter(Boolean);
+    for (const cell of [...new Set([...identityCells, ...geometricCells, ...indexedCells])]) {
+      const candidates = [...cell.querySelectorAll('button, label, [role="button"], [class*="upload"], [onclick]')]
+        .filter((element) => browserOptUploadVisible(element))
+        .sort((a, b) => {
+          const aRect = a.getBoundingClientRect();
+          const bRect = b.getBoundingClientRect();
+          return aRect.width * aRect.height - bRect.width * bRect.height;
+        });
+      const trigger = candidates[0] || (browserOptUploadVisible(cell) ? cell : null);
+      if (!trigger) continue;
+      trigger.scrollIntoView({ block: 'center', inline: 'nearest' });
+      trigger.click();
+      return { found: true, revealed: true };
+    }
+  }
+  return { found: false, revealed: false };
+}
+function diagnoseUploadByField(field) {
+  const fieldText = normalizeBrowserOptUploadText(field);
+  const headers = [...document.querySelectorAll('thead th, thead td, [role="columnheader"]')]
+    .filter((header) => normalizeBrowserOptUploadText(header.textContent || '').includes(fieldText))
+    .map((header) => {
+      const component = browserOptUploadTableRoot(header);
+      const rect = header.getBoundingClientRect();
+      return {
+        tag: header.tagName,
+        className: String(header.className || ''),
+        identities: browserOptUploadCellIdentities(header),
+        rect: { left: rect.left, right: rect.right, top: rect.top, width: rect.width },
+        component: component ? { tag: component.tagName, className: String(component.className || '') } : null,
+        rows: browserOptUploadTableRows(component).length,
+        ownRows: header.closest('table')?.querySelectorAll('tbody tr').length || 0,
+      };
+    });
+  const inputs = [...document.querySelectorAll('input[type="file"]')].map((input) => {
+    const cell = input.closest('td, th, [role="cell"], [role="gridcell"], .ant-table-cell');
+    const context = browserOptUploadContext(input, fieldText);
+    return {
+      className: String(input.className || ''),
+      cellTag: cell?.tagName || null,
+      cellClassName: String(cell?.className || ''),
+      identities: cell ? browserOptUploadCellIdentities(cell) : [],
+      context: { source: context.source, depth: context.depth, matches: context.text.includes(fieldText) },
+    };
+  });
+  return { diagnostic: { headers, inputs, inputCount: inputs.length } };
+}
+return { findUploadInputByField, findUploadInputsByField, getUploadStateByField, revealTableUploadInputByField, diagnoseUploadByField };
 })()
 `;
 }
@@ -324,6 +508,8 @@ function parseEvalJson(raw: string): {
   scrollSelector?: string;
   pending?: boolean;
   failed?: boolean;
+  revealed?: boolean;
+  diagnostic?: unknown;
 } {
   const decoded = JSON.parse(raw.trim()) as unknown;
   return typeof decoded === 'string'
