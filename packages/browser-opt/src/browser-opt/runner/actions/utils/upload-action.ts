@@ -18,6 +18,15 @@ interface BatchUploadDomTarget {
   scrollSelector?: string;
 }
 
+interface UploadState {
+  found?: boolean;
+  pending?: boolean;
+  failed?: boolean;
+  completed?: boolean;
+  completedCount?: number;
+  inputFilesCount?: number;
+}
+
 /** 执行上传动作，先展示可见上传区域，再使用快照 ref、隐藏 input 或长表单搜索结果上传。 */
 export async function executeUploadAction(
   agent: BrowserAgent,
@@ -28,14 +37,14 @@ export async function executeUploadAction(
 ): Promise<string> {
   const sources = action.sources ?? [action.source];
   if (sources.length > 1) {
-    return executeBatchUploadAction(agent, action.field, sources, outputDir);
+    return executeBatchUploadAction(agent, action.field, sources, outputDir, action.rowNumber);
   }
 
-  let ref = findUploadRef(snapshot, action.field);
-  let scrollTarget = ref;
   const searchOutput: string[] = [];
+  let ref = action.rowNumber ? null : findUploadRef(snapshot, action.field);
+  let scrollTarget = ref;
   if (!ref) {
-    const domTarget = findHiddenUploadInputSelector(agent, action.field);
+    const domTarget = findHiddenUploadInputSelector(agent, action.field, action.rowNumber);
     if (domTarget) {
       ref = domTarget.selector;
       scrollTarget = domTarget.scrollSelector ?? null;
@@ -43,18 +52,21 @@ export async function executeUploadAction(
     }
   }
 
-  if (!ref && revealTableUploadInput(agent, action.field)) {
-    searchOutput.push(`upload reveal table input ${action.field}`);
-    agent.waitMs(300);
-    const domTarget = findHiddenUploadInputSelector(agent, action.field);
-    if (domTarget) {
-      ref = domTarget.selector;
-      scrollTarget = domTarget.scrollSelector ?? null;
-      searchOutput.push(`upload dom selector ${domTarget.selector}`);
+  if (!ref && revealTableUploadInput(agent, action.field, action.rowNumber)) {
+    const rowLabel = action.rowNumber ? `第 ${action.rowNumber} 行 ` : '';
+    searchOutput.push(`upload reveal table input ${rowLabel}${action.field}`);
+    for (let attempt = 1; attempt <= 10 && !ref; attempt += 1) {
+      agent.waitMs(100);
+      const domTarget = findHiddenUploadInputSelector(agent, action.field, action.rowNumber);
+      if (domTarget) {
+        ref = domTarget.selector;
+        scrollTarget = domTarget.scrollSelector ?? null;
+        searchOutput.push(`upload dynamic input ${attempt} ${domTarget.selector}`);
+      }
     }
   }
 
-  if (!ref && options.allowViewportSearch) {
+  if (!ref && !action.rowNumber && options.allowViewportSearch) {
     const scrolled = searchUploadInLongForm(agent, action.field);
     if (scrolled) {
       ref = scrolled.ref;
@@ -64,7 +76,8 @@ export async function executeUploadAction(
   }
 
   if (!ref) {
-    throw new Error(`无法找到上传控件：${action.field}；DOM诊断：${diagnoseUploadTarget(agent, action.field)}`);
+    const rowLabel = action.rowNumber ? `第 ${action.rowNumber} 行 ` : '';
+    throw new Error(`无法找到上传控件：${rowLabel}${action.field}；DOM诊断：${diagnoseUploadTarget(agent, action.field, action.rowNumber)}`);
   }
 
   if (scrollTarget) {
@@ -72,7 +85,7 @@ export async function executeUploadAction(
   }
   const filePath = await prepareUploadFile(sources[0], outputDir);
   const output = agent.upload(ref, [filePath]);
-  const completionOutput = waitForUploadCompletion(agent, action.field);
+  const completionOutput = waitForUploadCompletion(agent, action.field, action.rowNumber, ref);
   return [
     ...searchOutput,
     `upload @${ref} ${filePath}`,
@@ -81,14 +94,44 @@ export async function executeUploadAction(
   ].filter(Boolean).join('\n').trim();
 }
 
+/** 上传动作必须在目标字段内形成文件、预览或组件成功态，不能只依赖 upload 命令返回。 */
+export function verifyUploadActionEffect(
+  agent: BrowserAgent,
+  action: Extract<DeterministicAction, { type: 'upload' }>,
+  afterSnapshot: SnapshotEvidence,
+): { passed: boolean; message: string } {
+  const expectedCount = action.sources?.length ?? 1;
+  const state = getUploadState(agent, action.field, action.rowNumber, expectedCount);
+  const rowLabel = action.rowNumber ? `第 ${action.rowNumber} 行` : '';
+  const target = `${rowLabel}${action.field}`;
+
+  if (state.failed) {
+    return { passed: false, message: `目标字段显示上传失败：${target}` };
+  }
+  if (state.completed && (state.completedCount ?? expectedCount) >= expectedCount) {
+    return { passed: true, message: `已确认上传成功：${target}` };
+  }
+  const normalizedSnapshot = afterSnapshot.text.replace(/\s+/g, '');
+  const escapedField = action.field.replace(/\s+/g, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const hasExplicitSuccess = new RegExp(
+    `(?:${escapedField}.{0,80}(?:上传成功|上传完成|预览)|(?:上传成功|上传完成|预览).{0,80}${escapedField})`,
+  ).test(normalizedSnapshot);
+  if (hasExplicitSuccess) {
+    return { passed: true, message: `已通过页面状态确认上传成功：${target}` };
+  }
+
+  return { passed: false, message: `未在目标字段检测到上传成功状态：${target}` };
+}
+
 /** 批量上传前滚动字段容器一次，再按 input 的 DOM 顺序逐槽位绑定图片。 */
 async function executeBatchUploadAction(
   agent: BrowserAgent,
   field: string,
   sources: string[],
   outputDir: string,
+  rowNumber?: number,
 ): Promise<string> {
-  const { selectors, scrollSelector } = findBatchUploadInputSelectors(agent, field, sources.length);
+  const { selectors, scrollSelector } = findBatchUploadInputSelectors(agent, field, sources.length, rowNumber);
   if (selectors.length < sources.length) {
     throw new Error(`上传槽位不足：${field}需要 ${sources.length} 个，找到 ${selectors.length} 个`);
   }
@@ -103,28 +146,34 @@ async function executeBatchUploadAction(
     output.push(
       `upload slot ${index + 1} @${selector} ${filePath}`,
       agent.upload(selector, [filePath]),
-      waitForUploadCompletion(agent, field),
+      waitForUploadCompletion(agent, field, rowNumber, selector),
     );
   }
   return output.filter(Boolean).join('\n').trim();
 }
 
-/** 上传命令返回后等待字段作用域内的加载态消失，避免后续步骤操作尚未就绪的表单。 */
-function waitForUploadCompletion(agent: BrowserAgent, field: string): string {
+/** 上传命令返回后等待目标字段出现明确成功态，并兼容只写入文件但未触发组件事件的页面。 */
+function waitForUploadCompletion(agent: BrowserAgent, field: string, rowNumber: number | undefined, ref: string): string {
   const waitLogs: string[] = [];
+  let inputChangeAttempted = false;
   agent.waitMs(300);
 
   for (let attempt = 1; attempt <= 20; attempt += 1) {
-    const script = `(() => {
-  const uploadHelper = ${uploadDomHelperSource()};
-  return JSON.stringify(uploadHelper.getUploadStateByField(${JSON.stringify(field)}));
-})()`;
-    const state = parseEvalJson(agent.evaluate(script));
+    const state = getUploadState(agent, field, rowNumber, 1);
     if (state.failed) {
       throw new Error(`上传失败：${field}`);
     }
-    if (state.pending !== true) {
+    if (state.completed === true) {
       return [...waitLogs, `upload settled ${field}`].join('\n');
+    }
+    if (!inputChangeAttempted && state.pending !== true) {
+      inputChangeAttempted = true;
+      const notification = notifyUploadInputChange(agent, ref);
+      if (notification.dispatched === true) {
+        waitLogs.push(`upload notify input change ${field} files=${notification.files ?? 0}`);
+        agent.waitMs(300);
+        continue;
+      }
     }
 
     waitLogs.push(`upload wait ${attempt} ${field}`);
@@ -134,11 +183,45 @@ function waitForUploadCompletion(agent: BrowserAgent, field: string): string {
   throw new Error(`等待上传完成超时：${field}`);
 }
 
-/** Ant Upload 等组件会隐藏真实 file input，同时返回用于滚动的可见字段容器。 */
-function findHiddenUploadInputSelector(agent: BrowserAgent, field: string): UploadDomTarget | null {
+/** 仅对已注入文件的隐藏 input 补发原生事件，解决部分 Ant Upload 未响应 CDP 文件写入的问题。 */
+function notifyUploadInputChange(agent: BrowserAgent, ref: string): { dispatched?: boolean; files?: number } {
+  if (!ref.startsWith('[') && !ref.startsWith('#') && !ref.startsWith('.')) {
+    return { dispatched: false };
+  }
+
+  const script = `(() => {
+  const input = document.querySelector(${JSON.stringify(ref)});
+  if (!(input instanceof HTMLInputElement) || input.type !== 'file' || !input.files?.length) {
+    return JSON.stringify({ dispatched: false, files: input instanceof HTMLInputElement ? input.files?.length || 0 : 0 });
+  }
+  input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+  return JSON.stringify({ dispatched: true, files: input.files.length });
+})()`;
+
+  try {
+    return parseEvalJson(agent.evaluate(script));
+  } catch {
+    return { dispatched: false };
+  }
+}
+
+/** 统一读取字段级上传状态，供等待逻辑和最终效果校验复用。 */
+function getUploadState(agent: BrowserAgent, field: string, rowNumber: number | undefined, expectedCount: number): UploadState {
+  const rowArgument = rowNumber ? `, ${rowNumber}` : ', null';
   const script = `(() => {
   const uploadHelper = ${uploadDomHelperSource()};
-  const result = uploadHelper.findUploadInputByField(${JSON.stringify(field)});
+  return JSON.stringify(uploadHelper.getUploadStateByField(${JSON.stringify(field)}${rowArgument}, ${expectedCount}));
+})()`;
+  return parseEvalJson(agent.evaluate(script));
+}
+
+/** Ant Upload 等组件会隐藏真实 file input，同时返回用于滚动的可见字段容器。 */
+function findHiddenUploadInputSelector(agent: BrowserAgent, field: string, rowNumber?: number): UploadDomTarget | null {
+  const rowArgument = rowNumber ? `, ${rowNumber}` : '';
+  const script = `(() => {
+  const uploadHelper = ${uploadDomHelperSource()};
+  const result = uploadHelper.findUploadInputByField(${JSON.stringify(field)}${rowArgument});
   return JSON.stringify(result);
 })()
 `;
@@ -154,10 +237,11 @@ function findHiddenUploadInputSelector(agent: BrowserAgent, field: string): Uplo
 }
 
 /** 表格上传组件可能在点击单元格入口后才创建 file input，按列头定位首行入口并触发一次。 */
-function revealTableUploadInput(agent: BrowserAgent, field: string): boolean {
+function revealTableUploadInput(agent: BrowserAgent, field: string, rowNumber?: number): boolean {
+  const rowArgument = rowNumber ? `, ${rowNumber}` : '';
   const script = `(() => {
   const uploadHelper = ${uploadDomHelperSource()};
-  return JSON.stringify(uploadHelper.revealTableUploadInputByField(${JSON.stringify(field)}));
+  return JSON.stringify(uploadHelper.revealTableUploadInputByField(${JSON.stringify(field)}${rowArgument}));
 })()`;
 
   try {
@@ -168,10 +252,11 @@ function revealTableUploadInput(agent: BrowserAgent, field: string): boolean {
 }
 
 /** 上传定位最终失败时记录表头、数据行和 file input 的真实结构，避免仅凭快照反复猜测。 */
-function diagnoseUploadTarget(agent: BrowserAgent, field: string): string {
+function diagnoseUploadTarget(agent: BrowserAgent, field: string, rowNumber?: number): string {
+  const rowArgument = rowNumber ? `, ${rowNumber}` : '';
   const script = `(() => {
   const uploadHelper = ${uploadDomHelperSource()};
-  return JSON.stringify(uploadHelper.diagnoseUploadByField(${JSON.stringify(field)}));
+  return JSON.stringify(uploadHelper.diagnoseUploadByField(${JSON.stringify(field)}${rowArgument}));
 })()`;
 
   try {
@@ -182,10 +267,16 @@ function diagnoseUploadTarget(agent: BrowserAgent, field: string): string {
 }
 
 /** 批量上传前一次性标记字段内的全部目标 input，确保素材与槽位按页面顺序一一对应。 */
-function findBatchUploadInputSelectors(agent: BrowserAgent, field: string, count: number): BatchUploadDomTarget {
+function findBatchUploadInputSelectors(
+  agent: BrowserAgent,
+  field: string,
+  count: number,
+  rowNumber?: number,
+): BatchUploadDomTarget {
+  const rowArgument = rowNumber ? `, ${rowNumber}` : '';
   const script = `(() => {
   const uploadHelper = ${uploadDomHelperSource()};
-  const result = uploadHelper.findUploadInputsByField(${JSON.stringify(field)}, ${count});
+  const result = uploadHelper.findUploadInputsByField(${JSON.stringify(field)}, ${count}${rowArgument});
   return JSON.stringify(result);
 })()
 `;
@@ -208,6 +299,19 @@ const browserOptUploadVisible = (element) => {
   const rect = element.getBoundingClientRect();
   return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0;
 };
+const browserOptUploadStableSelector = (element, attribute, prefix) => {
+  const existingId = element.getAttribute(attribute);
+  const existingSelector = existingId ? '[' + attribute + '="' + existingId + '"]' : '';
+  if (existingSelector && document.querySelectorAll(existingSelector).length === 1) {
+    return existingSelector;
+  }
+  const root = document.documentElement;
+  const sequence = Number(root.getAttribute('data-browser-opt-upload-sequence') || '0') + 1;
+  root.setAttribute('data-browser-opt-upload-sequence', String(sequence));
+  const id = prefix + sequence;
+  element.setAttribute(attribute, id);
+  return '[' + attribute + '="' + id + '"]';
+};
 const browserOptUploadAncestorChain = (element) => {
   const chain = [];
   let current = element;
@@ -219,9 +323,38 @@ const browserOptUploadAncestorChain = (element) => {
 };
 const browserOptUploadTableRoot = (element) => element.closest('.ant-table, .el-table, [role="table"], [role="grid"]')
   || element.closest('table')?.parentElement;
-const browserOptUploadTableRows = (root) => root ? [...root.querySelectorAll('tbody tr, [role="row"], .ant-table-tbody-virtual-holder-inner .ant-table-row')] : [];
+const browserOptUploadTableRows = (root) => root
+  ? [...root.querySelectorAll('tbody tr, [role="row"], .ant-table-tbody-virtual-holder-inner .ant-table-row')]
+    .filter((row) => !row.closest('thead') && !row.querySelector(':scope > [role="columnheader"]'))
+  : [];
 const browserOptUploadRowCells = (row) => [...row.querySelectorAll(':scope > td, :scope > th, :scope > [role="cell"], :scope > [role="gridcell"], :scope > .ant-table-cell')];
+const browserOptUploadVisibleDescendants = (root, selector) => [...root.querySelectorAll(selector)].filter(browserOptUploadVisible);
+const browserOptUploadRowGroups = (rows) => {
+  const groups = [];
+  for (const row of [...rows].sort((left, right) => left.getBoundingClientRect().top - right.getBoundingClientRect().top)) {
+    const top = row.getBoundingClientRect().top;
+    const group = groups.find((item) => Math.abs(item.top - top) <= 2);
+    if (group) group.rows.push(row);
+    else groups.push({ top, rows: [row] });
+  }
+  return groups.map((group) => group.rows);
+};
+const browserOptUploadMatchesRow = (element, rowNumber) => {
+  if (!rowNumber) return true;
+  const row = element.closest('tbody tr, [role="row"], .ant-table-row');
+  const root = row ? browserOptUploadTableRoot(row) : null;
+  const targetRows = root ? browserOptUploadRowGroups(browserOptUploadTableRows(root))[rowNumber - 1] || [] : [];
+  return Boolean(row && targetRows.includes(row));
+};
 const browserOptUploadHorizontalOverlap = (left, right) => Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
+const browserOptUploadSyncVirtualHeader = (element) => {
+  const virtualTable = element.closest('.ant-table-virtual');
+  const virtualBody = element.closest('.ant-table-tbody-virtual-holder');
+  const virtualHeader = virtualTable?.querySelector('.ant-table-header');
+  if (virtualBody && virtualHeader) {
+    virtualHeader.scrollLeft = virtualBody.scrollLeft;
+  }
+};
 const browserOptUploadCellIdentities = (cell) => {
   const identities = [];
   for (const name of ['data-column-key', 'data-field', 'data-prop', 'data-index', 'aria-colindex']) {
@@ -244,6 +377,56 @@ const browserOptUploadCellIdentities = (cell) => {
   }
   return [...new Set(identities)];
 };
+const browserOptUploadInputsInside = (cell) => {
+  if (!cell) return [];
+  const inputs = [
+    ...(cell.matches('input[type="file"]') ? [cell] : []),
+    ...cell.querySelectorAll('input[type="file"]'),
+  ];
+  return [...new Set(inputs)];
+};
+const browserOptUploadTableColumnCells = (header, rowNumber) => {
+  const component = browserOptUploadTableRoot(header);
+  if (!component) return [];
+  browserOptUploadSyncVirtualHeader(component);
+  const headerRect = header.getBoundingClientRect();
+  const rows = browserOptUploadTableRows(component);
+  const targetRows = rowNumber ? browserOptUploadRowGroups(rows)[rowNumber - 1] || [] : rows;
+  const headerCells = [...(header.parentElement?.children || [])];
+  const columnIndex = header.cellIndex >= 0 ? header.cellIndex : headerCells.indexOf(header);
+
+  if (component.matches('.ant-table-virtual') && columnIndex >= 0) {
+    const exactCells = targetRows.map((row) => browserOptUploadRowCells(row)[columnIndex]).filter(Boolean);
+    if (exactCells.length > 0) return exactCells;
+  }
+
+  const headerIdentities = browserOptUploadCellIdentities(header);
+  const identityCells = headerIdentities.length === 0 ? [] : targetRows
+    .flatMap((row) => browserOptUploadRowCells(row)
+      .filter((cell) => browserOptUploadCellIdentities(cell).some((identity) => headerIdentities.includes(identity))));
+  if (identityCells.length > 0) return identityCells;
+
+  const sameTextHeaders = [...component.querySelectorAll('thead th, thead td, [role="columnheader"]')]
+    .filter((item) => normalizeBrowserOptUploadText(item.textContent || '') === normalizeBrowserOptUploadText(header.textContent || ''));
+  const geometricCells = sameTextHeaders.length > 1 ? [] : targetRows
+    .flatMap((row) => browserOptUploadRowCells(row)
+      .map((cell) => ({ cell, rowTop: row.getBoundingClientRect().top, overlap: browserOptUploadHorizontalOverlap(headerRect, cell.getBoundingClientRect()) })))
+    .filter((item) => item.overlap > 0)
+    .sort((a, b) => b.overlap - a.overlap || a.rowTop - b.rowTop)
+    .map((item) => item.cell);
+  if (geometricCells.length > 0) return geometricCells;
+
+  if (columnIndex < 0) return [];
+  const ownTable = header.closest('table');
+  const ownRows = ownTable?.querySelector('tbody tr') ? [...ownTable.querySelectorAll('tbody tr')] : [];
+  const indexedRows = rowNumber
+    ? (ownRows.length > 0 ? [ownRows[rowNumber - 1]].filter(Boolean) : targetRows)
+    : (ownRows.length > 0 ? ownRows : rows);
+  return indexedRows.map((row) => browserOptUploadRowCells(row)[columnIndex]).filter(Boolean);
+};
+const browserOptUploadFieldHeaders = (field) => [...document.querySelectorAll('thead th, thead td, [role="columnheader"]')]
+  .filter((element) => browserOptUploadVisible(element))
+  .filter((element) => normalizeBrowserOptUploadText(element.textContent || '').includes(normalizeBrowserOptUploadText(field)));
 const browserOptUploadHeadersForCell = (cell) => {
   const root = browserOptUploadTableRoot(cell);
   if (!root) return [];
@@ -316,9 +499,44 @@ const browserOptUploadContext = (input, fieldText) => {
 
   return { text: normalizeBrowserOptUploadText(chain.map((element) => element.textContent || '').join(' ')), depth: 99, source: 'none' };
 };
-function findUploadInputsByField(field, limit) {
+function findUploadInputsByField(field, limit, rowNumber = null) {
   const fieldText = normalizeBrowserOptUploadText(field);
-  const inputs = [...document.querySelectorAll('input[type="file"]')];
+  const tableCandidates = [];
+  for (const header of browserOptUploadFieldHeaders(field)) {
+    for (const cell of browserOptUploadTableColumnCells(header, rowNumber)) {
+      for (const input of browserOptUploadInputsInside(cell).filter((candidate) => browserOptUploadMatchesRow(candidate, rowNumber))) {
+        tableCandidates.push({ input, cell });
+      }
+    }
+  }
+  const revealedCells = [...document.querySelectorAll('[data-browser-opt-upload-target-field]')]
+    .filter((cell) => cell.getAttribute('data-browser-opt-upload-target-field') === fieldText)
+    .filter((cell) => !rowNumber || cell.getAttribute('data-browser-opt-upload-target-row') === String(rowNumber));
+  const revealedInputs = [...document.querySelectorAll('input[type="file"]')]
+    .filter((input) => !input.hasAttribute('data-browser-opt-upload-before-reveal'));
+  if (revealedCells.length === 1 && revealedInputs.length === 1) {
+    tableCandidates.push({ input: revealedInputs[0], cell: revealedCells[0] });
+  }
+  if (tableCandidates.length > 0) {
+    const uniqueTableCandidates = [...new Map(tableCandidates.map((item) => [item.input, item])).values()];
+    const selectors = uniqueTableCandidates.slice(0, limit).map((candidate) => browserOptUploadStableSelector(
+      candidate.input,
+      'data-browser-opt-upload-id',
+      'browser-opt-upload-',
+    ));
+    const scrollCell = uniqueTableCandidates[0]?.cell;
+    let scrollSelector;
+    if (scrollCell) {
+      scrollSelector = browserOptUploadStableSelector(
+        scrollCell,
+        'data-browser-opt-upload-scroll-target',
+        'browser-opt-upload-scroll-',
+      );
+    }
+    return { found: selectors.length > 0, selectors, count: uniqueTableCandidates.length, scrollSelector };
+  }
+  const inputs = [...document.querySelectorAll('input[type="file"]')]
+    .filter((input) => browserOptUploadMatchesRow(input, rowNumber));
   const candidates = inputs.map((input, index) => {
     const chain = browserOptUploadAncestorChain(input);
     const context = browserOptUploadContext(input, fieldText);
@@ -335,11 +553,11 @@ function findUploadInputsByField(field, limit) {
       return { found: false, selectors: [], count: inputs.length };
     }
   }
-  const selectors = selected.slice(0, limit).map((candidate) => {
-    const id = 'browser-opt-upload-' + candidate.index;
-    candidate.input.setAttribute('data-browser-opt-upload-id', id);
-    return '[data-browser-opt-upload-id="' + id + '"]';
-  });
+  const selectors = selected.slice(0, limit).map((candidate) => browserOptUploadStableSelector(
+    candidate.input,
+    'data-browser-opt-upload-id',
+    'browser-opt-upload-',
+  ));
   const firstSelected = selected[0];
   const scrollElement = firstSelected
     ? browserOptUploadAncestorChain(firstSelected.input)
@@ -348,85 +566,86 @@ function findUploadInputsByField(field, limit) {
     : null;
   let scrollSelector;
   if (scrollElement) {
-    const scrollId = 'browser-opt-upload-scroll-' + firstSelected.index;
-    scrollElement.setAttribute('data-browser-opt-upload-scroll-target', scrollId);
-    scrollSelector = '[data-browser-opt-upload-scroll-target="' + scrollId + '"]';
+    scrollSelector = browserOptUploadStableSelector(
+      scrollElement,
+      'data-browser-opt-upload-scroll-target',
+      'browser-opt-upload-scroll-',
+    );
   }
   return { found: selectors.length > 0, selectors, count: selected.length, scrollSelector };
 }
-function findUploadInputByField(field) {
-  const result = findUploadInputsByField(field, 1);
+function findUploadInputByField(field, rowNumber = null) {
+  const result = findUploadInputsByField(field, 1, rowNumber);
   return result.found
     ? { found: true, selector: result.selectors[0], count: result.count, scrollSelector: result.scrollSelector }
     : result;
 }
-function getUploadStateByField(field) {
-  const target = findUploadInputByField(field);
-  if (!target.found || !target.selector) {
-    return { found: false, pending: false, failed: false };
-  }
-  const input = document.querySelector(target.selector);
-  if (!input) {
-    return { found: false, pending: false, failed: false };
+function getUploadStateByField(field, rowNumber = null, expectedCount = 1) {
+  const targets = findUploadInputsByField(field, expectedCount, rowNumber);
+  const tableScopes = browserOptUploadFieldHeaders(field)
+    .flatMap((header) => browserOptUploadTableColumnCells(header, rowNumber));
+  const uniqueTableScopes = [...new Set(tableScopes)].slice(0, expectedCount);
+  if ((!targets.found || targets.selectors.length === 0) && uniqueTableScopes.length === 0) {
+    return { found: false, pending: false, failed: false, inputFilesCount: 0 };
   }
   const fieldText = normalizeBrowserOptUploadText(field);
-  const scope = browserOptUploadAncestorChain(input)
-    .find((element) => normalizeBrowserOptUploadText(element.textContent || '').includes(fieldText))
-    || input.parentElement;
-  if (!scope) {
-    return { found: true, pending: false, failed: false };
-  }
-  const visibleMatches = (selectors) => [...scope.querySelectorAll(selectors)].filter(browserOptUploadVisible);
-  const failed = visibleMatches([
-    '.ant-upload-list-item-error',
-    '.ant-progress-status-exception',
-    '.el-upload-list__item.is-fail',
-    '[class*="upload-error"]',
-    '[class*="upload-fail"]'
-  ].join(',')).length > 0;
-  const pending = visibleMatches([
-    '.ant-upload-list-item-uploading',
-    '.ant-upload-list-item-progress',
-    '.ant-progress-status-active',
-    '.ant-spin-spinning',
-    '.anticon-loading',
-    '.el-loading-mask',
-    '.el-icon-loading',
-    '[aria-busy="true"]',
-    '[class*="uploading"]'
-  ].join(',')).length > 0;
-  return { found: true, pending, failed };
+  const inputs = (targets.selectors || []).map((selector) => document.querySelector(selector)).filter(Boolean);
+  const scopes = uniqueTableScopes.length > 0 ? uniqueTableScopes : inputs.map((input) => {
+    const chain = browserOptUploadAncestorChain(input);
+    return input.closest('td, th, [role="cell"], [role="gridcell"], .ant-table-cell')
+      || chain.find((element) => /ant-form-item|form-item|field/i.test(String(element.className || ''))
+        && normalizeBrowserOptUploadText(element.textContent || '').includes(fieldText))
+      || chain.find((element) => normalizeBrowserOptUploadText(element.textContent || '').includes(fieldText))
+      || input.parentElement;
+  }).filter(Boolean);
+  const states = scopes.map((scope, index) => {
+    const input = inputs[index] || inputs.find((candidate) => scope.contains(candidate));
+    const visibleMatches = (selectors) => [...scope.querySelectorAll(selectors)].filter(browserOptUploadVisible);
+    const failed = visibleMatches([
+      '.ant-upload-list-item-error',
+      '.ant-progress-status-exception',
+      '.el-upload-list__item.is-fail',
+      '[class*="upload-error"]',
+      '[class*="upload-fail"]'
+    ].join(',')).length > 0 || /上传失败|上传错误/.test(scope.textContent || '');
+    const pending = visibleMatches([
+      '.ant-upload-list-item-uploading',
+      '.ant-upload-list-item-progress',
+      '.ant-progress-status-active',
+      '.ant-spin-spinning',
+      '.anticon-loading',
+      '.el-loading-mask',
+      '.el-icon-loading',
+      '[aria-busy="true"]',
+      '[class*="uploading"]'
+    ].join(',')).length > 0;
+    const success = visibleMatches([
+      '.ant-upload-list-item-done',
+      '.ant-upload-list-item-success',
+      '.ant-upload-list-picture-card',
+      '.el-upload-list__item.is-success',
+      '[class*="upload-success"]',
+      '[class*="upload-done"]',
+      'img[src]'
+    ].join(',')).length > 0;
+    // file input 持有文件只表示命令写入成功；必须等上传组件渲染出预览或成功态，才能确认业务上传完成。
+    const completed = !pending && !failed && success;
+    return { pending, failed, completed, inputFilesCount: input?.files?.length || 0 };
+  });
+  const completedCount = states.filter((state) => state.completed).length;
+  return {
+    found: true,
+    pending: states.some((state) => state.pending),
+    failed: states.some((state) => state.failed),
+    completed: completedCount >= expectedCount,
+    completedCount,
+    inputFilesCount: states.reduce((sum, state) => sum + (state.inputFilesCount || 0), 0),
+  };
 }
-function revealTableUploadInputByField(field) {
-  const fieldText = normalizeBrowserOptUploadText(field);
-  const headers = [...document.querySelectorAll('thead th, thead td, [role="columnheader"]')]
-    .filter((element) => browserOptUploadVisible(element))
-    .filter((element) => normalizeBrowserOptUploadText(element.textContent || '').includes(fieldText));
-  for (const header of headers) {
-    const component = browserOptUploadTableRoot(header);
-    const headerRect = header.getBoundingClientRect();
-    const rows = browserOptUploadTableRows(component);
-    const headerIdentities = browserOptUploadCellIdentities(header);
-    const identityCells = headerIdentities.length === 0 ? [] : rows
-      .flatMap((row) => browserOptUploadRowCells(row)
-        .filter((cell) => browserOptUploadCellIdentities(cell).some((identity) => headerIdentities.includes(identity))));
-    const sameTextHeaders = component ? [...component.querySelectorAll('thead th, thead td, [role="columnheader"]')]
-      .filter((item) => normalizeBrowserOptUploadText(item.textContent || '') === normalizeBrowserOptUploadText(header.textContent || '')) : [];
-    const geometricCells = sameTextHeaders.length > 1 ? [] : rows
-      .flatMap((row) => browserOptUploadRowCells(row)
-        .map((cell) => ({ cell, rowTop: row.getBoundingClientRect().top, overlap: browserOptUploadHorizontalOverlap(headerRect, cell.getBoundingClientRect()) })))
-      .filter((item) => item.overlap > 0)
-      .sort((a, b) => b.overlap - a.overlap || a.rowTop - b.rowTop)
-      .map((item) => item.cell);
-    const headerCells = [...(header.parentElement?.children || [])];
-    const columnIndex = header.cellIndex >= 0 ? header.cellIndex : headerCells.indexOf(header);
-    const ownTable = header.closest('table');
-    const indexedRows = ownTable?.querySelector('tbody tr') ? [...ownTable.querySelectorAll('tbody tr')] : rows;
-    const indexedCells = columnIndex < 0 ? [] : indexedRows
-      .map((row) => browserOptUploadRowCells(row)[columnIndex]).filter(Boolean);
-    for (const cell of [...new Set([...identityCells, ...geometricCells, ...indexedCells])]) {
-      const candidates = [...cell.querySelectorAll('button, label, [role="button"], [class*="upload"], [onclick]')]
-        .filter((element) => browserOptUploadVisible(element))
+function revealTableUploadInputByField(field, rowNumber = null) {
+  for (const header of browserOptUploadFieldHeaders(field)) {
+    for (const cell of browserOptUploadTableColumnCells(header, rowNumber)) {
+      const candidates = browserOptUploadVisibleDescendants(cell, 'button, label, [role="button"], [class*="upload"], [onclick]')
         .sort((a, b) => {
           const aRect = a.getBoundingClientRect();
           const bRect = b.getBoundingClientRect();
@@ -434,6 +653,18 @@ function revealTableUploadInputByField(field) {
         });
       const trigger = candidates[0] || (browserOptUploadVisible(cell) ? cell : null);
       if (!trigger) continue;
+      document.querySelectorAll('[data-browser-opt-upload-before-reveal]').forEach((input) => {
+        input.removeAttribute('data-browser-opt-upload-before-reveal');
+      });
+      document.querySelectorAll('[data-browser-opt-upload-target-field]').forEach((target) => {
+        target.removeAttribute('data-browser-opt-upload-target-field');
+        target.removeAttribute('data-browser-opt-upload-target-row');
+      });
+      document.querySelectorAll('input[type="file"]').forEach((input) => {
+        input.setAttribute('data-browser-opt-upload-before-reveal', 'true');
+      });
+      cell.setAttribute('data-browser-opt-upload-target-field', normalizeBrowserOptUploadText(field));
+      cell.setAttribute('data-browser-opt-upload-target-row', rowNumber ? String(rowNumber) : '');
       trigger.scrollIntoView({ block: 'center', inline: 'nearest' });
       trigger.click();
       return { found: true, revealed: true };
@@ -441,7 +672,7 @@ function revealTableUploadInputByField(field) {
   }
   return { found: false, revealed: false };
 }
-function diagnoseUploadByField(field) {
+function diagnoseUploadByField(field, rowNumber = null) {
   const fieldText = normalizeBrowserOptUploadText(field);
   const headers = [...document.querySelectorAll('thead th, thead td, [role="columnheader"]')]
     .filter((header) => normalizeBrowserOptUploadText(header.textContent || '').includes(fieldText))
@@ -458,7 +689,9 @@ function diagnoseUploadByField(field) {
         ownRows: header.closest('table')?.querySelectorAll('tbody tr').length || 0,
       };
     });
-  const inputs = [...document.querySelectorAll('input[type="file"]')].map((input) => {
+  const inputs = [...document.querySelectorAll('input[type="file"]')]
+    .filter((input) => browserOptUploadMatchesRow(input, rowNumber))
+    .map((input) => {
     const cell = input.closest('td, th, [role="cell"], [role="gridcell"], .ant-table-cell');
     const context = browserOptUploadContext(input, fieldText);
     return {
@@ -508,7 +741,11 @@ function parseEvalJson(raw: string): {
   scrollSelector?: string;
   pending?: boolean;
   failed?: boolean;
+  completed?: boolean;
+  completedCount?: number;
   revealed?: boolean;
+  dispatched?: boolean;
+  files?: number;
   diagnostic?: unknown;
 } {
   const decoded = JSON.parse(raw.trim()) as unknown;
