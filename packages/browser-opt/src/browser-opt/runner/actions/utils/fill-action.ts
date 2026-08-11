@@ -14,7 +14,7 @@ export function executeFillAction(
   action: Extract<DeterministicAction, { type: 'fill' }>,
   snapshot: SnapshotEvidence,
 ): string {
-  let ref = findTextboxRef(snapshot, action.field);
+  let ref = action.rowNumber ? null : findTextboxRef(snapshot, action.field);
   if (!ref) {
     if (isLoginLikeSnapshot(snapshot)) {
       return buildLoginHandoffActionOutput(
@@ -25,7 +25,7 @@ export function executeFillAction(
 
     agent.waitMs(500);
     const settledSnapshot = captureTransientSnapshot(agent);
-    ref = findTextboxRef(settledSnapshot, action.field);
+    ref = action.rowNumber ? null : findTextboxRef(settledSnapshot, action.field);
     if (ref) {
       agent.scrollIntoView(ref);
       const output = agent.fill(ref, action.value);
@@ -33,7 +33,13 @@ export function executeFillAction(
       return `fill delayed @${ref} ${JSON.stringify(action.value)}\n${output}\n${pressOutput}`.trim();
     }
 
-    const domOutput = fillFieldScopedDomTarget(agent, action.field, action.value, Boolean(action.pressKey));
+    const domOutput = fillFieldScopedDomTarget(
+      agent,
+      action.field,
+      action.value,
+      Boolean(action.pressKey),
+      action.rowNumber,
+    );
     if (domOutput) {
       const pressOutput = action.pressKey ? agent.press(action.pressKey) : '';
       return `${domOutput}\n${pressOutput}`.trim();
@@ -54,6 +60,20 @@ export function verifyFillActionEffect(
   action: Extract<DeterministicAction, { type: 'fill' }>,
   afterSnapshot: SnapshotEvidence,
 ): { passed: boolean; message: string } {
+  if (action.rowNumber) {
+    const domValue = readFieldScopedDomValue(agent, action.field, action.rowNumber);
+    const target = `第 ${action.rowNumber} 行${action.field}`;
+    if (domValue === action.value) {
+      return { passed: true, message: `已通过 DOM 确认输入值：${target}=${action.value}` };
+    }
+
+    const domDescription = domValue === null ? 'DOM 未定位到该行输入框' : `DOM 实际值为${JSON.stringify(domValue)}`;
+    return {
+      passed: false,
+      message: `动作后未确认输入值：${target}=${action.value}（${domDescription}）`,
+    };
+  }
+
   const actualValue = readTextboxValue(afterSnapshot, action.field);
   if (action.pressKey === 'Enter' && afterSnapshot.text.includes(action.value)) {
     return { passed: true, message: `已确认输入并按 Enter 提交：${action.field}=${action.value}` };

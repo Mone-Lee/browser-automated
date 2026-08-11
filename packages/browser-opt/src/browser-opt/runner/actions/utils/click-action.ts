@@ -5,7 +5,7 @@ import type { BrowserAgent } from '#browser-core/agent';
 import type { DeterministicAction, SnapshotEvidence } from '../../../type.js';
 import { findClickableRef } from '../../../utils.js';
 import { captureTransientSnapshot } from '../../evidence.js';
-import { clickFieldScopedDomTarget } from './dom-action.js';
+import { clickFieldScopedDomTarget, clickTableRowDomTarget } from './dom-action.js';
 
 /** 点击前按需滚动目标；“下一步”类过渡按钮会等待离开当前页面并在异步门禁期间重试。 */
 export function executeClickAction(
@@ -13,7 +13,7 @@ export function executeClickAction(
   action: Extract<DeterministicAction, { type: 'click' }>,
   snapshot: SnapshotEvidence,
 ): string {
-  const ref = findClickableRef(snapshot, action.target, action.field);
+  const ref = action.rowNumber ? null : findClickableRef(snapshot, action.target, action.field);
   if (ref) {
     agent.scrollIntoView(ref);
     const output = agent.click(ref);
@@ -23,7 +23,11 @@ export function executeClickAction(
     return `click @${ref}\n${output}`.trim();
   }
 
-  const domOutput = action.field ? clickFieldScopedDomTarget(agent, action.field, action.target) : null;
+  const domOutput = action.field
+    ? clickFieldScopedDomTarget(agent, action.field, action.target, action.rowNumber)
+    : action.rowNumber
+      ? clickTableRowDomTarget(agent, action.target, action.rowNumber)
+      : null;
   if (domOutput) {
     return domOutput;
   }

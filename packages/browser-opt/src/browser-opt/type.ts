@@ -23,6 +23,13 @@ export interface BrowserOptStepResult {
   logs: string[];
 }
 
+/** 记录因前置步骤失败而未执行的依赖步骤，供 JSON、Markdown 与 CLI 统一展示。 */
+export interface BrowserOptSkippedStep {
+  index: number;
+  instruction: string;
+  reason: string;
+}
+
 export interface BrowserOptReport {
   status: BrowserOptStatus;
   handoffTriggered?: boolean;
@@ -38,6 +45,8 @@ export interface BrowserOptReport {
   screenshots: string[];
   logs: string[];
   steps: BrowserOptStepResult[];
+  /** 保持可选以兼容旧版持久化报告与外部构造的报告对象。 */
+  skippedSteps?: BrowserOptSkippedStep[];
 }
 
 export interface BrowserOptRunResult {
@@ -63,6 +72,7 @@ export interface BrowserOptRunnerOptions {
 
 export interface BrowserOptStepExecutionOptions {
   useAgentChat: boolean;
+  evidencePrefix?: string;
   alreadyOpenedUrl?: string;
   authStateSavePath?: string;
   retryAuthStateFallback?: () => BrowserAgent | null;
@@ -99,20 +109,21 @@ export interface SnapshotNode {
 export type DeterministicAction =
   | { type: 'open'; url: string }
   | { type: 'inspect' }
-  | { type: 'fill'; field: string; value: string; pressKey?: string }
+  | { type: 'fill'; field: string; value: string; rowNumber?: number; pressKey?: string }
   | { type: 'press-key'; key: string }
-  | { type: 'click'; target: string; field?: string | null }
+  | { type: 'click'; target: string; field?: string | null; rowNumber?: number }
   | { type: 'check-table-rows'; count: number; target?: never }
   | { type: 'check-table-rows'; target: 'select-all'; count?: never }
   | {
       type: 'select-option';
       field: string | null;
       option: string;
+      rowNumber?: number;
       endOption?: string;
       mode?: 'select' | 'deselect' | 'exclusive';
     }
-  | { type: 'upload'; field: string; source: string; sources?: never }
-  | { type: 'upload'; field: string; sources: string[]; source?: never }
+  | { type: 'upload'; field: string; source: string; sources?: never; rowNumber?: number }
+  | { type: 'upload'; field: string; sources: string[]; source?: never; rowNumber?: number }
   | { type: 'handoff'; message: string }
   | { type: 'assert-text'; text: string };
 

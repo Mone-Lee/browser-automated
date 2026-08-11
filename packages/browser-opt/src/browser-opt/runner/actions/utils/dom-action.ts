@@ -10,12 +10,27 @@ interface FieldScopedDomResult {
   filled?: boolean;
   targetText?: string;
   value?: string;
+  reached?: boolean;
+  changed?: boolean;
+  opened?: boolean;
+  kind?: string;
 }
 
-export function clickFieldScopedDomTarget(agent: BrowserAgent, field: string, target: string): string | null {
+interface FieldScopedSelectionOutput {
+  dropdownOpened: boolean;
+  output: string | null;
+}
+
+export function clickFieldScopedDomTarget(
+  agent: BrowserAgent,
+  field: string,
+  target: string,
+  rowNumber?: number,
+): string | null {
+  const rowArgument = rowNumber ? `, ${rowNumber}` : '';
   const script = `(() => {
   const helper = ${fieldScopedDomHelperSource()};
-  return JSON.stringify(helper.clickFieldScopedTarget(${JSON.stringify(field)}, ${JSON.stringify(target)}));
+  return JSON.stringify(helper.clickFieldScopedTarget(${JSON.stringify(field)}, ${JSON.stringify(target)}${rowArgument}));
 })()`;
 
   try {
@@ -23,7 +38,27 @@ export function clickFieldScopedDomTarget(agent: BrowserAgent, field: string, ta
     if (parsed.found && parsed.clicked) {
       agent.waitMs(300);
       const clickedText = parsed.targetText ? ` (${parsed.targetText.trim()})` : '';
-      return `click dom ${field} -> ${target}${clickedText}`;
+      const rowLabel = rowNumber ? `第 ${rowNumber} 行 ` : '';
+      return `click dom ${rowLabel}${field} -> ${target}${clickedText}`;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** 未提供列名时在指定数据行内查找唯一目标，适用于“点击第 N 行删除按钮”这类表达。 */
+export function clickTableRowDomTarget(agent: BrowserAgent, target: string, rowNumber: number): string | null {
+  const script = `(() => {
+  const helper = ${fieldScopedDomHelperSource()};
+  return JSON.stringify(helper.clickTableRowTarget(${JSON.stringify(target)}, ${rowNumber}));
+})()`;
+
+  try {
+    const parsed = parseEvalJson(agent.evaluate(script));
+    if (parsed.found && parsed.clicked) {
+      agent.waitMs(300);
+      return `click dom 第 ${rowNumber} 行 -> ${target}`;
     }
     return null;
   } catch {
@@ -36,17 +71,20 @@ export function fillFieldScopedDomTarget(
   field: string,
   value: string,
   preserveFocus = false,
+  rowNumber?: number,
 ): string | null {
+  const rowArgument = rowNumber ? `, ${rowNumber}` : '';
   const script = `(() => {
   const helper = ${fieldScopedDomHelperSource()};
-  return JSON.stringify(helper.fillFieldScopedTarget(${JSON.stringify(field)}, ${JSON.stringify(value)}, ${preserveFocus}));
+  return JSON.stringify(helper.fillFieldScopedTarget(${JSON.stringify(field)}, ${JSON.stringify(value)}, ${preserveFocus}${rowArgument}));
 })()`;
 
   try {
     const parsed = parseEvalJson(agent.evaluate(script));
     if (parsed.found && parsed.filled) {
       agent.waitMs(300);
-      return `fill dom ${field} ${JSON.stringify(value)}`;
+      const rowLabel = rowNumber ? `第 ${rowNumber} 行 ` : '';
+      return `fill dom ${rowLabel}${field} ${JSON.stringify(value)}`;
     }
     return null;
   } catch {
@@ -55,15 +93,67 @@ export function fillFieldScopedDomTarget(
 }
 
 /** 读取字段对应输入控件的真实 DOM 值，供 snapshot 未暴露值时做后置校验。 */
-export function readFieldScopedDomValue(agent: BrowserAgent, field: string): string | null {
+export function readFieldScopedDomValue(agent: BrowserAgent, field: string, rowNumber?: number): string | null {
+  const rowArgument = rowNumber ? `, ${rowNumber}` : '';
   const script = `(() => {
   const helper = ${fieldScopedDomHelperSource()};
-  return JSON.stringify(helper.readFieldScopedValue(${JSON.stringify(field)}));
+  return JSON.stringify(helper.readFieldScopedValue(${JSON.stringify(field)}${rowArgument}));
 })()`;
 
   try {
     const parsed = parseEvalJson(agent.evaluate(script));
     return parsed.found && typeof parsed.value === 'string' ? parsed.value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 在指定表格行列内处理开关、单复选框或打开下拉框，避免同列多行控件串位。 */
+export function selectFieldScopedDomTarget(
+  agent: BrowserAgent,
+  field: string,
+  option: string,
+  rowNumber: number,
+  mode: 'select' | 'deselect' | 'exclusive' = 'select',
+): FieldScopedSelectionOutput | null {
+  const script = `(() => {
+  const helper = ${fieldScopedDomHelperSource()};
+  return JSON.stringify(helper.selectFieldScopedTarget(${JSON.stringify(field)}, ${JSON.stringify(option)}, ${rowNumber}, ${JSON.stringify(mode)}, false));
+})()`;
+
+  try {
+    const parsed = parseEvalJson(agent.evaluate(script));
+    if (parsed.opened) {
+      agent.waitMs(300);
+      return { dropdownOpened: true, output: null };
+    }
+    if (parsed.reached) {
+      agent.waitMs(parsed.changed ? 300 : 0);
+      const verb = parsed.changed ? 'select dom' : 'selection skipped';
+      return { dropdownOpened: false, output: `${verb} 第 ${rowNumber} 行 ${field}=${option}` };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** 从指定表格单元格读取选择类控件状态，确保后置校验不引用其他数据行。 */
+export function verifyFieldScopedDomSelection(
+  agent: BrowserAgent,
+  field: string,
+  option: string,
+  rowNumber: number,
+  mode: 'select' | 'deselect' | 'exclusive' = 'select',
+): boolean | null {
+  const script = `(() => {
+  const helper = ${fieldScopedDomHelperSource()};
+  return JSON.stringify(helper.selectFieldScopedTarget(${JSON.stringify(field)}, ${JSON.stringify(option)}, ${rowNumber}, ${JSON.stringify(mode)}, true));
+})()`;
+
+  try {
+    const parsed = parseEvalJson(agent.evaluate(script));
+    return typeof parsed.reached === 'boolean' ? parsed.reached : null;
   } catch {
     return null;
   }
@@ -114,6 +204,32 @@ const inputLike = (element) => {
   if (element instanceof HTMLTextAreaElement) return true;
   if (element instanceof HTMLInputElement) return !['hidden', 'file', 'checkbox', 'radio', 'button', 'submit', 'reset'].includes(element.type);
   return element.isContentEditable === true;
+};
+const switchLike = (element) => element.matches('[role="switch"], .ant-switch, [class*="switch"]') && !disabled(element);
+const selectLike = (element) => element.matches('select:not(:disabled), .ant-select:not(.ant-select-disabled), .el-select:not(.is-disabled), [role="combobox"]');
+const choiceInput = (element, optionText) => {
+  const input = element.matches('input[type="radio"], input[type="checkbox"]')
+    ? element
+    : element.querySelector?.('input[type="radio"], input[type="checkbox"]');
+  if (!input || disabled(input)) return null;
+  const label = element.closest('label') || input.closest('label') || (input.id ? document.querySelector('label[for="' + CSS.escape(input.id) + '"]') : null);
+  const text = normalize(textOf(label || element));
+  return text && (text.includes(optionText) || optionText.includes(text)) ? { input, label } : null;
+};
+const switchState = (element) => {
+  const aria = element.getAttribute('aria-checked');
+  if (aria === 'true' || aria === '1') return true;
+  if (aria === 'false' || aria === '0') return false;
+  if (typeof element.checked === 'boolean') return element.checked;
+  const className = String(element.className || '');
+  if (element.classList.contains('ant-switch-checked') || element.classList.contains('is-checked') || className.includes('switch-checked')) return true;
+  return false;
+};
+const desiredSwitchState = (option) => {
+  const text = normalize(option);
+  if (/^(是|开|开启|打开|启用|展示|true|yes|on)$/.test(text)) return true;
+  if (/^(否|关|关闭|停用|禁用|不展示|false|no|off)$/.test(text)) return false;
+  return null;
 };
 const dispatchMouse = (element) => {
   element.scrollIntoView({ block: 'center', inline: 'nearest' });
@@ -166,8 +282,24 @@ const closestFieldContainer = (element) => element.closest('.ant-form-item, .el-
 const actionableDescendants = (root, predicate) => [...root.querySelectorAll('*')].filter((element) => visible(element) && predicate(element));
 const tableComponentRoot = (header) => header.closest('.ant-table, .el-table, [role="table"], [role="grid"]')
   || header.closest('table')?.parentElement;
-const tableRows = (root) => root ? [...root.querySelectorAll('tbody tr, [role="row"], .ant-table-tbody-virtual-holder-inner .ant-table-row')] : [];
+const tableRows = (root) => root
+  ? [...root.querySelectorAll('tbody tr, [role="row"], .ant-table-tbody-virtual-holder-inner .ant-table-row')]
+    .filter((row) => !row.closest('thead') && !row.querySelector(':scope > [role="columnheader"]'))
+  : [];
 const tableRowCells = (row) => [...row.querySelectorAll(':scope > td, :scope > th, :scope > [role="cell"], :scope > [role="gridcell"], :scope > .ant-table-cell')];
+const tableRowGroups = (rows) => {
+  const groups = [];
+  for (const row of [...rows].sort((left, right) => left.getBoundingClientRect().top - right.getBoundingClientRect().top)) {
+    const top = row.getBoundingClientRect().top;
+    const group = groups.find((item) => Math.abs(item.top - top) <= 2);
+    if (group) {
+      group.rows.push(row);
+    } else {
+      groups.push({ top, rows: [row] });
+    }
+  }
+  return groups.map((group) => group.rows);
+};
 const horizontalOverlap = (left, right) => Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
 const tableCellIdentities = (cell) => {
   const identities = [];
@@ -196,25 +328,26 @@ const targetInside = (cell, predicate) => {
   if (visible(cell) && predicate(cell)) return cell;
   return actionableDescendants(cell, predicate)[0] || null;
 };
-const tableColumnTarget = (fieldElement, predicate) => {
+const tableColumnTarget = (fieldElement, predicate, rowNumber) => {
   const header = fieldElement.closest('th, td')
     || (fieldElement.getAttribute('role') === 'columnheader' ? fieldElement : null);
   if (!header) return null;
   const component = tableComponentRoot(header);
   const headerRect = header.getBoundingClientRect();
   const rows = tableRows(component);
+  const targetRows = rowNumber ? tableRowGroups(rows)[rowNumber - 1] || [] : rows;
   const headerCells = [...(header.parentElement?.children || [])];
   const columnIndex = header.cellIndex >= 0 ? header.cellIndex : headerCells.indexOf(header);
 
   // Ant 虚拟表格保留完整列顺序但表头、表体滚动位置可能短暂不同，必须优先按稳定列序号定位。
   if (component?.matches('.ant-table-virtual') && columnIndex >= 0) {
-    for (const row of rows) {
+    for (const row of targetRows) {
       const target = targetInside(tableRowCells(row)[columnIndex], predicate);
       if (target) return target;
     }
   }
   const headerIdentities = tableCellIdentities(header);
-  const identityTargets = headerIdentities.length === 0 ? [] : rows
+  const identityTargets = headerIdentities.length === 0 ? [] : targetRows
     .flatMap((row) => tableRowCells(row)
       .filter((cell) => tableCellIdentities(cell).some((identity) => headerIdentities.includes(identity)))
       .map((cell) => ({ target: targetInside(cell, predicate), rowTop: row.getBoundingClientRect().top })))
@@ -225,7 +358,7 @@ const tableColumnTarget = (fieldElement, predicate) => {
   // 滚动表格常把表头和表体拆成不同 table，并额外渲染固定列副本；按屏幕横坐标映射才能避免列序号漂移。
   const sameTextHeaders = component ? [...component.querySelectorAll('thead th, thead td, [role="columnheader"]')]
     .filter((item) => normalize(textOf(item)) === normalize(textOf(header))) : [];
-  const geometricTargets = sameTextHeaders.length > 1 ? [] : rows
+  const geometricTargets = sameTextHeaders.length > 1 ? [] : targetRows
     .flatMap((row) => tableRowCells(row)
       .map((cell) => ({ cell, rowTop: row.getBoundingClientRect().top, overlap: horizontalOverlap(headerRect, cell.getBoundingClientRect()) })))
     .filter((item) => item.overlap > 0)
@@ -236,7 +369,10 @@ const tableColumnTarget = (fieldElement, predicate) => {
 
   if (columnIndex < 0) return null;
   const ownTable = header.closest('table');
-  const indexedRows = ownTable?.querySelector('tbody tr') ? [...ownTable.querySelectorAll('tbody tr')] : rows;
+  const ownRows = ownTable?.querySelector('tbody tr') ? [...ownTable.querySelectorAll('tbody tr')] : [];
+  const indexedRows = rowNumber
+    ? (ownRows.length > 0 ? [ownRows[rowNumber - 1]].filter(Boolean) : targetRows)
+    : (ownRows.length > 0 ? ownRows : rows);
   for (const row of indexedRows) {
     const cell = tableRowCells(row)[columnIndex];
     if (!cell) continue;
@@ -280,11 +416,11 @@ const structurallyScopedTargets = (fieldElement, predicate) => {
   }
   return null;
 };
-const scopedTarget = (field, predicate) => {
+const scopedTarget = (field, predicate, rowNumber = null) => {
   const fields = fieldElements(field);
   const tableFields = fields.filter((fieldItem) => fieldItem.element.closest('th, [role="columnheader"]'));
   for (const fieldItem of tableFields.length > 0 ? tableFields : fields) {
-    const tableTarget = tableColumnTarget(fieldItem.element, predicate);
+    const tableTarget = tableColumnTarget(fieldItem.element, predicate, rowNumber);
     if (tableTarget) {
       return { element: tableTarget, fields };
     }
@@ -306,25 +442,41 @@ const scopedTarget = (field, predicate) => {
   }
   return { element: null, fields };
 };
-function clickFieldScopedTarget(field, target) {
+function clickFieldScopedTarget(field, target, rowNumber = null) {
   const targetText = normalize(target);
-  const result = scopedTarget(field, (element) => clickable(element) && textMatches(element, targetText));
+  const result = scopedTarget(field, (element) => clickable(element) && textMatches(element, targetText), rowNumber);
   if (result.element) {
     dispatchMouse(result.element);
     return { found: true, clicked: true, targetText: textOf(result.element) };
   }
   return { found: result.fields.length > 0, clicked: false };
 }
-function fillFieldScopedTarget(field, value, preserveFocus) {
-  const result = scopedTarget(field, inputLike);
+function clickTableRowTarget(target, rowNumber) {
+  const targetText = normalize(target);
+  const rootSelector = '.ant-table, .el-table, [role="table"], [role="grid"], table';
+  const roots = [...document.querySelectorAll(rootSelector)]
+    .filter((root) => !root.parentElement?.closest(rootSelector));
+  const targets = roots.flatMap((root) => {
+    const rows = tableRowGroups(tableRows(root))[rowNumber - 1] || [];
+    return rows.flatMap((row) => [row, ...row.querySelectorAll('*')])
+      .filter((element) => visible(element) && clickable(element) && textMatches(element, targetText));
+  });
+  const targetElement = targets
+    .sort((left, right) => normalize(textOf(left)).length - normalize(textOf(right)).length)[0];
+  if (!targetElement) return { found: false, clicked: false };
+  dispatchMouse(targetElement);
+  return { found: true, clicked: true, targetText: textOf(targetElement) };
+}
+function fillFieldScopedTarget(field, value, preserveFocus, rowNumber = null) {
+  const result = scopedTarget(field, inputLike, rowNumber);
   if (result.element) {
     dispatchValue(result.element, value, preserveFocus);
     return { found: true, filled: true, targetText: textOf(result.element) };
   }
   return { found: result.fields.length > 0, filled: false };
 }
-function readFieldScopedValue(field) {
-  const result = scopedTarget(field, inputLike);
+function readFieldScopedValue(field, rowNumber = null) {
+  const result = scopedTarget(field, inputLike, rowNumber);
   if (!result.element) {
     return { found: false };
   }
@@ -333,7 +485,68 @@ function readFieldScopedValue(field) {
     : result.element.textContent || '';
   return { found: true, value };
 }
-return { clickFieldScopedTarget, fillFieldScopedTarget, readFieldScopedValue };
+function selectFieldScopedTarget(field, option, rowNumber, mode = 'select', verifyOnly = false) {
+  const optionText = normalize(option);
+  const result = scopedTarget(field, (element) => switchLike(element) || selectLike(element) || Boolean(choiceInput(element, optionText)), rowNumber);
+  if (!result.element) return { found: false };
+
+  const switchElement = result.element.closest('[role="switch"], .ant-switch, [class*="switch"]');
+  if (switchElement && switchLike(switchElement)) {
+    const desired = desiredSwitchState(option);
+    if (desired === null) return { found: true, kind: 'switch' };
+    const before = switchState(switchElement);
+    if (!verifyOnly && before !== desired) dispatchMouse(switchElement);
+    const reached = verifyOnly ? before === desired : switchState(switchElement) === desired;
+    return { found: true, kind: 'switch', reached, changed: !verifyOnly && before !== desired };
+  }
+
+  const choice = choiceInput(result.element, optionText);
+  if (choice) {
+    const desired = mode !== 'deselect';
+    const cell = choice.input.closest('td, th, [role="cell"], [role="gridcell"], .ant-table-cell');
+    const group = cell ? [...cell.querySelectorAll('input[type="checkbox"]')].filter((input) => !disabled(input)) : [choice.input];
+    let changed = false;
+    if (!verifyOnly && mode === 'exclusive') {
+      for (const sibling of group) {
+        if (sibling !== choice.input && sibling.checked) {
+          (sibling.closest('label') || sibling).click();
+          changed = true;
+        }
+      }
+    }
+    if (!verifyOnly && choice.input.checked !== desired) {
+      (choice.label || choice.input).click();
+      changed = true;
+    }
+    const reached = choice.input.checked === desired
+      && (mode !== 'exclusive' || group.filter((input) => input !== choice.input && input.checked).length === 0);
+    return { found: true, kind: choice.input.type, reached, changed };
+  }
+
+  const selectElement = result.element.closest('select, .ant-select, .el-select, [role="combobox"]');
+  if (!selectElement) return { found: true };
+  const values = [
+    selectElement instanceof HTMLSelectElement ? selectElement.selectedOptions?.[0]?.textContent || selectElement.value : '',
+    selectElement.querySelector('input:not([type="hidden"])')?.value,
+    selectElement.querySelector('.ant-select-selection-item, .el-input__inner, [class*="singleValue"]')?.textContent,
+  ].map(normalize).filter(Boolean);
+  if (verifyOnly) {
+    return { found: true, kind: 'dropdown', reached: values.some((value) => value === optionText) };
+  }
+  if (selectElement instanceof HTMLSelectElement) {
+    const nativeOption = [...selectElement.options].find((item) => normalize(item.textContent || item.value) === optionText);
+    if (!nativeOption) return { found: true, kind: 'dropdown', reached: false };
+    selectElement.value = nativeOption.value;
+    selectElement.dispatchEvent(new Event('input', { bubbles: true }));
+    selectElement.dispatchEvent(new Event('change', { bubbles: true }));
+    return { found: true, kind: 'dropdown', reached: true, changed: true };
+  }
+  document.querySelectorAll('[data-browser-opt-active-select="true"]').forEach((element) => element.removeAttribute('data-browser-opt-active-select'));
+  selectElement.setAttribute('data-browser-opt-active-select', 'true');
+  dispatchMouse(selectElement.querySelector('.ant-select-selector, .el-input, [role="combobox"]') || selectElement);
+  return { found: true, kind: 'dropdown', opened: true };
+}
+return { clickFieldScopedTarget, clickTableRowTarget, fillFieldScopedTarget, readFieldScopedValue, selectFieldScopedTarget };
 })()
 `;
 }

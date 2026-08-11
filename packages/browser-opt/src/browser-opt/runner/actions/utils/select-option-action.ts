@@ -8,6 +8,7 @@ import {
   findSelectableOption,
 } from '../../../utils.js';
 import { captureTransientSnapshot } from '../../evidence.js';
+import { selectFieldScopedDomTarget, verifyFieldScopedDomSelection } from './dom-action.js';
 import {
   executeDateSelectOptionAction,
   resolveDateSelectOption,
@@ -21,6 +22,26 @@ export function executeSelectOptionAction(
   snapshot: SnapshotEvidence,
   options: DeterministicExecutionOptions,
 ): string {
+  if (action.rowNumber && action.field) {
+    const scoped = selectFieldScopedDomTarget(
+      agent,
+      action.field,
+      action.option,
+      action.rowNumber,
+      action.mode,
+    );
+    if (scoped?.output) {
+      return scoped.output;
+    }
+    if (scoped?.dropdownOpened) {
+      const dropdown = clickDropdownDomTarget(agent, action.field, action.option, true);
+      if (dropdown.output) {
+        return dropdown.output;
+      }
+    }
+    throw new Error(`无法找到选项：第 ${action.rowNumber} 行 ${action.field} -> ${action.option}`);
+  }
+
   const normalizedDate = resolveDateSelectOption(action);
   if (normalizedDate) {
     return executeDateSelectOptionAction(agent, action, snapshot, normalizedDate);
@@ -129,6 +150,20 @@ export function verifySelectOptionActionEffect(
   action: Extract<DeterministicAction, { type: 'select-option' }>,
   afterSnapshot: SnapshotEvidence,
 ): { passed: boolean; message: string } {
+  if (action.rowNumber && action.field) {
+    const reached = verifyFieldScopedDomSelection(
+      agent,
+      action.field,
+      action.option,
+      action.rowNumber,
+      action.mode,
+    );
+    const target = `第 ${action.rowNumber} 行${action.field}=${action.option}`;
+    return reached === true
+      ? { passed: true, message: `已通过 DOM 确认选择状态：${target}` }
+      : { passed: false, message: `DOM 未确认目标行选择状态：${target}` };
+  }
+
   const normalizedDate = resolveDateSelectOption(action);
   if (normalizedDate) {
     return verifyDateSelectOptionActionEffect(agent, action, afterSnapshot, normalizedDate);
@@ -403,25 +438,13 @@ function verifyNativeSelectableDomState(
 }
 
 /** 普通下拉优先按 DOM 中字段同组控件和可见弹层选项点击，避开嵌套布局里的 ref 坐标漂移。 */
-function clickDropdownDomTarget(agent: BrowserAgent, field: string, option: string): { attempted: boolean; output: string | null } {
-  const openScript = `(() => {
-  const selectHelper = ${dropdownDomHelperSource()};
-  return JSON.stringify(selectHelper.openDropdownByField(${JSON.stringify(field)}));
-})()`;
-
-  try {
-    const opened = parseEvalJson(agent.evaluate(openScript));
-    if (typeof opened.opened !== 'boolean') {
-      return { attempted: false, output: null };
-    }
-    if (!opened.found) {
-      return { attempted: false, output: null };
-    }
-    if (opened.opened === false) {
-      return { attempted: true, output: null };
-    }
-
-    agent.waitMs(300);
+function clickDropdownDomTarget(
+  agent: BrowserAgent,
+  field: string,
+  option: string,
+  alreadyOpened = false,
+): { attempted: boolean; output: string | null } {
+  const consumeOpenedDropdown = (): { attempted: boolean; output: string | null } => {
     const clickScript = `(() => {
   const selectHelper = ${dropdownDomHelperSource()};
   return JSON.stringify(selectHelper.clickVisibleOption(${JSON.stringify(option)}));
@@ -435,11 +458,7 @@ function clickDropdownDomTarget(agent: BrowserAgent, field: string, option: stri
       const searched = parseEvalJson(agent.evaluate(searchScript));
       if (searched.searched === true) {
         agent.waitMs(500);
-        const retryClickScript = `(() => {
-  const selectHelper = ${dropdownDomHelperSource()};
-  return JSON.stringify(selectHelper.clickVisibleOption(${JSON.stringify(option)}));
-})()`;
-        Object.assign(clicked, parseEvalJson(agent.evaluate(retryClickScript)));
+        Object.assign(clicked, parseEvalJson(agent.evaluate(clickScript)));
       }
     }
     if (clicked.clicked !== true) {
@@ -456,16 +475,51 @@ function clickDropdownDomTarget(agent: BrowserAgent, field: string, option: stri
         agent.waitMs(200);
       }
     }
-    if (clicked.clicked === true) {
-      agent.waitMs(300);
-      const selectedText = clicked.selectedText ? ` (${clicked.selectedText})` : '';
-      const dropdownCleanup = dismissActiveDropdown(agent);
-      return {
-        attempted: true,
-        output: [`select dom click ${field}=${option}${selectedText}`, dropdownCleanup].filter(Boolean).join('\n'),
-      };
+    if (clicked.clicked !== true) {
+      return { attempted: true, output: null };
     }
-    return { attempted: true, output: null };
+    agent.waitMs(300);
+    const selectedText = clicked.selectedText ? ` (${clicked.selectedText})` : '';
+    const dropdownCleanup = dismissActiveDropdown(agent);
+    return {
+      attempted: true,
+      output: [`select dom click ${field}=${option}${selectedText}`, dropdownCleanup].filter(Boolean).join('\n'),
+    };
+  };
+
+  const visibleDropdownScript = `(() => {
+  const selectHelper = ${dropdownDomHelperSource()};
+  return JSON.stringify(selectHelper.hasVisibleDropdown());
+})()`;
+  const openScript = `(() => {
+  const selectHelper = ${dropdownDomHelperSource()};
+  return JSON.stringify(selectHelper.openDropdownByField(${JSON.stringify(field)}));
+})()`;
+
+  try {
+    const dropdownVisible = parseEvalJson(agent.evaluate(visibleDropdownScript)).dropdownOpen === true;
+    if (dropdownVisible) {
+      const consumed = consumeOpenedDropdown();
+      if (consumed.output || alreadyOpened) {
+        return consumed;
+      }
+    }
+
+    if (!alreadyOpened) {
+      const opened = parseEvalJson(agent.evaluate(openScript));
+      if (typeof opened.opened !== 'boolean') {
+        return { attempted: false, output: null };
+      }
+      if (!opened.found) {
+        return { attempted: false, output: null };
+      }
+      if (opened.opened === false) {
+        return { attempted: true, output: null };
+      }
+    }
+
+    agent.waitMs(300);
+    return consumeOpenedDropdown();
   } catch (error) {
     if (error instanceof Error && error.message === '选中选项后下拉层仍未收起') {
       throw error;

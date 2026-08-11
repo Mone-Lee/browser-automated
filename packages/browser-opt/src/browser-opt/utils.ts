@@ -119,6 +119,7 @@ function splitCompoundSelectableStep(instruction: string): string[] {
 export function parseDeterministicAction(instruction: string): DeterministicAction | null {
   const normalized = cleanInstructionPrefix(normalizeBrowserOptFlowText(instruction));
   const actionText = maskQuotedSegments(normalized);
+  const rowNumber = parseTableRowNumber(normalized);
   const urls = [...normalized.matchAll(new RegExp(URL_RE.source, 'gi'))].map((match) => match[0]);
   const url = urls[0];
   if (url && /访问|打开|open|goto|navigate/i.test(actionText)) {
@@ -138,6 +139,7 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
       type: 'upload',
       field: parseUploadFieldName(normalized) ?? '文件',
       ...(urls.length > 1 ? { sources: urls } : { source: url }),
+      ...(rowNumber ? { rowNumber } : {}),
     };
   }
 
@@ -150,6 +152,11 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
   }
 
   const quoted = extractQuotedSegments(normalized);
+  const tableCellAssignment = parseTableCellAssignment(normalized);
+  if (tableCellAssignment) {
+    return { type: 'fill', ...tableCellAssignment };
+  }
+
   const fillVerb = actionText.match(/输入|填写|填入|type|fill/i);
   if (fillVerb && quoted.length > 0) {
     const valueSegment = quoted[quoted.length - 1];
@@ -159,6 +166,7 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
       type: 'fill',
       field: fieldSegment?.value ?? parseFieldName(normalized) ?? '文本',
       value: valueSegment?.value ?? '',
+      ...(rowNumber ? { rowNumber } : {}),
       ...(pressKey ? { pressKey } : {}),
     };
   }
@@ -179,6 +187,9 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
     if (clickTarget?.field) {
       action.field = clickTarget.field;
     }
+    if (rowNumber) {
+      action.rowNumber = rowNumber;
+    }
     return action;
   }
 
@@ -187,8 +198,9 @@ export function parseDeterministicAction(instruction: string): DeterministicActi
     const selectionMode = parseSelectionMode(normalized);
     return {
       type: 'select-option',
-      field: selectableTarget.field,
+      field: rowNumber ? cleanTableRowFieldName(selectableTarget.field) : selectableTarget.field,
       option: selectableTarget.option,
+      ...(rowNumber ? { rowNumber } : {}),
       ...(selectableTarget.endOption ? { endOption: selectableTarget.endOption } : {}),
       ...(selectionMode === 'select' ? {} : { mode: selectionMode }),
     };
@@ -290,6 +302,54 @@ function parseTableRowCheckboxTarget(instruction: string): number | 'select-all'
 
   const parsed = Number.parseInt(count, 10);
   return parsed > 0 ? parsed : null;
+}
+
+/** 提取表格输入步骤中的一基数据行号，表头不参与计数。 */
+function parseTableRowNumber(instruction: string): number | null {
+  const matched = instruction.match(/第\s*(\d+|[一二两三四五六七八九十]+)\s*行/)?.[1];
+  if (!matched) {
+    return null;
+  }
+
+  if (/^\d+$/.test(matched)) {
+    const rowNumber = Number.parseInt(matched, 10);
+    return rowNumber > 0 ? rowNumber : null;
+  }
+
+  const digits: Record<string, number> = {
+    一: 1,
+    二: 2,
+    两: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+  };
+  const [tens, ones] = matched.split('十');
+  const rowNumber = matched.includes('十')
+    ? (tens ? digits[tens] ?? 0 : 1) * 10 + (ones ? digits[ones] ?? 0 : 0)
+    : digits[matched] ?? 0;
+  return rowNumber > 0 ? rowNumber : null;
+}
+
+/** 识别“第 N 行价格改为数值”的表格输入表达，文本值仍交给选择动作判断控件类型。 */
+function parseTableCellAssignment(instruction: string): { field: string; value: string; rowNumber: number } | null {
+  const rowNumber = parseTableRowNumber(instruction);
+  if (!rowNumber) {
+    return null;
+  }
+
+  const matched = instruction.match(
+    /第\s*(?:\d+|[一二两三四五六七八九十]+)\s*行(?:的)?\s*(?:[“"'‘]([^”"'’]+)[”"'’]|([^，,。；\s]+?))\s*(?:修改为|改为|设置为|设为|调整为|为)\s*(?:[“"'‘]([^”"'’]+)[”"'’]|([^，,。；\s]+))/,
+  );
+  const field = matched?.[1] ?? matched?.[2];
+  const value = matched?.[3] ?? matched?.[4];
+  return field && value && /^[-+]?\d+(?:\.\d+)?$/.test(value)
+    ? { field, value, rowNumber }
+    : null;
 }
 
 /** 判断步骤是否会触发导出、删除或提交等需要前置条件保护的高影响操作。 */
@@ -439,6 +499,10 @@ function parseClickTarget(instruction: string): ClickTarget | null {
     return { target: quoted[0].value };
   }
 
+  if (parseTableRowNumber(instruction)) {
+    return { target: quoted[quoted.length - 1]?.value ?? quoted[0].value, field: quoted[0].value };
+  }
+
   const lastQuoted = quoted[quoted.length - 1];
   if (!lastQuoted) {
     return quoted[0] ? { target: quoted[0].value } : null;
@@ -455,6 +519,17 @@ function parseClickTarget(instruction: string): ClickTarget | null {
   }
 
   return quoted[0] ? { target: quoted[0].value } : null;
+}
+
+/** 去掉选择字段前的表格与行号上下文，只保留真实列名。 */
+function cleanTableRowFieldName(field: string | null): string | null {
+  if (!field) {
+    return null;
+  }
+  return field
+    .replace(/^.*第\s*(?:\d+|[一二两三四五六七八九十]+)\s*行(?:的)?\s*/, '')
+    .replace(/(?:列|字段)$/, '')
+    .trim() || null;
 }
 
 /** 从没有引号的选择语句中提取目标选项，作为口语化步骤的兜底。 */
@@ -1306,6 +1381,7 @@ export function collectFailedBrowserOptSteps(report: BrowserOptReport): BrowserO
 /** 把执行报告渲染成 Markdown，方便直接在本地阅读和附带截图证据。 */
 export function renderMarkdownReport(report: BrowserOptReport): string {
   const failedSteps = collectFailedBrowserOptSteps(report);
+  const skippedSteps = report.skippedSteps ?? [];
   const lines = [
     `# Browser Opt Report: ${report.status}`,
     '',
@@ -1321,6 +1397,11 @@ export function renderMarkdownReport(report: BrowserOptReport): string {
     '## Failed Steps',
     ...(failedSteps.length > 0
       ? failedSteps.map((step) => `- ${step.index}. ${step.instruction}: ${step.error ?? step.verification ?? '未知原因'}`)
+      : ['- n/a']),
+    '',
+    '## Skipped Steps',
+    ...(skippedSteps.length > 0
+      ? skippedSteps.map((step) => `- ${step.index}. ${step.instruction}: ${step.reason}`)
       : ['- n/a']),
     '',
     '## Steps',
