@@ -590,6 +590,28 @@ describe('browser-opt parsing', () => {
     expect(findClickableRef(snapshot, '请选择', '商品类目')).toBe('e1');
   });
 
+  it('continues scanning later siblings after a matching table header line', () => {
+    const snapshot = {
+      output: snapshotJson('', {
+        e1: { role: 'columnheader', name: 'SKU编码' },
+        e2: { role: 'columnheader', name: '包含最小销售产品与数量' },
+        e3: { role: 'columnheader', name: '*产品净重' },
+        e4: { role: 'generic', name: '展示隐藏XL预览-最小销售产品g000%', clickable: true },
+        e5: { role: 'button', name: 'plus 最小销售产品' },
+      }),
+      text: [
+        '- columnheader "SKU编码" [ref=e1]',
+        '- columnheader "包含最小销售产品与数量" [ref=e2]',
+        '- columnheader "*产品净重" [ref=e3]',
+        '- generic "展示隐藏XL预览-最小销售产品g000%" [ref=e4] clickable [onclick]',
+        '  - button "plus 最小销售产品" [ref=e5]',
+      ].join('\n'),
+      nodeCount: 5,
+    };
+
+    expect(findClickableRef(snapshot, '最小销售产品', '包含最小销售产品与数量')).toBe('e5');
+  });
+
   it('returns the current combobox line when the field name is on the select itself', () => {
     const snapshot = {
       output: snapshotJson('', {
@@ -827,6 +849,67 @@ describe('BrowserOptRunner', () => {
     expect(result.passed).toBe(true);
     expect(evaluate).toHaveBeenCalledTimes(1);
     expect(result.report.steps[0].verification).toContain('已通过 DOM 确认输入值：供应商名称=广州澳创投资有限公司');
+  });
+
+  it('fills and verifies a table input by its column header instead of a nearby input', async () => {
+    const outputDir = makeTempDir();
+    const tableSnapshot = [
+      '- columnheader "*产品净重" [ref=e1]',
+      '- columnheader "*供应商结算价" [ref=e2]',
+      '- generic "500g0.00" [ref=e3]',
+      '  - textbox [ref=e4]: 500',
+      '  - spinbutton "请输入" [ref=e5]: 0.00',
+    ].join('\n');
+    const evaluate = vi.fn((script: string) => {
+      if (script.includes('helper.fillFieldScopedTarget(')) {
+        return JSON.stringify({ found: true, filled: true, targetText: '请输入' });
+      }
+      if (script.includes('helper.readFieldScopedValue(')) {
+        return JSON.stringify({ found: true, value: '19.90' });
+      }
+      return JSON.stringify({ found: false });
+    });
+    const agent = buildAgent({
+      evaluate,
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(tableSnapshot, {
+          e1: { role: 'columnheader', name: '*产品净重' },
+          e2: { role: 'columnheader', name: '*供应商结算价' },
+          e3: { role: 'generic', name: '500g0.00' },
+          e4: { role: 'textbox', name: '', value: '500' },
+          e5: { role: 'spinbutton', name: '请输入', value: '0.00' },
+        }),
+        snapshotJson(tableSnapshot, {
+          e1: { role: 'columnheader', name: '*产品净重' },
+          e2: { role: 'columnheader', name: '*供应商结算价' },
+          e3: { role: 'generic', name: '500g0.00' },
+          e4: { role: 'textbox', name: '', value: '500' },
+          e5: { role: 'spinbutton', name: '请输入', value: '19.90' },
+        }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com。\n\n目标：\n1. 在价格设置表格第 1 行的“供应商结算价”输入“19.90”',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(true);
+    const scripts = evaluate.mock.calls.map(([script]) => String(script));
+    expect(scripts[0]).toContain("fieldElement.closest('th, td')");
+    expect(scripts[0]).toContain('horizontalOverlap(headerRect, cell.getBoundingClientRect())');
+    expect(scripts[0]).toContain('tableCellIdentities(cell)');
+    expect(scripts[0]).toContain('.ant-table-tbody-virtual-holder-inner .ant-table-row');
+    expect(scripts[0]).toContain("component?.matches('.ant-table-virtual')");
+    expect(scripts[0]).toContain('virtualHeader.scrollLeft = virtualBody.scrollLeft');
+    expect(scripts[0]).toContain('tableFields.length > 0 ? tableFields : fields');
+    expect(scripts[0]).toContain("fieldItem.element.closest('th, [role=\"columnheader\"]')");
+    expect(scripts[0]).toContain('tableRowCells(row)[columnIndex]');
+    expect(scripts[1]).toContain('tableRowCells(row)[columnIndex]');
+    expect(result.report.steps[0].actionOutput).toContain('fill dom 供应商结算价 "19.90"');
+    expect(result.report.steps[0].verification).toContain('已通过 DOM 确认输入值：供应商结算价=19.90');
   });
 
   it('re-snapshots before filling a field that appears after an SPA transition', async () => {

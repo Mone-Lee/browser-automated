@@ -132,6 +132,13 @@ const dispatchMouse = (element) => {
 };
 const dispatchValue = (element, value, keepFocus = false) => {
   element.scrollIntoView({ block: 'center', inline: 'nearest' });
+  // Ant 虚拟表格的表头与表体使用独立滚动容器，scrollIntoView 后显式同步表头避免视觉与列映射错位。
+  const virtualTable = element.closest('.ant-table-virtual');
+  const virtualBody = element.closest('.ant-table-tbody-virtual-holder');
+  const virtualHeader = virtualTable?.querySelector('.ant-table-header');
+  if (virtualBody && virtualHeader) {
+    virtualHeader.scrollLeft = virtualBody.scrollLeft;
+  }
   element.focus?.();
   const preserveFocus = Boolean(element.closest('[role="combobox"], .ant-select, .el-select'));
   if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
@@ -157,6 +164,87 @@ const fieldElements = (field) => {
 };
 const closestFieldContainer = (element) => element.closest('.ant-form-item, .el-form-item, .form-item, [class*="form-item"], [class*="FormItem"], [class*="field"], [class*="Field"]');
 const actionableDescendants = (root, predicate) => [...root.querySelectorAll('*')].filter((element) => visible(element) && predicate(element));
+const tableComponentRoot = (header) => header.closest('.ant-table, .el-table, [role="table"], [role="grid"]')
+  || header.closest('table')?.parentElement;
+const tableRows = (root) => root ? [...root.querySelectorAll('tbody tr, [role="row"], .ant-table-tbody-virtual-holder-inner .ant-table-row')] : [];
+const tableRowCells = (row) => [...row.querySelectorAll(':scope > td, :scope > th, :scope > [role="cell"], :scope > [role="gridcell"], :scope > .ant-table-cell')];
+const horizontalOverlap = (left, right) => Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
+const tableCellIdentities = (cell) => {
+  const identities = [];
+  for (const name of ['data-column-key', 'data-field', 'data-prop', 'data-index', 'aria-colindex']) {
+    const value = cell.getAttribute(name);
+    if (value) identities.push(name + '=' + value);
+  }
+  for (const token of cell.classList || []) {
+    if (/column|(^|[-_])col([-_]|\\d)|cell[-_]\\d/i.test(token) && !/^(ant-table-cell|el-table__cell)$/.test(token)) {
+      identities.push('class=' + token);
+    }
+  }
+  const table = cell.closest('table');
+  const index = cell.cellIndex;
+  const col = table && index >= 0 ? table.querySelectorAll('colgroup col')[index] : null;
+  if (col) {
+    for (const name of ['name', 'class', 'data-column-key', 'data-index']) {
+      const value = col.getAttribute(name);
+      if (value) identities.push('col-' + name + '=' + value);
+    }
+  }
+  return [...new Set(identities)];
+};
+const targetInside = (cell, predicate) => {
+  if (!cell) return null;
+  if (visible(cell) && predicate(cell)) return cell;
+  return actionableDescendants(cell, predicate)[0] || null;
+};
+const tableColumnTarget = (fieldElement, predicate) => {
+  const header = fieldElement.closest('th, td')
+    || (fieldElement.getAttribute('role') === 'columnheader' ? fieldElement : null);
+  if (!header) return null;
+  const component = tableComponentRoot(header);
+  const headerRect = header.getBoundingClientRect();
+  const rows = tableRows(component);
+  const headerCells = [...(header.parentElement?.children || [])];
+  const columnIndex = header.cellIndex >= 0 ? header.cellIndex : headerCells.indexOf(header);
+
+  // Ant 虚拟表格保留完整列顺序但表头、表体滚动位置可能短暂不同，必须优先按稳定列序号定位。
+  if (component?.matches('.ant-table-virtual') && columnIndex >= 0) {
+    for (const row of rows) {
+      const target = targetInside(tableRowCells(row)[columnIndex], predicate);
+      if (target) return target;
+    }
+  }
+  const headerIdentities = tableCellIdentities(header);
+  const identityTargets = headerIdentities.length === 0 ? [] : rows
+    .flatMap((row) => tableRowCells(row)
+      .filter((cell) => tableCellIdentities(cell).some((identity) => headerIdentities.includes(identity)))
+      .map((cell) => ({ target: targetInside(cell, predicate), rowTop: row.getBoundingClientRect().top })))
+    .filter((item) => item.target)
+    .sort((a, b) => a.rowTop - b.rowTop);
+  if (identityTargets.length > 0) return identityTargets[0].target;
+
+  // 滚动表格常把表头和表体拆成不同 table，并额外渲染固定列副本；按屏幕横坐标映射才能避免列序号漂移。
+  const sameTextHeaders = component ? [...component.querySelectorAll('thead th, thead td, [role="columnheader"]')]
+    .filter((item) => normalize(textOf(item)) === normalize(textOf(header))) : [];
+  const geometricTargets = sameTextHeaders.length > 1 ? [] : rows
+    .flatMap((row) => tableRowCells(row)
+      .map((cell) => ({ cell, rowTop: row.getBoundingClientRect().top, overlap: horizontalOverlap(headerRect, cell.getBoundingClientRect()) })))
+    .filter((item) => item.overlap > 0)
+    .map((item) => ({ ...item, target: targetInside(item.cell, predicate) }))
+    .filter((item) => item.target)
+    .sort((a, b) => b.overlap - a.overlap || a.rowTop - b.rowTop);
+  if (geometricTargets.length > 0) return geometricTargets[0].target;
+
+  if (columnIndex < 0) return null;
+  const ownTable = header.closest('table');
+  const indexedRows = ownTable?.querySelector('tbody tr') ? [...ownTable.querySelectorAll('tbody tr')] : rows;
+  for (const row of indexedRows) {
+    const cell = tableRowCells(row)[columnIndex];
+    if (!cell) continue;
+    const target = targetInside(cell, predicate);
+    if (target) return target;
+  }
+  return null;
+};
 const collectSiblingScope = (element) => {
   const scope = [];
   let current = element;
@@ -194,7 +282,17 @@ const structurallyScopedTargets = (fieldElement, predicate) => {
 };
 const scopedTarget = (field, predicate) => {
   const fields = fieldElements(field);
-  for (const fieldItem of fields) {
+  const tableFields = fields.filter((fieldItem) => fieldItem.element.closest('th, [role="columnheader"]'));
+  for (const fieldItem of tableFields.length > 0 ? tableFields : fields) {
+    const tableTarget = tableColumnTarget(fieldItem.element, predicate);
+    if (tableTarget) {
+      return { element: tableTarget, fields };
+    }
+    // 列头定位失败时不能退化为普通近邻搜索，否则会把值写入相邻列并造成同源校验假阳性。
+    if (fieldItem.element.closest('th, [role="columnheader"]')) {
+      continue;
+    }
+
     const container = closestFieldContainer(fieldItem.element);
     const scoped = container ? [...container.querySelectorAll('*')].filter((element) => visible(element) && predicate(element)) : [];
     if (scoped.length > 0) {

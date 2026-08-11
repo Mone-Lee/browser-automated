@@ -776,23 +776,30 @@ function findFirstFollowingClickableLine(
       break;
     }
 
-    if (!line.node.disabled && isClickableNode(line.node) && !isTextboxRole(line.node.role) && matchesOptionalTarget(line.node, normalizedFollowingTarget)) {
-      return line;
-    }
-
     if (line.indent === anchor.indent) {
+      // 聚合容器可能同时可点且包含整行文本，优先选择匹配文案的子控件，避免误点整行。
       const descendant = findFirstDescendantClickableLine(lines, line, normalizedFollowingTarget);
       if (descendant) {
         return descendant;
       }
+      if (!line.node.disabled && isClickableNode(line.node) && !isTextboxRole(line.node.role) && matchesOptionalTarget(line.node, normalizedFollowingTarget)) {
+        return line;
+      }
+      if (isTableHeaderRole(anchor.node.role) && isTableHeaderRole(line.node.role)) {
+        continue;
+      }
       break;
+    }
+
+    if (!line.node.disabled && isClickableNode(line.node) && !isTextboxRole(line.node.role) && matchesOptionalTarget(line.node, normalizedFollowingTarget)) {
+      return line;
     }
   }
 
   return null;
 }
 
-/** 同级容器本身不可点时，继续在这个兄弟节点的子树里寻找目标控件。 */
+/** 在同级兄弟节点的子树中查找更精确的目标控件，供父容器匹配前优先使用。 */
 function findFirstDescendantClickableLine(
   lines: SnapshotTextLine[],
   root: SnapshotTextLine,
@@ -856,6 +863,11 @@ function isTextboxRole(role: string): boolean {
 /** 判断节点是否可直接点击，refs 缺少 clickable 时按常见交互角色保守推断。 */
 function isClickableNode(node: SnapshotNode): boolean {
   return Boolean(node.clickable) || /button|link|menuitem|tab|option|radio|checkbox|switch|labeltext|label/i.test(node.role);
+}
+
+/** 表格列头允许跨过连续同级 header，继续在后续数据行里寻找真实操作入口。 */
+function isTableHeaderRole(role: string): boolean {
+  return /columnheader/i.test(role);
 }
 
 /** 识别 radio、checkbox 等可选择控件。 */
