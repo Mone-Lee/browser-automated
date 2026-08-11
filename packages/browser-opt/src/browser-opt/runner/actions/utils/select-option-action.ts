@@ -37,8 +37,9 @@ export function executeSelectOptionAction(
     option = { ...option, alreadySelected: false };
   }
 
-  const switchDomTarget = action.field && (isSwitchSelectable(option.role) || snapshotHasSwitchField(snapshot, action.field))
-    ? clickSwitchDomTarget(agent, action.field, action.option)
+  const switchField = action.field;
+  const switchDomTarget = switchField && shouldUseSwitchDomFallback(snapshot, action, option.role)
+    ? clickSwitchDomTarget(agent, switchField, action.option)
     : null;
   if (switchDomTarget) {
     return switchDomTarget;
@@ -134,15 +135,15 @@ export function verifySelectOptionActionEffect(
   }
 
   const selected = findSelectableOption(afterSnapshot, action.field, action.option);
-  if ((isSwitchSelectable(selected.role) || snapshotHasSwitchField(afterSnapshot, action.field)) && action.field) {
-    const domState = verifySwitchDomState(agent, action.field, action.option);
+  const switchField = action.field;
+  if (switchField && shouldUseSwitchDomFallback(afterSnapshot, action, selected.role)) {
+    const domState = verifySwitchDomState(agent, switchField, action.option);
     if (domState === true) {
-      return { passed: true, message: `已确认开关状态：${action.field}=${action.option}` };
+      return { passed: true, message: `已确认开关状态：${switchField}=${action.option}` };
     }
     if (domState === false) {
-      return { passed: false, message: `DOM 确认开关未达到目标状态：${action.field}=${action.option}` };
+      return { passed: false, message: `DOM 确认开关未达到目标状态：${switchField}=${action.option}` };
     }
-    return { passed: false, message: `无法可靠确认开关状态：${action.field}=${action.option}` };
   }
 
   if (/radio|checkbox/i.test(selected.role ?? '') || action.mode === 'deselect' || action.mode === 'exclusive') {
@@ -166,6 +167,10 @@ export function verifySelectOptionActionEffect(
 
   if (isOrdinalOptionIntent(action.option) && action.field && isFieldSelectedValueVisible(afterSnapshot.text, action.field)) {
     return { passed: true, message: `已确认按位置选择：${action.field}=${action.option}` };
+  }
+
+  if (action.field && verifyDropdownDomState(agent, action.field, action.option) === true) {
+    return { passed: true, message: `已通过 DOM 确认选择状态：${action.field}=${action.option}` };
   }
 
   return { passed: false, message: `动作后未确认目标已选中：${action.field ?? '选项'}=${action.option}` };
@@ -499,6 +504,21 @@ function dismissActiveDropdown(agent: BrowserAgent): string | null {
   return 'dismiss active dropdown';
 }
 
+/** 快照未暴露组合输入中的下拉值时，读取字段对应下拉的真实 DOM 值做最终确认。 */
+function verifyDropdownDomState(agent: BrowserAgent, field: string, option: string): boolean | null {
+  const script = `(() => {
+  const selectHelper = ${dropdownDomHelperSource()};
+  return JSON.stringify(selectHelper.verifySelectedValueByField(${JSON.stringify(field)}, ${JSON.stringify(option)}));
+})()`;
+
+  try {
+    const parsed = parseEvalJson(agent.evaluate(script));
+    return parsed.found === true && typeof parsed.reached === 'boolean' ? parsed.reached : null;
+  } catch {
+    return null;
+  }
+}
+
 /** 长表单中字段可能不在当前可交互快照里，按视口上下搜索字段和目标选项。 */
 function searchSelectableInLongForm(
   agent: BrowserAgent,
@@ -536,18 +556,17 @@ function clickSwitchDomTarget(agent: BrowserAgent, field: string, option: string
   const script = `(() => {
   const switchHelper = ${switchDomHelperSource()};
   const result = switchHelper.findSwitchByField(${JSON.stringify(field)}, ${JSON.stringify(option)});
-  if (!result.found || !result.switchId || typeof result.desiredChecked !== 'boolean') {
-    return JSON.stringify(result);
+  const element = result.element;
+  const { element: ignoredElement, ...evidence } = result;
+  if (!result.found || !element || typeof result.desiredChecked !== 'boolean') {
+    return JSON.stringify(evidence);
   }
   if (result.checked === result.desiredChecked) {
-    return JSON.stringify({ ...result, clicked: false });
+    return JSON.stringify({ ...evidence, clicked: false });
   }
-  const element = document.querySelector('[data-browser-opt-switch-id="' + result.switchId + '"]');
-  if (!element) {
-    return JSON.stringify({ ...result, clicked: false, missingElement: true });
-  }
+  element.scrollIntoView({ block: 'center', inline: 'nearest' });
   element.click();
-  return JSON.stringify({ ...result, clicked: true });
+  return JSON.stringify({ ...evidence, clicked: true });
 })()
 `;
 
@@ -578,7 +597,8 @@ function verifySwitchDomState(agent: BrowserAgent, field: string, option: string
   const script = `(() => {
   const switchHelper = ${switchDomHelperSource()};
   const result = switchHelper.findSwitchByField(${JSON.stringify(field)}, ${JSON.stringify(option)});
-  return JSON.stringify(result);
+  const { element: ignoredElement, ...evidence } = result;
+  return JSON.stringify(evidence);
 })()
 `;
 
@@ -795,7 +815,12 @@ function clickVisibleOption(option) {
     ? options[ordinalIndex === -1 ? options.length - 1 : ordinalIndex]
     : options
       .filter((item) => item.text.includes(optionText) || optionText.includes(item.text))
-      .sort((a, b) => (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height))[0];
+      .sort((a, b) => {
+        const aExactRank = a.text === optionText ? 0 : 1;
+        const bExactRank = b.text === optionText ? 0 : 1;
+        return aExactRank - bExactRank
+          || (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height);
+      })[0];
   if (!target) {
     return { found: false, clicked: false };
   }
@@ -868,7 +893,46 @@ function dismissActiveDropdown() {
 function hasVisibleDropdown() {
   return { dropdownOpen: browserOptDropdownContainers().length > 0 };
 }
-return { openDropdownByField, clickVisibleOption, searchActiveDropdown, scrollActiveDropdown, dismissActiveDropdown, hasVisibleDropdown };
+function verifySelectedValueByField(field, option) {
+  const fieldText = normalizeBrowserOptText(field);
+  const optionText = normalizeBrowserOptText(option);
+  const labels = [...document.querySelectorAll('body *')]
+    .filter((element) => browserOptVisible(element) && normalizeBrowserOptText(element.textContent).includes(fieldText))
+    .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+    .sort((a, b) => (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height));
+  for (const label of labels) {
+    for (const container of browserOptClosestFieldContainers(label.element)) {
+      const targets = browserOptSelects()
+        .filter((select) => container.element.contains(select))
+        .map((element) => ({ element, distance: browserOptCenterDistance(label.rect, element.getBoundingClientRect()) }))
+        .sort((a, b) => a.distance - b.distance);
+      for (const target of targets) {
+        const element = target.element;
+        const nativeValue = element.matches('select')
+          ? String(element.selectedOptions?.[0]?.textContent || element.value || '')
+          : '';
+        const inputValue = String(element.querySelector('input:not([type="hidden"])')?.value || '');
+        const selectedText = String(element.querySelector([
+          '.ant-select-selection-item',
+          '.ant-select-selection-selected-value',
+          '.el-input__inner',
+          '[class*="singleValue"]'
+        ].join(','))?.textContent || '');
+        const values = [nativeValue, inputValue, selectedText]
+          .map(normalizeBrowserOptText)
+          .filter(Boolean);
+        if (values.some((value) => value === optionText)) {
+          return { found: true, reached: true, value: optionText };
+        }
+      }
+      if (targets.length > 0) {
+        return { found: true, reached: false };
+      }
+    }
+  }
+  return { found: false };
+}
+return { openDropdownByField, clickVisibleOption, searchActiveDropdown, scrollActiveDropdown, dismissActiveDropdown, hasVisibleDropdown, verifySelectedValueByField };
 })()
 `;
 }
@@ -913,22 +977,32 @@ const browserOptSwitches = () => [...document.querySelectorAll('[role="switch"],
   .filter((element) => browserOptVisible(element) && (element.getAttribute('role') === 'switch' || String(element.className || '').includes('switch')));
 function findSwitchByField(field, option) {
   const fieldText = normalizeBrowserOptText(field);
+  // 字段文案只做标准化后的完整匹配，避免相似字段误触发相邻开关。
   const labels = [...document.querySelectorAll('body *')]
-    .filter((element) => browserOptVisible(element) && normalizeBrowserOptText(element.textContent).includes(fieldText))
-    .map((element) => ({ element, rect: element.getBoundingClientRect() }))
-    .sort((a, b) => (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height));
-  const switches = browserOptSwitches().map((element, index) => {
-    const id = 'browser-opt-switch-' + index;
-    element.setAttribute('data-browser-opt-switch-id', id);
-    return {
-      element,
-      id,
-      rect: element.getBoundingClientRect(),
-      checked: browserOptSwitchState(element),
-      desiredChecked: browserOptSwitchDesiredState(element, option),
-    };
-  });
+    .filter((element) => browserOptVisible(element))
+    .map((element) => {
+      const text = normalizeBrowserOptText(element.textContent);
+      return { element, text, rect: element.getBoundingClientRect() };
+    })
+    .filter((item) => item.text.includes(fieldText))
+    .sort((a, b) => a.text.length - b.text.length || (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height));
+  const switches = browserOptSwitches().map((element) => ({
+    element,
+    rect: element.getBoundingClientRect(),
+    checked: browserOptSwitchState(element),
+    desiredChecked: browserOptSwitchDesiredState(element, option),
+  }));
   for (const label of labels) {
+    // 优先使用字段所在的最小单开关容器，避免相邻卡片或大表单中的无名 switch 串位。
+    let container = label.element.parentElement;
+    for (let depth = 0; container && container !== document.body && depth < 6; depth += 1, container = container.parentElement) {
+      const contained = switches.filter((item) => container.contains(item.element) && item.checked !== null && item.desiredChecked !== null);
+      if (contained.length === 1) {
+        const target = contained[0];
+        return { found: true, checked: target.checked, desiredChecked: target.desiredChecked, element: target.element };
+      }
+    }
+
     const sameRow = switches
       .map((item) => {
         const verticalOverlap = Math.min(label.rect.bottom, item.rect.bottom) - Math.max(label.rect.top, item.rect.top);
@@ -940,7 +1014,7 @@ function findSwitchByField(field, option) {
       .sort((a, b) => a.yDistance - b.yDistance || a.xDistance - b.xDistance);
     const target = sameRow[0];
     if (target) {
-      return { found: true, checked: target.checked, desiredChecked: target.desiredChecked, switchId: target.id };
+      return { found: true, checked: target.checked, desiredChecked: target.desiredChecked, element: target.element };
     }
   }
   return { found: false, checked: null, desiredChecked: null };
@@ -957,6 +1031,23 @@ function isSwitchSelectable(role: string | null): boolean {
 /** 只有明确来自下拉列表的 option 才执行弹层收尾，避免影响单选和复选控件。 */
 function isDropdownOption(role: string | null): boolean {
   return Boolean(role && /option/i.test(role));
+}
+
+/** 布尔型目标值在真实页面常呈现为无名 switch，先尝试 DOM 同行近邻开关，失败后再回落其他选择策略。 */
+function shouldUseSwitchDomFallback(
+  snapshot: SnapshotEvidence,
+  action: Extract<DeterministicAction, { type: 'select-option' }>,
+  role: string | null,
+): boolean {
+  if (!action.field) {
+    return false;
+  }
+
+  if (isSwitchSelectable(role) || snapshotHasSwitchField(snapshot, action.field)) {
+    return true;
+  }
+
+  return isBooleanLikeSwitchOption(action.option);
 }
 
 /** 只有 snapshot 明确把字段暴露为 switch 时，才启用开关 DOM 兜底，避免大表单误碰邻近控件。 */
@@ -1003,6 +1094,11 @@ function isFieldLabelSnapshotLine(parsed: { role: string; label: string }, norma
 
   const normalizedLabel = normalizeVisibleText(parsed.label);
   return normalizedLabel.includes(normalizedField) && normalizedLabel.length <= normalizedField.length + 8;
+}
+
+/** 与 utils 中的布尔 switch 词表保持一致，供本文件决定是否值得走 switch DOM 兜底。 */
+function isBooleanLikeSwitchOption(option: string): boolean {
+  return /^(是|否|开|关|开启|关闭|打开|启用|停用|true|false|yes|no|on|off)$/i.test(option.trim());
 }
 
 /** 下拉选择通常会收起选项列表，只保留字段和值文案，因此补充基于页面文案的确认。 */

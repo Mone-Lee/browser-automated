@@ -2150,6 +2150,45 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps[0].actionOutput).toContain('check @e51');
   });
 
+  it('uses DOM switch fallback for unlabeled switches even when snapshot misclassifies the field as expandable', async () => {
+    const outputDir = makeTempDir();
+    const beforeSnapshot = [
+      '- StaticText "福卡折扣" [ref=f1]',
+      '- button "帮助" [ref=b1]',
+      '- switch [checked=false, ref=e51]',
+    ].join('\n');
+    const afterSnapshot = [
+      '- StaticText "福卡折扣" [ref=f1]',
+      '- button "帮助" [ref=b1]',
+      '- switch [checked=true, ref=e51]',
+    ].join('\n');
+    const refs = {
+      f1: { role: 'StaticText', name: '福卡折扣' },
+      b1: { role: 'button', name: '帮助' },
+      e51: { role: 'switch', name: '' },
+    };
+    const evaluate = vi.fn()
+      .mockReturnValueOnce(JSON.stringify({ found: true, checked: false, desiredChecked: true, switchId: 'browser-opt-switch-0', clicked: true }))
+      .mockReturnValueOnce(JSON.stringify({ found: true, checked: true, desiredChecked: true, switchId: 'browser-opt-switch-0' }));
+    const agent = buildAgent({
+      evaluate,
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(beforeSnapshot, refs),
+        snapshotJson(afterSnapshot, refs),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 福卡折扣切换为“开”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect(evaluate).toHaveBeenCalled();
+    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(result.report.steps[0].actionOutput).toContain('switch dom click 福卡折扣=开');
+    expect(result.report.steps[0].verification).toContain('已确认开关状态：福卡折扣=开');
+  });
+
   it('fails a select action when the post-action snapshot does not confirm the target state', async () => {
     const outputDir = makeTempDir();
     const switchSnapshot = [
@@ -2290,6 +2329,57 @@ describe('BrowserOptRunner', () => {
     expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalledWith('e14');
   });
 
+  it('uses DOM switch fallback for boolean steps when snapshot omits the switch field label', async () => {
+    const outputDir = makeTempDir();
+    const unlabeledSnapshot = [
+      '- generic "商品抵扣信息" [ref=f1]',
+      '- switch [checked=false, ref=e14]',
+      '- switch [checked=false, ref=e15]',
+    ].join('\n');
+    const selectedSnapshot = [
+      '- generic "商品抵扣信息" [ref=f1]',
+      '- switch [checked=false, ref=e14]',
+      '- switch [checked=true, ref=e15]',
+    ].join('\n');
+    let evaluateCount = 0;
+    const agent = buildAgent({
+      evaluate: (script) => {
+        if (script.includes('switchHelper.findSwitchByField')) {
+          evaluateCount += 1;
+          return JSON.stringify({
+            found: true,
+            checked: evaluateCount > 1,
+            desiredChecked: true,
+            switchId: 'browser-opt-switch-1',
+            clicked: evaluateCount === 1,
+          });
+        }
+        return JSON.stringify({ found: false });
+      },
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(unlabeledSnapshot, {
+          f1: { role: 'generic', name: '商品抵扣信息' },
+          e14: { role: 'switch', name: '' },
+          e15: { role: 'switch', name: '' },
+        }),
+        snapshotJson(selectedSnapshot, {
+          f1: { role: 'generic', name: '商品抵扣信息' },
+          e14: { role: 'switch', name: '' },
+          e15: { role: 'switch', name: '' },
+        }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 福卡折扣切换为“开”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(result.report.steps[0].actionOutput).toContain('switch dom click 福卡折扣=开');
+    expect(result.report.steps[0].verification).toContain('已确认开关状态：福卡折扣=开');
+  });
+
   it('opens a select field before choosing an option that is not initially rendered', async () => {
     const outputDir = makeTempDir();
     const closedSnapshot = [
@@ -2387,6 +2477,56 @@ describe('BrowserOptRunner', () => {
     expect(openDropdownScript).toContain("new PointerEventCtor('pointerdown', init)");
     expect(result.report.steps[0].actionOutput).toContain('select dom click 售后周期=提货当天');
     expect(result.report.steps[0].actionOutput).toContain('dismiss active dropdown');
+  });
+
+  it('verifies a unit dropdown through DOM when the snapshot omits its selected value', async () => {
+    const outputDir = makeTempDir();
+    const snapshotText = [
+      '- StaticText "产品净重" [ref=f1]',
+      '- textbox "产品净重" [ref=e1]: 1.25',
+      '- combobox "" [ref=e2]',
+    ].join('\n');
+    const agent = buildAgent({
+      evaluate: (script) => {
+        if (script.includes('selectHelper.openDropdownByField')) {
+          return JSON.stringify({ found: true, opened: true });
+        }
+        if (script.includes('selectHelper.clickVisibleOption')) {
+          return JSON.stringify({ found: true, clicked: true, selectedText: 'kg' });
+        }
+        if (script.includes('selectHelper.verifySelectedValueByField')) {
+          return JSON.stringify({ found: true, reached: true, value: 'kg' });
+        }
+        return JSON.stringify({ found: false });
+      },
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(snapshotText, {
+          f1: { role: 'StaticText', name: '产品净重' },
+          e1: { role: 'textbox', name: '产品净重', value: '1.25' },
+          e2: { role: 'combobox', name: '' },
+        }),
+        snapshotJson(snapshotText, {
+          f1: { role: 'StaticText', name: '产品净重' },
+          e1: { role: 'textbox', name: '产品净重', value: '1.25' },
+          e2: { role: 'combobox', name: '' },
+        }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 产品净重选择“kg”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect(result.report.steps[0].verification).toContain('已通过 DOM 确认选择状态：产品净重=kg');
+    const clickScript = (agent.evaluate as ReturnType<typeof vi.fn>).mock.calls
+      .map(([script]) => String(script))
+      .find((script) => script.includes('selectHelper.clickVisibleOption')) ?? '';
+    const verifyScript = (agent.evaluate as ReturnType<typeof vi.fn>).mock.calls
+      .map(([script]) => String(script))
+      .find((script) => script.includes('selectHelper.verifySelectedValueByField')) ?? '';
+    expect(clickScript).toContain('a.text === optionText ? 0 : 1');
+    expect(verifyScript).toContain('values.some((value) => value === optionText)');
   });
 
   it('fails the selection step when the dropdown still covers the page after dismissal', async () => {
