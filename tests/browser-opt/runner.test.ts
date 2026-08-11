@@ -90,7 +90,15 @@ function buildAgent(options: {
     stateLoad: vi.fn(() => 'state loaded'),
     scroll: vi.fn(() => 'scrolled'),
     scrollIntoView: vi.fn(() => 'scrolled into view'),
-    evaluate: vi.fn(options.evaluate ?? (() => JSON.stringify({ found: true, checked: true, desired: true }))),
+    evaluate: vi.fn(options.evaluate ?? (() => JSON.stringify({
+      found: true,
+      checked: true,
+      desired: true,
+      pending: false,
+      failed: false,
+      completed: true,
+      completedCount: 10,
+    }))),
     chatJson: vi.fn(options.chat ?? (() => ({ raw: '{"success":true}', data: { success: true } }))),
     waitMs: vi.fn(() => 'waited'),
     close: vi.fn(() => {}),
@@ -128,6 +136,65 @@ describe('browser-opt parsing', () => {
       field: '更新时间',
       option: '2026-08-06',
       endOption: '2026-08-09',
+    });
+  });
+
+  it('preserves the one-based data row number for table fill actions', () => {
+    expect(parseDeterministicAction('价格设置表格第2行的“会员价”输入“2.7”')).toEqual({
+      type: 'fill',
+      field: '会员价',
+      value: '2.7',
+      rowNumber: 2,
+    });
+    expect(parseDeterministicAction('价格设置表格第二行的“会员价”输入“2.7”')).toEqual({
+      type: 'fill',
+      field: '会员价',
+      value: '2.7',
+      rowNumber: 2,
+    });
+    expect(parseDeterministicAction('价格设置表格第2行的会员价为2.7')).toEqual({
+      type: 'fill',
+      field: '会员价',
+      value: '2.7',
+      rowNumber: 2,
+    });
+    expect(parseDeterministicAction('价格设置表格第2行“会员价”修改为“2.7”')).toEqual({
+      type: 'fill',
+      field: '会员价',
+      value: '2.7',
+      rowNumber: 2,
+    });
+  });
+
+  it('preserves table row numbers for click, select, and upload actions', () => {
+    expect(parseDeterministicAction('点击第2行“操作”列的“删除”按钮')).toEqual({
+      type: 'click',
+      field: '操作',
+      target: '删除',
+      rowNumber: 2,
+    });
+    expect(parseDeterministicAction('点击第2行的“删除”按钮')).toEqual({
+      type: 'click',
+      target: '删除',
+      rowNumber: 2,
+    });
+    expect(parseDeterministicAction('第2行的“展示状态”选择“展示”')).toEqual({
+      type: 'select-option',
+      field: '展示状态',
+      option: '展示',
+      rowNumber: 2,
+    });
+    expect(parseDeterministicAction('第2行的展示状态改为展示')).toEqual({
+      type: 'select-option',
+      field: '展示状态',
+      option: '展示',
+      rowNumber: 2,
+    });
+    expect(parseDeterministicAction('第2行“规格图片”自动上传，来源为 https://example.com/2.png')).toEqual({
+      type: 'upload',
+      field: '规格图片',
+      source: 'https://example.com/2.png',
+      rowNumber: 2,
     });
   });
 
@@ -892,7 +959,7 @@ describe('BrowserOptRunner', () => {
     const runner = new BrowserOptRunner(makeFactory(agent));
 
     const result = await runner.run(
-      '测试 https://example.com。\n\n目标：\n1. 在价格设置表格第 1 行的“供应商结算价”输入“19.90”',
+      '测试 https://example.com。\n\n目标：\n1. 在价格设置表格第 2 行的“供应商结算价”输入“19.90”',
       { outputDir },
     );
 
@@ -902,14 +969,68 @@ describe('BrowserOptRunner', () => {
     expect(scripts[0]).toContain('horizontalOverlap(headerRect, cell.getBoundingClientRect())');
     expect(scripts[0]).toContain('tableCellIdentities(cell)');
     expect(scripts[0]).toContain('.ant-table-tbody-virtual-holder-inner .ant-table-row');
+    expect(scripts[0]).toContain('tableRowGroups(rows)[rowNumber - 1]');
+    expect(scripts[0]).toContain('"供应商结算价", "19.90", false, 2');
     expect(scripts[0]).toContain("component?.matches('.ant-table-virtual')");
     expect(scripts[0]).toContain('virtualHeader.scrollLeft = virtualBody.scrollLeft');
     expect(scripts[0]).toContain('tableFields.length > 0 ? tableFields : fields');
     expect(scripts[0]).toContain("fieldItem.element.closest('th, [role=\"columnheader\"]')");
     expect(scripts[0]).toContain('tableRowCells(row)[columnIndex]');
     expect(scripts[1]).toContain('tableRowCells(row)[columnIndex]');
-    expect(result.report.steps[0].actionOutput).toContain('fill dom 供应商结算价 "19.90"');
-    expect(result.report.steps[0].verification).toContain('已通过 DOM 确认输入值：供应商结算价=19.90');
+    expect(scripts[1]).toContain('"供应商结算价", 2');
+    expect(result.report.steps[0].actionOutput).toContain('fill dom 第 2 行 供应商结算价 "19.90"');
+    expect(result.report.steps[0].verification).toContain('已通过 DOM 确认输入值：第 2 行供应商结算价=19.90');
+  });
+
+  it('clicks a button inside the requested table row and column', async () => {
+    const outputDir = makeTempDir();
+    const evaluate = vi.fn((script: string) => script.includes('helper.clickFieldScopedTarget(')
+      ? JSON.stringify({ found: true, clicked: true, targetText: '删除' })
+      : JSON.stringify({ found: false }));
+    const agent = buildAgent({
+      evaluate,
+      snapshots: [snapshotJson('open'), snapshotJson('价格表格'), snapshotJson('删除完成')],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com。\n\n目标：\n1. 点击第2行“操作”列的“删除”按钮',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(String(evaluate.mock.calls[0]?.[0])).toContain('clickFieldScopedTarget("操作", "删除", 2)');
+    expect(result.report.steps[0].actionOutput).toContain('click dom 第 2 行 操作 -> 删除');
+  });
+
+  it('selects and verifies a switch inside the requested table row and column', async () => {
+    const outputDir = makeTempDir();
+    const evaluate = vi.fn((script: string) => {
+      if (script.includes('helper.selectFieldScopedTarget(') && script.includes(', false)')) {
+        return JSON.stringify({ found: true, kind: 'switch', reached: true, changed: true });
+      }
+      if (script.includes('helper.selectFieldScopedTarget(') && script.includes(', true)')) {
+        return JSON.stringify({ found: true, kind: 'switch', reached: true });
+      }
+      return JSON.stringify({ found: false });
+    });
+    const agent = buildAgent({
+      evaluate,
+      snapshots: [snapshotJson('open'), snapshotJson('价格表格'), snapshotJson('状态已更新')],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com。\n\n目标：\n1. 第2行的“展示状态”选择“展示”',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(true);
+    const scripts = evaluate.mock.calls.map(([script]) => String(script));
+    expect(scripts[0]).toContain('selectFieldScopedTarget("展示状态", "展示", 2, "select", false)');
+    expect(scripts[1]).toContain('selectFieldScopedTarget("展示状态", "展示", 2, "select", true)');
+    expect(result.report.steps[0].verification).toContain('第 2 行展示状态=展示');
   });
 
   it('re-snapshots before filling a field that appears after an SPA transition', async () => {
@@ -2469,7 +2590,7 @@ describe('BrowserOptRunner', () => {
 
     expect(result.passed).toBe(true);
     expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
-    expect((agent.evaluate as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(4);
+    expect((agent.evaluate as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(5);
     const openDropdownScript = (agent.evaluate as ReturnType<typeof vi.fn>).mock.calls
       .map(([script]) => String(script))
       .find((script) => script.includes('selectHelper.openDropdownByField'));
@@ -2697,7 +2818,7 @@ describe('BrowserOptRunner', () => {
 
     expect(result.passed).toBe(true);
     expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
-    expect((agent.evaluate as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(5);
+    expect((agent.evaluate as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(6);
     expect(result.report.steps[0].actionOutput).toContain('select dom click 对接负责人=嘻嘻嘻 (嘻嘻嘻)');
   });
 
@@ -3307,7 +3428,7 @@ describe('BrowserOptRunner', () => {
       ],
       evaluate: (script) => script.includes('uploadHelper.findUploadInputsByField')
         ? JSON.stringify({ found: true, selectors, count: selectors.length, scrollSelector })
-        : JSON.stringify({ found: true, pending: false, failed: false }),
+        : JSON.stringify({ found: true, pending: false, failed: false, completed: true, completedCount: 3 }),
     });
     const runner = new BrowserOptRunner(makeFactory(agent));
 
@@ -3337,7 +3458,13 @@ describe('BrowserOptRunner', () => {
       evaluate: (script) => {
         if (script.includes('uploadHelper.getUploadStateByField')) {
           uploadStateChecks += 1;
-          return JSON.stringify({ found: true, pending: uploadStateChecks < 3, failed: false });
+          return JSON.stringify({
+            found: true,
+            pending: uploadStateChecks < 3,
+            failed: false,
+            completed: uploadStateChecks >= 3,
+            completedCount: uploadStateChecks >= 3 ? 1 : 0,
+          });
         }
         return JSON.stringify({ found: false });
       },
@@ -3355,7 +3482,7 @@ describe('BrowserOptRunner', () => {
     );
 
     expect(result.passed).toBe(true);
-    expect(uploadStateChecks).toBe(3);
+    expect(uploadStateChecks).toBe(4);
     expect(result.report.steps[0].actionOutput).toContain('upload wait 2 商品白底图');
     expect(result.report.steps[0].actionOutput).toContain('upload settled 商品白底图');
   });
@@ -3442,10 +3569,12 @@ describe('BrowserOptRunner', () => {
         snapshotJson('before upload with visible Ant Upload but no file ref', { e1: { role: 'heading', name: '基础信息' } }),
         snapshotJson('after upload with 封面预览', { e1: { role: 'heading', name: '基础信息' } }),
       ],
-      evaluate: () => JSON.stringify({
-        found: true,
-        selector: '[data-browser-opt-upload-id="browser-opt-upload-0"]',
-      }),
+      evaluate: (script) => script.includes('uploadHelper.getUploadStateByField')
+        ? JSON.stringify({ found: true, pending: false, failed: false, completed: true, completedCount: 1 })
+        : JSON.stringify({
+          found: true,
+          selector: '[data-browser-opt-upload-id="browser-opt-upload-0"]',
+        }),
     });
     const runner = new BrowserOptRunner(makeFactory(agent));
 
@@ -3477,10 +3606,12 @@ describe('BrowserOptRunner', () => {
           e142: { role: 'button', name: '上传商品白底图' },
         }),
       ],
-      evaluate: () => JSON.stringify({
-        found: true,
-        selector: '[data-browser-opt-upload-id="browser-opt-upload-0"]',
-      }),
+      evaluate: (script) => script.includes('uploadHelper.getUploadStateByField')
+        ? JSON.stringify({ found: true, pending: false, failed: false, completed: true, completedCount: 1 })
+        : JSON.stringify({
+          found: true,
+          selector: '[data-browser-opt-upload-id="browser-opt-upload-0"]',
+        }),
     });
     const runner = new BrowserOptRunner(makeFactory(agent));
 
@@ -3504,6 +3635,8 @@ describe('BrowserOptRunner', () => {
     const outputDir = makeTempDir();
     vi.stubGlobal('fetch', vi.fn(async () => new Response('image-bytes', { status: 200 })));
     let lookupCount = 0;
+    let revealCount = 0;
+    const uploadLookupEvents: string[] = [];
     const agent = buildAgent({
       snapshots: [
         snapshotJson('open'),
@@ -3514,16 +3647,19 @@ describe('BrowserOptRunner', () => {
         if (script.includes('uploadHelper.diagnoseUploadByField(')) {
           return JSON.stringify({ diagnostic: {} });
         }
-        if (script.includes('uploadHelper.revealTableUploadInputByField(')) {
+        if (script.includes('return JSON.stringify(uploadHelper.revealTableUploadInputByField(')) {
+          revealCount += 1;
+          uploadLookupEvents.push('reveal');
           return JSON.stringify({ found: true, revealed: true });
         }
-        if (script.includes('uploadHelper.findUploadInputByField(')) {
+        if (script.includes('const result = uploadHelper.findUploadInputByField(')) {
           lookupCount += 1;
-          return JSON.stringify(lookupCount === 1
+          uploadLookupEvents.push('lookup');
+          return JSON.stringify(lookupCount < 3
             ? { found: false }
             : { found: true, selector: '[data-browser-opt-upload-id="browser-opt-upload-0"]' });
         }
-        return JSON.stringify({ found: true, pending: false, failed: false });
+        return JSON.stringify({ found: true, pending: false, failed: false, completed: true, completedCount: 1 });
       },
     });
     const runner = new BrowserOptRunner(makeFactory(agent));
@@ -3536,8 +3672,12 @@ describe('BrowserOptRunner', () => {
     expect(result.passed).toBe(true);
     const scripts = (agent.evaluate as ReturnType<typeof vi.fn>).mock.calls
       .map(([script]) => String(script));
-    const lookupScript = scripts.find((script) => script.includes('uploadHelper.findUploadInputByField(')) ?? '';
-    const revealScript = scripts.find((script) => script.includes('uploadHelper.revealTableUploadInputByField(')) ?? '';
+    const lookupScript = scripts.find((script) => script.includes('const result = uploadHelper.findUploadInputByField(')) ?? '';
+    const revealScript = scripts.find((script) => script.includes('return JSON.stringify(uploadHelper.revealTableUploadInputByField(')) ?? '';
+    expect(uploadLookupEvents).toEqual(['lookup', 'reveal', 'lookup', 'lookup']);
+    expect(revealCount).toBe(1);
+    expect(lookupCount).toBe(3);
+    expect((agent.waitMs as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(100);
     expect(lookupScript).toContain("input.closest('td, th, [role=\"cell\"], [role=\"gridcell\"], .ant-table-cell')");
     expect(lookupScript).toContain("source: 'table-geometry'");
     expect(lookupScript).toContain('browserOptUploadCellIdentities(header)');
@@ -3545,9 +3685,138 @@ describe('BrowserOptRunner', () => {
     expect(lookupScript).toContain("input.closest('td, th, [role=\"cell\"], [role=\"gridcell\"], .ant-table-cell')");
     expect(lookupScript).toContain("table.querySelectorAll('thead tr')");
     expect(lookupScript).toContain('headerCells[cell.cellIndex]');
+    expect(lookupScript).toContain('findUploadInputByField("规格图片", 1)');
+    expect(lookupScript).toContain('browserOptUploadStableSelector(');
+    expect(lookupScript).toContain("document.querySelectorAll(existingSelector).length === 1");
+    expect(lookupScript).toContain("data-browser-opt-upload-sequence");
     expect(revealScript).toContain('browserOptUploadHorizontalOverlap(headerRect, cell.getBoundingClientRect())');
     expect(revealScript).toContain("root.querySelectorAll('tbody tr, [role=\"row\"], .ant-table-tbody-virtual-holder-inner .ant-table-row')");
-    expect(result.report.steps[0].actionOutput).toContain('upload reveal table input 规格图片');
+    expect(revealScript).toContain('revealTableUploadInputByField("规格图片", 1)');
+    expect(revealScript).toContain('data-browser-opt-upload-before-reveal');
+    expect(lookupScript).toContain('data-browser-opt-upload-target-field');
+    expect(result.report.steps[0].actionOutput).toContain('upload reveal table input 第 1 行 规格图片');
+    expect(result.report.steps[0].actionOutput).toContain('upload dynamic input 2');
+  });
+
+  it('does not click the table upload entry when the target cell already contains a file input', async () => {
+    const outputDir = makeTempDir();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('image-bytes', { status: 200 })));
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('价格设置表格规格图片为空', { e1: { role: 'table', name: '价格设置' } }),
+        snapshotJson('价格设置表格规格图片预览', { e1: { role: 'table', name: '价格设置' } }),
+      ],
+      evaluate: (script) => {
+        if (script.includes('uploadHelper.revealTableUploadInputByField')) {
+          throw new Error('已有 input 时不应点击上传入口');
+        }
+        if (script.includes('uploadHelper.getUploadStateByField')) {
+          return JSON.stringify({ found: true, pending: false, failed: false, completed: true, completedCount: 1 });
+        }
+        return JSON.stringify({ found: true, selector: '[data-browser-opt-upload-id="browser-opt-upload-0"]' });
+      },
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/goods/create。\n\n目标：\n1. 价格设置表格第 1 行“规格图片”列自动上传，图片来源 URL 为“https://example.com/spec.png”。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(true);
+    expect(result.report.steps[0].actionOutput).not.toContain('upload reveal table input');
+  });
+
+  it('notifies a hidden file input when CDP injection does not trigger Ant Upload', async () => {
+    const outputDir = makeTempDir();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('image-bytes', { status: 200 })));
+    let inputChangeNotified = false;
+    const selector = '[data-browser-opt-upload-id="browser-opt-upload-0"]';
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('价格设置表格规格图片为空', { e1: { role: 'table', name: '价格设置' } }),
+        snapshotJson('价格设置表格规格图片预览', { e1: { role: 'table', name: '价格设置' } }),
+      ],
+      evaluate: (script) => {
+        if (script.includes("dispatchEvent(new Event('input'")) {
+          inputChangeNotified = true;
+          return JSON.stringify({ dispatched: true, files: 1 });
+        }
+        if (script.includes('uploadHelper.getUploadStateByField')) {
+          return JSON.stringify({
+            found: true,
+            pending: false,
+            failed: false,
+            completed: inputChangeNotified,
+            completedCount: inputChangeNotified ? 1 : 0,
+          });
+        }
+        if (script.includes('uploadHelper.revealTableUploadInputByField')) {
+          return JSON.stringify({ found: true, revealed: true });
+        }
+        return JSON.stringify({ found: true, selector });
+      },
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/goods/create。\n\n目标：\n1. 价格设置表格第 1 行“规格图片”列自动上传，图片来源 URL 为“https://example.com/spec.png”。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(true);
+    expect(inputChangeNotified).toBe(true);
+    expect(result.report.steps[0].actionOutput).toContain('upload notify input change 规格图片 files=1');
+    expect((agent.upload as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails when an upload command returns but the target field has no success state', async () => {
+    const outputDir = makeTempDir();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('image-bytes', { status: 200 })));
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('价格设置表格规格图片为空', { e1: { role: 'table', name: '价格设置' } }),
+        snapshotJson('价格设置表格规格图片仍为空', { e1: { role: 'table', name: '价格设置' } }),
+      ],
+      evaluate: (script) => script.includes('uploadHelper.getUploadStateByField')
+        ? JSON.stringify({ found: true, pending: false, failed: false, completed: false, completedCount: 0 })
+        : JSON.stringify({ found: true, selector: '[data-browser-opt-upload-id="browser-opt-upload-0"]' }),
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/goods/create。\n\n目标：\n1. 价格设置表格第 1 行“规格图片”列自动上传，图片来源 URL 为“https://example.com/spec.png”。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(false);
+    expect(result.report.steps[0].error).toBe('等待上传完成超时：规格图片');
+    expect((agent.waitMs as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(500);
+    const uploadStateScript = (agent.evaluate as ReturnType<typeof vi.fn>).mock.calls
+      .map(([script]) => String(script))
+      .find((script) => script.includes('uploadHelper.getUploadStateByField')) ?? '';
+    expect(uploadStateScript).toContain('const completed = !pending && !failed && success');
+    expect(uploadStateScript).not.toMatch(/completed\s*=.*inputFilesCount/);
+  });
+
+  it('fails when a click command returns but the page state does not change', async () => {
+    const outputDir = makeTempDir();
+    const unchanged = snapshotJson('提交发布按钮仍在原页面', { e1: { role: 'button', name: '提交发布' } });
+    const agent = buildAgent({
+      snapshots: [snapshotJson('open'), unchanged, unchanged],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/goods/create。\n\n目标：\n1. 点击“提交发布”。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(false);
+    expect(result.report.steps[0].error).toBe('点击后页面状态未发生变化：提交发布');
   });
 
   it('hands off after upload when the page enters an image crop workflow', async () => {
@@ -3870,6 +4139,35 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps[0].logs.join('\n')).toContain('retry-snapshot');
   });
 
+  it('waits for an asynchronously rendered click target beyond the ordinary retry', async () => {
+    const outputDir = makeTempDir();
+    const loadingSnapshot = snapshotJson('- button "我知道了" [ref=e1]', {
+      e1: { role: 'button', name: '我知道了' },
+    });
+    const readySnapshot = snapshotJson('- link "规格与价格" [ref=e2]', {
+      e2: { role: 'link', name: '规格与价格' },
+    });
+    const agent = buildAgent({
+      snapshots: [
+        loadingSnapshot,
+        loadingSnapshot,
+        loadingSnapshot,
+        readySnapshot,
+        readySnapshot,
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 点击导航栏的“规格与价格”。', {
+      outputDir,
+    });
+
+    expect(result.passed).toBe(true);
+    expect(result.report.steps[0].attempts).toBe(3);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e2');
+    expect(result.report.steps[0].logs.join('\n')).toContain('target-wait');
+  });
+
   it('returns FAIL and reports verification errors', async () => {
     const outputDir = makeTempDir();
     const agent = buildAgent({
@@ -3891,7 +4189,7 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps[0].error).toContain('页面未包含文本');
   });
 
-  it('continues executing remaining steps after ordinary step failures', async () => {
+  it('continues executing remaining steps after an ordinary step failure', async () => {
     const outputDir = makeTempDir();
     const agent = buildAgent({
       snapshots: [
@@ -3914,6 +4212,7 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps).toHaveLength(2);
     expect(result.report.steps[0].passed).toBe(false);
     expect(result.report.steps[1].passed).toBe(true);
+    expect(result.report.skippedSteps ?? []).toEqual([]);
     expect((agent.snapshotJson as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(5);
     expect(reportMarkdown).toContain('## Failed Steps');
     expect(reportMarkdown).toContain('1. 验证页面包含 "Dashboard"。');
@@ -3936,8 +4235,139 @@ describe('BrowserOptRunner', () => {
     expect(result.passed).toBe(false);
     expect(result.report.steps).toHaveLength(1);
     expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(result.report.skippedSteps).toHaveLength(1);
     expect(result.report.logs.join('\n')).toContain('high-impact-action-blocked');
     expect(result.report.logs.join('\n')).toContain('前置步骤失败');
+  });
+
+  it('retries a deferred ordinary step after later configuration reveals its target', async () => {
+    const outputDir = makeTempDir();
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('配置尚未完成'),
+        snapshotJson('配置尚未完成'),
+        snapshotJson('before loading', { e1: { role: 'button', name: '加载配置' } }),
+        snapshotJson('ready', { e1: { role: 'button', name: '提交发布' } }),
+        snapshotJson('ready'),
+        snapshotJson('ready'),
+        snapshotJson('ready', { e1: { role: 'button', name: '提交发布' } }),
+        snapshotJson('submitted'),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com。\n\n目标：\n1. 验证页面包含“ready”。\n2. 点击“加载配置”。\n3. 点击“提交发布”。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(true);
+    expect(result.report.steps).toHaveLength(3);
+    expect(result.report.steps[0].passed).toBe(true);
+    expect(result.report.steps[0].beforeScreenshotPath).toContain('01-deferred-before.png');
+    expect(result.report.logs.join('\n')).toContain('deferred-step-retry');
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e1');
+  });
+
+  it('restores an earlier switch state before a high-impact action', async () => {
+    const outputDir = makeTempDir();
+    let fukaEnabled = false;
+    let triggerValue = '';
+    const evaluate = vi.fn((script: string) => {
+      if (script.includes('switchHelper.findSwitchByField')) {
+        const before = fukaEnabled;
+        if (script.includes('element.click()') && !fukaEnabled) fukaEnabled = true;
+        return JSON.stringify({ found: true, checked: before, desiredChecked: true, clicked: before ? false : true });
+      }
+      if (script.includes('helper.readFieldScopedValue')) {
+        return JSON.stringify({ found: true, value: triggerValue });
+      }
+      return JSON.stringify({ found: false });
+    });
+    const agent = buildAgent({
+      evaluate,
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('- switch "福卡抵扣" [checked=false, ref=e1]'),
+        snapshotJson('- switch "福卡抵扣" [checked=true, ref=e1]'),
+        snapshotJson('- textbox "触发器" [ref=e2]'),
+        snapshotJson('- textbox "触发器" [ref=e2]: x'),
+        snapshotJson('before reconcile'),
+        snapshotJson('after switch restore'),
+        snapshotJson('reconciled'),
+        snapshotJson('before submit', { e3: { role: 'button', name: '提交发布' } }),
+        snapshotJson('submitted'),
+      ],
+    });
+    (agent.fill as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      triggerValue = 'x';
+      fukaEnabled = false;
+      return 'filled';
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com。\n\n目标：\n1. 福卡抵扣切换为开启。\n2. “触发器”输入“x”。\n3. 点击“提交发布”。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(true);
+    expect(fukaEnabled).toBe(true);
+    expect(result.report.logs.join('\n')).toContain('state-reconcile-restored: 步骤 1 福卡抵扣切换为开启');
+  });
+
+  it('uses the already opened dropdown before reopening the field', async () => {
+    const outputDir = makeTempDir();
+    let clickVisibleCount = 0;
+    let hasVisibleDropdownCount = 0;
+    const agent = buildAgent({
+      evaluate: (script) => {
+        if (script.includes('selectHelper.hasVisibleDropdown')) {
+          hasVisibleDropdownCount += 1;
+          return JSON.stringify({ dropdownOpen: hasVisibleDropdownCount === 1 });
+        }
+        if (script.includes('selectHelper.clickVisibleOption')) {
+          clickVisibleCount += 1;
+          return JSON.stringify(clickVisibleCount === 1
+            ? { found: true, clicked: true, selectedText: '嘻嘻嘻' }
+            : { found: false, clicked: false });
+        }
+        if (script.includes('selectHelper.dismissActiveDropdown')) {
+          return JSON.stringify({ found: true, dismissed: true });
+        }
+        if (script.includes('selectHelper.openDropdownByField')) {
+          return JSON.stringify({ found: true, opened: true });
+        }
+        return JSON.stringify({ found: false });
+      },
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson([
+          '- StaticText "对接负责人" [ref=f1]',
+          '- combobox "嘻嘻嘻" [expanded=true, ref=e61]',
+          '- option "嘻嘻嘻" [ref=e203]',
+        ].join('\n'), {
+          f1: { role: 'StaticText', name: '对接负责人' },
+          e61: { role: 'combobox', name: '嘻嘻嘻' },
+          e203: { role: 'option', name: '嘻嘻嘻' },
+        }),
+        snapshotJson([
+          '- StaticText "对接负责人" [ref=f1]',
+          '- combobox "嘻嘻嘻" [ref=e61]',
+        ].join('\n'), {
+          f1: { role: 'StaticText', name: '对接负责人' },
+          e61: { role: 'combobox', name: '嘻嘻嘻' },
+        }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. “对接负责人”选择“嘻嘻嘻”', { outputDir });
+
+    expect(result.passed).toBe(true);
+    expect((agent.evaluate as ReturnType<typeof vi.fn>).mock.calls.some(([script]) => String(script).includes('selectHelper.openDropdownByField'))).toBe(false);
+    expect(result.report.steps[0].actionOutput).toContain('select dom click 对接负责人=嘻嘻嘻 (嘻嘻嘻)');
   });
 
   it('stops before confirmation when a high-impact action itself fails', async () => {

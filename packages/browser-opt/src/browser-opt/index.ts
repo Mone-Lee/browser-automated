@@ -25,6 +25,7 @@ export type {
   BrowserOptReport,
   BrowserOptRunResult,
   BrowserOptRunnerOptions,
+  BrowserOptSkippedStep,
   BrowserOptStepResult,
 } from './type.js';
 export type {

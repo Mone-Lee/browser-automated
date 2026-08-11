@@ -26,6 +26,11 @@ import {
   buildHandoffContext,
 } from './handoff.js';
 
+// 普通错误只重试一次；目标尚未渲染时按 500ms 间隔折算为约 10 秒的等待窗口。
+const ORDINARY_ACTION_ATTEMPTS = 2;
+const CLICK_TARGET_ATTEMPTS = 20;
+const FILL_TARGET_ATTEMPTS = 10;
+
 /** 执行单个步骤，负责前后快照、动作重试、验证和步骤级日志记录。 */
 export async function executeStep(
   agent: BrowserAgent,
@@ -34,7 +39,7 @@ export async function executeStep(
   instruction: string,
   options: BrowserOptStepExecutionOptions,
 ): Promise<BrowserOptStepResult> {
-  const prefix = String(index).padStart(2, '0');
+  const prefix = options.evidencePrefix ?? String(index).padStart(2, '0');
   const beforeSnapshotPath = path.join(outputDir, `${prefix}-before.snapshot.json`);
   const afterSnapshotPath = path.join(outputDir, `${prefix}-after.snapshot.json`);
   const retrySnapshotPath = path.join(outputDir, `${prefix}-retry.snapshot.json`);
@@ -87,7 +92,7 @@ export async function executeStep(
   let actionError: string | undefined;
   const parsedAction = parseDeterministicAction(instruction);
 
-  while (attempts < 2) {
+  while (attempts < targetRetryLimit(parsedAction)) {
     attempts += 1;
     try {
       if (!isVerificationStep(instruction) || (parsedAction && parsedAction.type !== 'assert-text')) {
@@ -121,14 +126,20 @@ export async function executeStep(
         logs.push(`terminal-failure: ${actionError}`);
         break;
       }
-      if (attempts < 2) {
-        agent.waitMs(500);
-        logs.push(`retry-wait: 等待联动渲染或异步状态更新后重新获取页面。`);
-        const retrySnapshot = captureSnapshot(agent, retrySnapshotPath);
-        actionSnapshot = retrySnapshot;
-        logs.push(`retry-snapshot: ${retrySnapshotPath}`);
-        logs.push(`retry-state: ${summarizeSnapshot(retrySnapshot)}`);
+      if (!shouldRetryAction(actionError, attempts, parsedAction)) {
+        break;
       }
+
+      agent.waitMs(500);
+      if (isMissingActionTarget(actionError)) {
+        logs.push(`target-wait ${attempts}: 目标尚未渲染，等待后重新获取页面。`);
+      } else {
+        logs.push(`retry-wait: 等待联动渲染或异步状态更新后重新获取页面。`);
+      }
+      const retrySnapshot = captureSnapshot(agent, retrySnapshotPath);
+      actionSnapshot = retrySnapshot;
+      logs.push(`retry-snapshot: ${retrySnapshotPath}`);
+      logs.push(`retry-state: ${summarizeSnapshot(retrySnapshot)}`);
     }
   }
 
@@ -227,7 +238,13 @@ export async function executeStep(
   }
 
   if (parsedAction && parsedAction.type !== 'assert-text' && !isVerificationStep(instruction)) {
-    const actionVerification = verifyDeterministicActionEffect(agent, parsedAction, afterSnapshot);
+    const actionVerification = verifyDeterministicActionEffect(
+      agent,
+      parsedAction,
+      beforeSnapshot,
+      afterSnapshot,
+      actionOutput,
+    );
     if (!actionVerification.passed) {
       logs.push(`verification failed: ${actionVerification.message}`);
       return {
@@ -314,6 +331,34 @@ export async function executeStep(
     error: verification.passed ? undefined : verification.message,
     logs,
   };
+}
+
+/** 异步目标缺失时扩大等待窗口，其他动作错误仍保持一次普通重试。 */
+function shouldRetryAction(
+  error: string,
+  attempts: number,
+  action: ReturnType<typeof parseDeterministicAction>,
+): boolean {
+  if (isMissingActionTarget(error)) {
+    return attempts < targetRetryLimit(action);
+  }
+  return attempts < ORDINARY_ACTION_ATTEMPTS;
+}
+
+/** 点击与输入的等待次数按动作内部是否自带 500ms 探测进行折算，总等待约为 10 秒。 */
+function targetRetryLimit(action: ReturnType<typeof parseDeterministicAction>): number {
+  if (action?.type === 'fill') {
+    return FILL_TARGET_ATTEMPTS;
+  }
+  if (action?.type === 'click') {
+    return CLICK_TARGET_ATTEMPTS;
+  }
+  return ORDINARY_ACTION_ATTEMPTS;
+}
+
+/** 仅把定位阶段的目标缺失视为可等待状态，避免业务执行错误被重复操作。 */
+function isMissingActionTarget(error: string): boolean {
+  return /^无法找到(?:可点击元素|输入框)：/.test(error);
 }
 
 /** 确定性动作已确认业务上不可达时不再重试，避免把不可选状态误当异步未完成。 */

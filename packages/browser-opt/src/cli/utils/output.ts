@@ -31,6 +31,17 @@ export function printBrowserOptResult(result: BrowserOptRunResult): void {
     }
   }
 
+  console.log('Skipped steps:');
+  const skippedSteps = report.skippedSteps ?? [];
+  if (skippedSteps.length === 0) {
+    console.log('  - n/a');
+  } else {
+    for (const step of skippedSteps) {
+      console.log(`  - ${step.index}. ${step.instruction}`);
+      console.log(`    Reason: ${step.reason}`);
+    }
+  }
+
   console.log('Evidence screenshots:');
   for (const screenshot of report.screenshots) {
     console.log(`  - ${screenshot}`);

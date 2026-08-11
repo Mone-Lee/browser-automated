@@ -936,7 +936,7 @@ describe('browser-opt CLI', () => {
     expect(result.stdout).not.toContain('执行成功');
   });
 
-  it('prints all failures after continuing through later steps', () => {
+  it('prints continued step results after a failure', () => {
     const outputDir = makeTempDir();
     const result = runCli([
       'browser-opt',
@@ -951,6 +951,8 @@ describe('browser-opt CLI', () => {
     expect(result.stdout).toContain('  - 1. 验证页面包含 "Missing"。');
     expect(result.stdout).toContain('    Reason: 页面未包含文本：Missing');
     expect(result.stdout).toContain('FAIL 1. 验证页面包含 "Missing"。');
+    expect(result.stdout).toContain('Skipped steps:');
+    expect(result.stdout).toContain('  - n/a');
     expect(result.stdout).toContain('PASS 2. 验证页面包含 "Example"。');
   });
 
