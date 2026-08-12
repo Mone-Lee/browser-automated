@@ -52,7 +52,7 @@ the active target in the same Chrome window; do not use `agent-browser inspect`,
 which opens a separate DevTools frontend URL. If the current Chrome version does
 not support `Target.openDevTools`, report the failure instead of falling back to
 the separate frontend. Supported expressions include `打开开发者工具`,
-`启动 DevTools`, `调起 Chrome DevTools`, and `inspect current page`:
+`打开控制台`, `启动 DevTools`, `调起 Chrome DevTools`, and `inspect current page`:
 
 ```text
 /browser-opt 测试 https://example.com 的页面调试流程。
