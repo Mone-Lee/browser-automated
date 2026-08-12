@@ -358,13 +358,13 @@ export function isHighImpactInstruction(instruction: string): boolean {
   return action?.type === 'click' && /导出|删除|提交|发布|保存|确认|支付|退款|上架|下架/.test(instruction);
 }
 
-/** 识别明确要求打开当前页面开发者工具的中英文表达，避免把普通“检查页面”误判为 inspect。 */
+/** 识别明确要求打开当前页面开发者工具或控制台的中英文表达，避免把普通“检查页面”误判为 inspect。 */
 function isInspectInstruction(instruction: string): boolean {
   if (/^inspect(?:\s+(?:the\s+)?(?:current\s+)?page)?[。.!！]?$/i.test(instruction)) {
     return true;
   }
 
-  return /开发者工具|开发人员工具|(?:chrome\s*)?devtools/i.test(instruction)
+  return /开发者工具|开发人员工具|控制台|(?:chrome\s*)?devtools/i.test(instruction)
     && /打开|启动|调起|唤起|显示|open|launch|start/i.test(instruction);
 }
 

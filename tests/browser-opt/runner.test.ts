@@ -119,6 +119,7 @@ describe('browser-opt parsing', () => {
 
   it('recognizes natural-language requests to open DevTools', () => {
     expect(parseDeterministicAction('打开开发者工具')).toEqual({ type: 'inspect' });
+    expect(parseDeterministicAction('打开控制台')).toEqual({ type: 'inspect' });
     expect(parseDeterministicAction('请调起 Chrome DevTools。')).toEqual({ type: 'inspect' });
     expect(parseDeterministicAction('inspect current page')).toEqual({ type: 'inspect' });
     expect(parseDeterministicAction('检查当前页面')).toBeNull();
