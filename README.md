@@ -27,7 +27,7 @@
 只想试用、不安装 cli 和 Skill，可直接运行：
 
 ```bash
-npx -p browser-opt@latest -p agent-browser@latest browser-opt "
+npx -y --registry=https://registry.npmjs.org/ -p browser-opt@latest -p agent-browser@latest browser-opt "
 执行创建药品分类商品流程
 目标：
 1. 打开页面https://test-ecmiddle.ifengqun.com/#/Home/goodsManage/GoodsDetaiManage/preFill?type=1&page=goodManage
