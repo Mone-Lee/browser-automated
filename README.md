@@ -235,10 +235,13 @@ npm run build -w browser-e2e
 
 ```bash
 npm run release:check
-npm run release:dry-run -- all patch
-npm run release -- browser-opt patch
-npm run release -- browser-e2e patch
-npm run release -- all minor
+npm run release:dry-run
+npm run release:dry-run minor
+npm run release browser-opt minor
+npm run release browser-e2e major
+npm run release all minor
+npm run release:browser-opt minor
+npm run release:browser-e2e major
 ```
 
 `browser-opt` 和 `browser-e2e` 的构建都会把共享底层代码编译进各自的 `dist/browser-core`。发版只发布这两个用户入口，不再发布或拉取独立的 core 包。
