@@ -13,6 +13,11 @@ import { executeTableRowCheckboxAction, verifyTableRowCheckboxActionEffect } fro
 import { executeUploadAction, verifyUploadActionEffect } from './utils/upload-action.js';
 import { captureTransientSnapshot } from '../evidence.js';
 
+interface ClickDomVerificationResult {
+  matched: number;
+  active: boolean;
+}
+
 export interface ReconcileActionResult {
   applicable: boolean;
   passed: boolean;
@@ -104,8 +109,13 @@ export function verifyDeterministicActionEffect(
   if (action.type === 'click') {
     const changed = normalizeSnapshotForComparison(beforeSnapshot.text)
       !== normalizeSnapshotForComparison(afterSnapshot.text);
-    return changed
-      ? { passed: true, message: '点击后页面状态已发生变化。' }
+    if (changed) {
+      return { passed: true, message: '点击后页面状态已发生变化。' };
+    }
+
+    const domVerified = verifyClickActionEffectViaDom(agent, action.target);
+    return domVerified.active
+      ? { passed: true, message: `点击后已通过 DOM 确认目标进入激活态：${action.target}` }
       : { passed: false, message: `点击后页面状态未发生变化：${action.target}` };
   }
 
@@ -179,4 +189,96 @@ function normalizeSnapshotForComparison(text: string): string {
     .replace(/\s*\[ref=[^\]]+\]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/** 当 snapshot 文本前后相同但页面存在页签/导航高亮变化时，补充读取真实 DOM 激活态避免误判。 */
+function verifyClickActionEffectViaDom(agent: BrowserAgent, target: string): ClickDomVerificationResult {
+  const targetLiteral = JSON.stringify(target);
+  const script = `(() => {
+    const normalize = (value) => String(value || '')
+      .replace(/\\s+/g, '')
+      .replace(/[：:]/g, '')
+      .toLowerCase();
+    const target = normalize(${targetLiteral});
+    if (!target) {
+      return JSON.stringify({ matched: 0, active: false });
+    }
+    const selector = [
+      'a',
+      'button',
+      '[role="tab"]',
+      '[role="link"]',
+      '[role="button"]',
+      '[role="menuitem"]',
+      '[role="option"]',
+      '[aria-controls]',
+      '[aria-selected]',
+      '[aria-current]',
+      '.ant-tabs-tab',
+      '.el-tabs__item',
+      '[tabindex]',
+    ].join(',');
+    const matches = [...document.querySelectorAll(selector)].filter((element) => {
+      const text = normalize(
+        element.textContent
+        || element.getAttribute('aria-label')
+        || element.getAttribute('title')
+        || element.getAttribute('value')
+        || '',
+      );
+      return text && (text.includes(target) || target.includes(text));
+    });
+    const activeLike = /(^|[\\s_-])(active|selected|current|checked|open)([\\s_-]|$)/i;
+    const isActive = (element) => {
+      if (!(element instanceof Element)) {
+        return false;
+      }
+      const scope = [element, element.parentElement, element.closest('[role="tablist"], .ant-tabs, .el-tabs, nav')].filter(Boolean);
+      return scope.some((candidate) => {
+        if (!(candidate instanceof Element)) {
+          return false;
+        }
+        if (
+          candidate.getAttribute('aria-selected') === 'true'
+          || candidate.getAttribute('aria-current') === 'page'
+          || candidate.getAttribute('aria-current') === 'true'
+          || candidate.getAttribute('aria-pressed') === 'true'
+          || candidate.getAttribute('aria-expanded') === 'true'
+          || candidate.getAttribute('aria-checked') === 'true'
+          || candidate.getAttribute('data-state') === 'active'
+          || candidate.getAttribute('data-status') === 'active'
+        ) {
+          return true;
+        }
+        const tokens = [
+          candidate.className,
+          candidate.getAttribute('data-state'),
+          candidate.getAttribute('data-status'),
+        ].filter(Boolean).join(' ');
+        return activeLike.test(tokens);
+      });
+    };
+    return JSON.stringify({
+      matched: matches.length,
+      active: matches.some((element) => isActive(element)),
+    });
+  })()`;
+
+  return parseClickDomVerification(agent.evaluate(script));
+}
+
+/** 宽容解析 eval 输出，避免浏览器侧异常把点击验证直接打崩。 */
+function parseClickDomVerification(raw: string): ClickDomVerificationResult {
+  try {
+    const decoded = JSON.parse(raw.trim()) as unknown;
+    const parsed = (typeof decoded === 'string'
+      ? JSON.parse(decoded)
+      : decoded) as Partial<ClickDomVerificationResult>;
+    return {
+      matched: typeof parsed.matched === 'number' ? parsed.matched : 0,
+      active: parsed.active === true,
+    };
+  } catch {
+    return { matched: 0, active: false };
+  }
 }

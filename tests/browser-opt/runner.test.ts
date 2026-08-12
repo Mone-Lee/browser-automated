@@ -839,6 +839,33 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps[0].actionOutput).toContain('click dom 商品类目 -> 请选择');
   });
 
+  it('accepts tab clicks when DOM confirms the target entered an active state', async () => {
+    const outputDir = makeTempDir();
+    const tabSnapshot = '- link "规格与价格" [ref=e1]';
+    const evaluate = vi.fn(() => JSON.stringify(JSON.stringify({ matched: 1, active: true })));
+    const agent = buildAgent({
+      evaluate,
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson(tabSnapshot, { e1: { role: 'link', name: '规格与价格' } }),
+        snapshotJson(tabSnapshot, { e1: { role: 'link', name: '规格与价格' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 点击“规格与价格”', {
+      outputDir,
+    });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e1');
+    expect(evaluate).toHaveBeenCalledTimes(1);
+    expect((evaluate.mock.calls[0]?.[0] as string)).toContain('[role="tab"]');
+    expect((evaluate.mock.calls[0]?.[0] as string)).toContain('"规格与价格"');
+    expect((evaluate.mock.calls[0]?.[0] as string)).toContain('[\\s_-]');
+    expect(result.report.steps[0].verification).toContain('已通过 DOM 确认目标进入激活态：规格与价格');
+  });
+
   it('uses DOM fallback for field inputs when snapshot omits the textbox ref', async () => {
     const outputDir = makeTempDir();
     const evaluate = vi.fn(() => JSON.stringify({ found: true, filled: true, targetText: '商品标题' }));
