@@ -19,13 +19,12 @@ import {
   extractBrowserOptUrl,
   findTextboxRef,
   isHighImpactInstruction,
-  parseDeterministicAction,
   renderMarkdownReport,
   resolveOutputDir,
   splitBrowserOptSteps,
   summarizeSnapshot,
 } from '../utils.js';
-import { captureSettledSnapshot, captureTransientSnapshot, isAboutBlankOpen } from './evidence.js';
+import { captureSettledSnapshot, isAboutBlankOpen } from './evidence.js';
 import {
   resumeFromHandoff,
   saveAuthenticatedHandoffState,
@@ -35,7 +34,6 @@ import {
   triggerLoginHandoff,
 } from './handoff.js';
 import { executeStep } from './step-executor.js';
-import { reconcileDeterministicInstruction } from './actions/index.js';
 
 export {
   browserOptTemplate,
@@ -203,31 +201,6 @@ export class BrowserOptRunner {
       }
 
       for (let index = 0; index < steps.length && !handoffTriggered; index++) {
-        if (isHighImpactInstruction(steps[index])) {
-          if (hasFailedStep) {
-            logs.push('deferred-step-retry: 提交前重新执行可能依赖后续配置才出现的失败步骤。');
-            for (const failedResult of stepResults.filter((result) => !result.passed && !result.handoffTriggered)) {
-              const retried = await executeStep(agent, outputDir, failedResult.index, failedResult.instruction, {
-                useAgentChat: options.useAgentChat ?? false,
-                evidencePrefix: `${String(failedResult.index).padStart(2, '0')}-deferred`,
-                authStateSavePath: options.authStateSavePath,
-                retryAuthStateFallback,
-                handoff: options.handoff,
-              });
-              const resultIndex = stepResults.indexOf(failedResult);
-              stepResults[resultIndex] = retried;
-              screenshots.push(retried.beforeScreenshotPath, retried.afterScreenshotPath);
-              logs.push(...retried.logs);
-            }
-            hasFailedStep = stepResults.some((result) => !result.passed && !result.handoffTriggered);
-          }
-
-          if (!hasFailedStep) {
-            const reconciliationFailed = await reconcileFormState(agent, stepResults, outputDir, logs);
-            hasFailedStep = reconciliationFailed;
-          }
-        }
-
         if (hasFailedStep && isHighImpactInstruction(steps[index])) {
           fatalError = `已阻止高影响步骤 ${index + 1}：前置步骤失败，未执行“${steps[index]}”。`;
           skippedSteps.push({
@@ -306,57 +279,6 @@ export class BrowserOptRunner {
       report,
     };
   }
-}
-
-/** 高影响操作前复核最终表单状态，只重放同一字段最后一次成功的输入或选择意图。 */
-async function reconcileFormState(
-  agent: BrowserAgent,
-  stepResults: BrowserOptStepResult[],
-  outputDir: string,
-  logs: string[],
-): Promise<boolean> {
-  const candidates = stepResults
-    .filter((result) => result.passed)
-    .map((result) => ({ result, action: parseDeterministicAction(result.instruction) }))
-    .filter(({ action }) => action?.type === 'fill' || action?.type === 'select-option');
-  if (candidates.length === 0) {
-    return false;
-  }
-  const lastIntentByField = new Map<string, BrowserOptStepResult>();
-  for (const candidate of candidates) {
-    const action = candidate.action;
-    if (!action || (action.type !== 'fill' && action.type !== 'select-option')) continue;
-    lastIntentByField.set(`${action.type}:${action.rowNumber ?? 0}:${action.field ?? ''}`, candidate.result);
-  }
-
-  let snapshot = captureTransientSnapshot(agent);
-  for (const candidate of candidates) {
-    const action = candidate.action;
-    if (!action || (action.type !== 'fill' && action.type !== 'select-option')) continue;
-    const key = `${action.type}:${action.rowNumber ?? 0}:${action.field ?? ''}`;
-    if (lastIntentByField.get(key) !== candidate.result) continue;
-
-    const reconciled = await reconcileDeterministicInstruction(
-      agent,
-      candidate.result.instruction,
-      snapshot,
-      outputDir,
-    );
-    if (!reconciled.applicable) continue;
-    if (!reconciled.passed) {
-      const message = `提交前状态复核失败：步骤 ${candidate.result.index} ${reconciled.message ?? ''}`.trim();
-      candidate.result.passed = false;
-      candidate.result.error = message;
-      candidate.result.logs.push(`state-reconcile-failed: ${message}`);
-      logs.push(`state-reconcile-failed: ${message}`);
-      return true;
-    }
-    if (reconciled.changed) {
-      logs.push(`state-reconcile-restored: 步骤 ${candidate.result.index} ${candidate.result.instruction}`);
-      snapshot = captureTransientSnapshot(agent);
-    }
-  }
-  return false;
 }
 
 /** 记录本轮浏览器登录态来源，便于排查默认 state 与 profile 导入是否命中。 */

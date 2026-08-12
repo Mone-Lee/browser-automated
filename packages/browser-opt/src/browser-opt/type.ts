@@ -72,7 +72,6 @@ export interface BrowserOptRunnerOptions {
 
 export interface BrowserOptStepExecutionOptions {
   useAgentChat: boolean;
-  evidencePrefix?: string;
   alreadyOpenedUrl?: string;
   authStateSavePath?: string;
   retryAuthStateFallback?: () => BrowserAgent | null;

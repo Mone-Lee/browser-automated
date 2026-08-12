@@ -11,19 +11,10 @@ import { executeOpenAction } from './utils/open-action.js';
 import { executeSelectOptionAction, verifySelectOptionActionEffect } from './utils/select-option-action.js';
 import { executeTableRowCheckboxAction, verifyTableRowCheckboxActionEffect } from './utils/table-row-checkbox-action.js';
 import { executeUploadAction, verifyUploadActionEffect } from './utils/upload-action.js';
-import { captureTransientSnapshot } from '../evidence.js';
 
 interface ClickDomVerificationResult {
   matched: number;
   active: boolean;
-}
-
-export interface ReconcileActionResult {
-  applicable: boolean;
-  passed: boolean;
-  changed: boolean;
-  output?: string;
-  message?: string;
 }
 
 /** 将自然语言动作直接映射到确定性命令，避免默认依赖 agent-browser chat。 */
@@ -138,49 +129,6 @@ export function verifyDeterministicActionEffect(
   }
 
   return { passed: false, message: '动作缺少执行后校验。' };
-}
-
-/** 提交前复核可幂等重放的表单状态，并只在页面已回退时重新执行对应输入或选择。 */
-export async function reconcileDeterministicInstruction(
-  agent: BrowserAgent,
-  instruction: string,
-  snapshot: SnapshotEvidence,
-  outputDir: string,
-): Promise<ReconcileActionResult> {
-  const action = parseDeterministicAction(instruction);
-  if (!action || (action.type !== 'fill' && action.type !== 'select-option')) {
-    return { applicable: false, passed: true, changed: false };
-  }
-
-  const current = verifyDeterministicActionEffect(agent, action, snapshot, snapshot, '');
-  if (current.passed) {
-    return { applicable: true, passed: true, changed: false, message: current.message };
-  }
-
-  try {
-    const output = await executeDeterministicInstruction(agent, instruction, snapshot, outputDir, {
-      allowViewportSearch: true,
-    });
-    if (!output) {
-      return { applicable: true, passed: false, changed: false, message: '无法重新执行确定性动作' };
-    }
-    const settledSnapshot = captureTransientSnapshot(agent);
-    const verified = verifyDeterministicActionEffect(agent, action, snapshot, settledSnapshot, output);
-    return {
-      applicable: true,
-      passed: verified.passed,
-      changed: true,
-      output,
-      message: verified.message,
-    };
-  } catch (error) {
-    return {
-      applicable: true,
-      passed: false,
-      changed: false,
-      message: error instanceof Error ? error.message : String(error),
-    };
-  }
 }
 
 /** 比较点击前后页面语义时忽略每次 snapshot 都可能变化的临时 ref。 */

@@ -4267,7 +4267,7 @@ describe('BrowserOptRunner', () => {
     expect(result.report.logs.join('\n')).toContain('前置步骤失败');
   });
 
-  it('retries a deferred ordinary step after later configuration reveals its target', async () => {
+  it('does not revisit a failed step after later configuration reveals its target', async () => {
     const outputDir = makeTempDir();
     const agent = buildAgent({
       snapshots: [
@@ -4276,10 +4276,6 @@ describe('BrowserOptRunner', () => {
         snapshotJson('配置尚未完成'),
         snapshotJson('before loading', { e1: { role: 'button', name: '加载配置' } }),
         snapshotJson('ready', { e1: { role: 'button', name: '提交发布' } }),
-        snapshotJson('ready'),
-        snapshotJson('ready'),
-        snapshotJson('ready', { e1: { role: 'button', name: '提交发布' } }),
-        snapshotJson('submitted'),
       ],
     });
     const runner = new BrowserOptRunner(makeFactory(agent));
@@ -4289,15 +4285,17 @@ describe('BrowserOptRunner', () => {
       { outputDir },
     );
 
-    expect(result.passed).toBe(true);
-    expect(result.report.steps).toHaveLength(3);
-    expect(result.report.steps[0].passed).toBe(true);
-    expect(result.report.steps[0].beforeScreenshotPath).toContain('01-deferred-before.png');
-    expect(result.report.logs.join('\n')).toContain('deferred-step-retry');
+    expect(result.passed).toBe(false);
+    expect(result.report.steps).toHaveLength(2);
+    expect(result.report.steps[0].passed).toBe(false);
+    expect(result.report.steps[1].passed).toBe(true);
+    expect(result.report.skippedSteps).toHaveLength(1);
+    expect(result.report.logs.join('\n')).not.toContain('deferred-step-retry');
+    expect((agent.snapshotJson as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(5);
     expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e1');
   });
 
-  it('restores an earlier switch state before a high-impact action', async () => {
+  it('does not replay earlier field actions before a high-impact action', async () => {
     const outputDir = makeTempDir();
     let fukaEnabled = false;
     let triggerValue = '';
@@ -4320,9 +4318,6 @@ describe('BrowserOptRunner', () => {
         snapshotJson('- switch "福卡抵扣" [checked=true, ref=e1]'),
         snapshotJson('- textbox "触发器" [ref=e2]'),
         snapshotJson('- textbox "触发器" [ref=e2]: x'),
-        snapshotJson('before reconcile'),
-        snapshotJson('after switch restore'),
-        snapshotJson('reconciled'),
         snapshotJson('before submit', { e3: { role: 'button', name: '提交发布' } }),
         snapshotJson('submitted'),
       ],
@@ -4340,8 +4335,10 @@ describe('BrowserOptRunner', () => {
     );
 
     expect(result.passed).toBe(true);
-    expect(fukaEnabled).toBe(true);
-    expect(result.report.logs.join('\n')).toContain('state-reconcile-restored: 步骤 1 福卡抵扣切换为开启');
+    expect(fukaEnabled).toBe(false);
+    expect(result.report.logs.join('\n')).not.toContain('state-reconcile');
+    expect((agent.snapshotJson as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(7);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
   });
 
   it('uses the already opened dropdown before reopening the field', async () => {

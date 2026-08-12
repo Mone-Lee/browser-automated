@@ -39,7 +39,7 @@ export async function executeStep(
   instruction: string,
   options: BrowserOptStepExecutionOptions,
 ): Promise<BrowserOptStepResult> {
-  const prefix = options.evidencePrefix ?? String(index).padStart(2, '0');
+  const prefix = String(index).padStart(2, '0');
   const beforeSnapshotPath = path.join(outputDir, `${prefix}-before.snapshot.json`);
   const afterSnapshotPath = path.join(outputDir, `${prefix}-after.snapshot.json`);
   const retrySnapshotPath = path.join(outputDir, `${prefix}-retry.snapshot.json`);
