@@ -121,7 +121,7 @@ browser-opt start --workflow-id "<matched.id>" --json
 browser-opt status --run-id "<runId>" --json
 ```
 
-Poll `status` until it returns `PASS`, `FAIL`, or `HANDOFF`. When it returns `HANDOFF`, ask the user to finish the manual action and end the current turn normally. After the user replies `done`, restore the original runner and browser with:
+Poll `status` until it returns `PASS`, `FAIL`, or `HANDOFF`. `RUNNING` only means the original runner is still executing: continue polling and never infer a manual block, ask the user to act, or call `resume`. Only when `status` explicitly returns `HANDOFF`, ask the user to finish the reported manual action and end the current turn normally. After the user replies `done`, restore the original runner and browser with:
 
 ```bash
 browser-opt resume --run-id "<runId>" --json
