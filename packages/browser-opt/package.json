@@ -39,7 +39,7 @@
     "access": "public"
   },
   "peerDependencies": {
-    "agent-browser": "^0.33.1"
+    "agent-browser": ">=0.33.1 <0.35.0"
   },
   "peerDependenciesMeta": {
     "agent-browser": {
