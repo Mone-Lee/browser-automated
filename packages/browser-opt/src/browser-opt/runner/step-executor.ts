@@ -30,6 +30,7 @@ import {
 const ORDINARY_ACTION_ATTEMPTS = 2;
 const CLICK_TARGET_ATTEMPTS = 20;
 const FILL_TARGET_ATTEMPTS = 10;
+const UPLOAD_TARGET_ATTEMPTS = 10;
 
 /** 执行单个步骤，负责前后快照、动作重试、验证和步骤级日志记录。 */
 export async function executeStep(
@@ -345,7 +346,7 @@ function shouldRetryAction(
   return attempts < ORDINARY_ACTION_ATTEMPTS;
 }
 
-/** 点击与输入的等待次数按动作内部是否自带 500ms 探测进行折算，总等待约为 10 秒。 */
+/** 点击、输入与上传定位按动作内部探测开销设置等待次数，兼顾异步渲染与失败收敛速度。 */
 function targetRetryLimit(action: ReturnType<typeof parseDeterministicAction>): number {
   if (action?.type === 'fill') {
     return FILL_TARGET_ATTEMPTS;
@@ -353,12 +354,15 @@ function targetRetryLimit(action: ReturnType<typeof parseDeterministicAction>): 
   if (action?.type === 'click') {
     return CLICK_TARGET_ATTEMPTS;
   }
+  if (action?.type === 'upload') {
+    return UPLOAD_TARGET_ATTEMPTS;
+  }
   return ORDINARY_ACTION_ATTEMPTS;
 }
 
 /** 仅把定位阶段的目标缺失视为可等待状态，避免业务执行错误被重复操作。 */
 function isMissingActionTarget(error: string): boolean {
-  return /^无法找到(?:可点击元素|输入框)：/.test(error);
+  return /^无法找到(?:可点击元素|输入框|上传控件)：/.test(error);
 }
 
 /** 确定性动作已确认业务上不可达时不再重试，避免把不可选状态误当异步未完成。 */

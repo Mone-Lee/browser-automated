@@ -61,12 +61,32 @@ export function captureSettledSnapshot(
     }
     snapshot = recoverNonBlankTab(agent, snapshot, filePath, logs, options.targetUrl);
   }
+  for (let attempt = 1; attempt <= 5 && isDismissOnlyInitialSnapshot(snapshot); attempt += 1) {
+    logs.push(`open-content-wait ${attempt}: 页面当前仅渲染了提示按钮，等待业务内容完成挂载。`);
+    agent.waitMs(500);
+    snapshot = captureSnapshot(agent, filePath);
+  }
   return snapshot;
 }
 
 export function isBlankInitialSnapshot(snapshot: SnapshotEvidence): boolean {
   const text = snapshot.text.trim();
   return snapshot.nodeCount === 0 && text === '(no interactive elements)';
+}
+
+/** 页面首屏只出现通用提示按钮时继续等待，避免把早于业务主体挂载的浮层当作稳定页面。 */
+function isDismissOnlyInitialSnapshot(snapshot: SnapshotEvidence): boolean {
+  if (snapshot.nodeCount > 2) {
+    return false;
+  }
+
+  const lines = snapshot.text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines.length > 0 && lines.every((line) => (
+    /^- button ["“](?:我知道了|知道了|关闭|Got it|Close)["”](?:\s+\[[^\]]+\])*$/i.test(line)
+  ));
 }
 
 /** 空白活动页持续不退场时，尝试切换到同一会话中已经打开的业务页或登录页。 */

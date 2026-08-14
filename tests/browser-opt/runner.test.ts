@@ -4169,8 +4169,8 @@ describe('BrowserOptRunner', () => {
 
   it('waits for an asynchronously rendered click target beyond the ordinary retry', async () => {
     const outputDir = makeTempDir();
-    const loadingSnapshot = snapshotJson('- button "我知道了" [ref=e1]', {
-      e1: { role: 'button', name: '我知道了' },
+    const loadingSnapshot = snapshotJson('- generic "页面加载中" [ref=e1]', {
+      e1: { role: 'generic', name: '页面加载中' },
     });
     const readySnapshot = snapshotJson('- link "规格与价格" [ref=e2]', {
       e2: { role: 'link', name: '规格与价格' },
@@ -4194,6 +4194,85 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps[0].attempts).toBe(3);
     expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e2');
     expect(result.report.steps[0].logs.join('\n')).toContain('target-wait');
+  });
+
+  it('waits for business content when the initial page only rendered an acknowledgement button', async () => {
+    const outputDir = makeTempDir();
+    const promptOnlySnapshot = snapshotJson('- button "我知道了" [ref=e1]', {
+      e1: { role: 'button', name: '我知道了' },
+    });
+    const readySnapshot = snapshotJson('- heading "新增商品" [ref=e2]\n- button "我知道了" [ref=e3]', {
+      e2: { role: 'heading', name: '新增商品' },
+      e3: { role: 'button', name: '我知道了' },
+    });
+    const dismissedSnapshot = snapshotJson('- heading "新增商品" [ref=e2]', {
+      e2: { role: 'heading', name: '新增商品' },
+    });
+    const agent = buildAgent({
+      snapshots: [
+        promptOnlySnapshot,
+        promptOnlySnapshot,
+        readySnapshot,
+        readySnapshot,
+        dismissedSnapshot,
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com/goods/create。\n\n目标：\n1. 点击“我知道了”。', {
+      outputDir,
+    });
+
+    expect(result.passed).toBe(true);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e3');
+    expect(result.report.logs.join('\n')).toContain('open-content-wait 1');
+  });
+
+  it('keeps waiting when an upload input appears just after the ordinary retry window', async () => {
+    const outputDir = makeTempDir();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('image-bytes', { status: 200 })));
+    let lookupCount = 0;
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before upload'),
+      ],
+      evaluate: (script) => {
+        if (script.includes('const result = uploadHelper.findUploadInputByField')) {
+          lookupCount += 1;
+          return lookupCount >= 3
+            ? JSON.stringify({ found: true, selector: '[data-browser-opt-upload-id="late-upload"]' })
+            : JSON.stringify({ found: false });
+        }
+        if (script.includes('uploadHelper.revealTableUploadInputByField')) {
+          return JSON.stringify({ found: false, revealed: false });
+        }
+        if (script.includes('uploadHelper.diagnoseUploadByField')) {
+          return JSON.stringify({ diagnostic: { inputCount: 0 } });
+        }
+        return JSON.stringify({
+          found: true,
+          pending: false,
+          failed: false,
+          completed: true,
+          completedCount: 1,
+        });
+      },
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/goods/create。\n\n目标：\n1. 上传“商品白底图”，图片URL为“https://example.com/product.png”。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(true);
+    expect(result.report.steps[0].attempts).toBe(3);
+    expect((agent.upload as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
+      '[data-browser-opt-upload-id="late-upload"]',
+      [expect.stringContaining(path.join('uploads', 'product.png'))],
+    );
+    expect(result.report.steps[0].logs.join('\n')).toContain('target-wait 2');
   });
 
   it('returns FAIL and reports verification errors', async () => {
