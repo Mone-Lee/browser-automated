@@ -6,6 +6,7 @@ import type { AgentBrowserJsonResult } from '#browser-core/agent';
 import type { BrowserAgent } from '#browser-core/agent';
 
 export type BrowserOptStatus = 'PASS' | 'FAIL' | 'HANDOFF';
+export type BrowserOptFailureKind = 'execution' | 'business-validation';
 
 export interface BrowserOptStepResult {
   index: number;
@@ -20,6 +21,7 @@ export interface BrowserOptStepResult {
   actionOutput?: string;
   verification?: string;
   error?: string;
+  failureKind?: BrowserOptFailureKind;
   logs: string[];
 }
 

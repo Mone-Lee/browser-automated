@@ -3515,6 +3515,73 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps[0].actionOutput).toContain('upload settled 商品白底图');
   });
 
+  it('accepts a new preview when a single-slot upload removes its input after completion', async () => {
+    const outputDir = makeTempDir();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('gif-bytes', { status: 200 })));
+    const beforeUpload = snapshotJson('- button "delete" [ref=e1]\n- generic "上传动态图" [ref=e2]', {
+      e2: { role: 'file', name: '上传动态图' },
+    });
+    const afterUpload = snapshotJson('- button "delete" [ref=e3]\n- button "delete" [ref=e4]', {
+      e3: { role: 'button', name: 'delete' },
+      e4: { role: 'button', name: 'delete' },
+    });
+    const agent = buildAgent({
+      evaluate: (script) => script.includes('uploadHelper.getUploadStateByField')
+        ? JSON.stringify({ found: false, pending: false, failed: false, completed: false })
+        : JSON.stringify({ found: false }),
+      snapshots: [snapshotJson('open'), beforeUpload, afterUpload, afterUpload],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/goods/create。\n\n目标：\n1. 上传“上传动态图”，图片URL为“https://example.com/product.gif”。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(true);
+    expect(result.report.steps[0].actionOutput).toContain('upload snapshot settled 上传动态图');
+    expect(result.report.steps[0].verification).toContain('新增预览确认上传成功');
+  });
+
+  it('reports the visible field validation message after an uploaded image is rejected', async () => {
+    const outputDir = makeTempDir();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('image-bytes', { status: 200 })));
+    let uploadStateChecks = 0;
+    const agent = buildAgent({
+      evaluate: (script) => {
+        if (!script.includes('uploadHelper.getUploadStateByField')) {
+          return JSON.stringify({ found: false });
+        }
+        uploadStateChecks += 1;
+        return uploadStateChecks === 1
+          ? JSON.stringify({ found: true, pending: false, failed: false, completed: true, completedCount: 1 })
+          : JSON.stringify({
+            found: false,
+            pending: false,
+            failed: true,
+            completed: false,
+            failureMessage: '商品白底图片必须为白底产品图，请重新上传',
+          });
+      },
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before upload', { e3: { role: 'file', name: '上传白底图' } }),
+        snapshotJson('after upload'),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/goods/create。\n\n目标：\n1. 上传“上传白底图”，图片URL为“https://example.com/product.png”。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(false);
+    expect(result.report.steps[0].error).toBe(
+      '目标字段显示上传失败：上传白底图：商品白底图片必须为白底产品图，请重新上传',
+    );
+  });
+
   it('fails without retrying the upload when its loading state never finishes', async () => {
     const outputDir = makeTempDir();
     vi.stubGlobal('fetch', vi.fn(async () => new Response('image-bytes', { status: 200 })));
@@ -4345,6 +4412,56 @@ describe('BrowserOptRunner', () => {
     expect(result.report.skippedSteps).toHaveLength(1);
     expect(result.report.logs.join('\n')).toContain('high-impact-action-blocked');
     expect(result.report.logs.join('\n')).toContain('前置步骤失败');
+  });
+
+  it('allows a high-impact action after a page business validation rejection', async () => {
+    const outputDir = makeTempDir();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('image-bytes', { status: 200 })));
+    let uploadStateChecks = 0;
+    const confirmSnapshot = snapshotJson('- button "确认" [ref=e4]', {
+      e4: { role: 'button', name: '确认' },
+    });
+    const agent = buildAgent({
+      evaluate: (script) => {
+        if (!script.includes('uploadHelper.getUploadStateByField')) {
+          return JSON.stringify({ found: false });
+        }
+        uploadStateChecks += 1;
+        return uploadStateChecks === 1
+          ? JSON.stringify({ found: true, pending: false, failed: false, completed: true, completedCount: 1 })
+          : JSON.stringify({
+            found: false,
+            pending: false,
+            failed: true,
+            completed: false,
+            failureMessage: '商品白底图片必须为白底产品图，请重新上传',
+          });
+      },
+      snapshots: [
+        snapshotJson('open'),
+        snapshotJson('before upload', { e3: { role: 'file', name: '上传白底图' } }),
+        confirmSnapshot,
+        confirmSnapshot,
+        confirmSnapshot,
+        confirmSnapshot,
+        confirmSnapshot,
+        snapshotJson('确认后页面显示表单校验错误'),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run(
+      '测试 https://example.com/goods/create。\n\n目标：\n1. 上传“上传白底图”，图片URL为“https://example.com/product.png”。\n2. 点击“确认”按钮。',
+      { outputDir },
+    );
+
+    expect(result.passed).toBe(false);
+    expect(result.report.steps).toHaveLength(2);
+    expect(result.report.steps[0].failureKind).toBe('business-validation');
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e4');
+    expect(result.report.skippedSteps ?? []).toEqual([]);
+    expect(result.report.logs.join('\n')).toContain('business-validation-non-blocking');
+    expect(result.report.logs.join('\n')).not.toContain('high-impact-action-blocked');
   });
 
   it('does not revisit a failed step after later configuration reveals its target', async () => {

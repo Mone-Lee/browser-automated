@@ -4,7 +4,12 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { BrowserAgent } from '#browser-core/agent';
-import type { DeterministicAction, SnapshotEvidence, DeterministicExecutionOptions } from '../../../type.js';
+import type {
+  BrowserOptFailureKind,
+  DeterministicAction,
+  SnapshotEvidence,
+  DeterministicExecutionOptions,
+} from '../../../type.js';
 import { findUploadRef } from '../../../utils.js';
 import { captureTransientSnapshot } from '../../evidence.js';
 
@@ -25,6 +30,7 @@ interface UploadState {
   completed?: boolean;
   completedCount?: number;
   inputFilesCount?: number;
+  failureMessage?: string;
 }
 
 /** 执行上传动作，先展示可见上传区域，再使用快照 ref、隐藏 input 或长表单搜索结果上传。 */
@@ -85,7 +91,7 @@ export async function executeUploadAction(
   }
   const filePath = await prepareUploadFile(sources[0], outputDir);
   const output = agent.upload(ref, [filePath]);
-  const completionOutput = waitForUploadCompletion(agent, action.field, action.rowNumber, ref);
+  const completionOutput = waitForUploadCompletion(agent, action.field, action.rowNumber, ref, snapshot);
   return [
     ...searchOutput,
     `upload @${ref} ${filePath}`,
@@ -98,18 +104,29 @@ export async function executeUploadAction(
 export function verifyUploadActionEffect(
   agent: BrowserAgent,
   action: Extract<DeterministicAction, { type: 'upload' }>,
+  beforeSnapshot: SnapshotEvidence,
   afterSnapshot: SnapshotEvidence,
-): { passed: boolean; message: string } {
+  actionOutput: string,
+): { passed: boolean; message: string; failureKind?: BrowserOptFailureKind } {
   const expectedCount = action.sources?.length ?? 1;
   const state = getUploadState(agent, action.field, action.rowNumber, expectedCount);
   const rowLabel = action.rowNumber ? `第 ${action.rowNumber} 行` : '';
   const target = `${rowLabel}${action.field}`;
 
   if (state.failed) {
-    return { passed: false, message: `目标字段显示上传失败：${target}` };
+    const detail = state.failureMessage ? `：${state.failureMessage}` : '';
+    return {
+      passed: false,
+      message: `目标字段显示上传失败：${target}${detail}`,
+      failureKind: state.failureMessage ? 'business-validation' : 'execution',
+    };
   }
   if (state.completed && (state.completedCount ?? expectedCount) >= expectedCount) {
     return { passed: true, message: `已确认上传成功：${target}` };
+  }
+  if (actionOutput.includes('upload snapshot settled')
+    || snapshotShowsUploadCompletion(beforeSnapshot, afterSnapshot, action.field)) {
+    return { passed: true, message: `已通过上传槽位替换和新增预览确认上传成功：${target}` };
   }
   const normalizedSnapshot = afterSnapshot.text.replace(/\s+/g, '');
   const escapedField = action.field.replace(/\s+/g, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -153,7 +170,13 @@ async function executeBatchUploadAction(
 }
 
 /** 上传命令返回后等待目标字段出现明确成功态，并兼容只写入文件但未触发组件事件的页面。 */
-function waitForUploadCompletion(agent: BrowserAgent, field: string, rowNumber: number | undefined, ref: string): string {
+function waitForUploadCompletion(
+  agent: BrowserAgent,
+  field: string,
+  rowNumber: number | undefined,
+  ref: string,
+  beforeSnapshot?: SnapshotEvidence,
+): string {
   const waitLogs: string[] = [];
   let inputChangeAttempted = false;
   agent.waitMs(300);
@@ -161,6 +184,9 @@ function waitForUploadCompletion(agent: BrowserAgent, field: string, rowNumber: 
   for (let attempt = 1; attempt <= 20; attempt += 1) {
     const state = getUploadState(agent, field, rowNumber, 1);
     if (state.failed) {
+      if (state.failureMessage) {
+        throw new Error(`页面业务校验拒绝：${field}（${state.failureMessage}）`);
+      }
       throw new Error(`上传失败：${field}`);
     }
     if (state.completed === true) {
@@ -175,12 +201,40 @@ function waitForUploadCompletion(agent: BrowserAgent, field: string, rowNumber: 
         continue;
       }
     }
+    if (beforeSnapshot) {
+      const currentSnapshot = captureTransientSnapshot(agent);
+      if (snapshotShowsUploadCompletion(beforeSnapshot, currentSnapshot, field)) {
+        return [...waitLogs, `upload snapshot settled ${field}`].join('\n');
+      }
+    }
 
     waitLogs.push(`upload wait ${attempt} ${field}`);
     agent.waitMs(500);
   }
 
   throw new Error(`等待上传完成超时：${field}`);
+}
+
+/** 上传组件达到数量上限后可能移除 file input，以槽位文案消失且预览操作增加作为替代成功证据。 */
+function snapshotShowsUploadCompletion(
+  beforeSnapshot: SnapshotEvidence,
+  afterSnapshot: SnapshotEvidence,
+  field: string,
+): boolean {
+  const normalize = (value: string) => value.replace(/[\s：:，,。；*"'‘’“”]/g, '').toLowerCase();
+  const target = normalize(field);
+  if (!target || !normalize(beforeSnapshot.text).includes(target) || normalize(afterSnapshot.text).includes(target)) {
+    return false;
+  }
+
+  return countSnapshotUploadPreviewActions(afterSnapshot.text) > countSnapshotUploadPreviewActions(beforeSnapshot.text);
+}
+
+/** 统计上传预览常见的查看、预览与删除操作，用数量变化避免依赖某个组件库的 class。 */
+function countSnapshotUploadPreviewActions(text: string): number {
+  return text.split('\n').filter((line) => (
+    /^\s*-\s+(?:button|link)\s+["“](?:delete|删除|eye|查看|预览)["”]/i.test(line)
+  )).length;
 }
 
 /** 仅对已注入文件的隐藏 input 补发原生事件，解决部分 Ant Upload 未响应 CDP 文件写入的问题。 */
@@ -585,10 +639,34 @@ function getUploadStateByField(field, rowNumber = null, expectedCount = 1) {
   const tableScopes = browserOptUploadFieldHeaders(field)
     .flatMap((header) => browserOptUploadTableColumnCells(header, rowNumber));
   const uniqueTableScopes = [...new Set(tableScopes)].slice(0, expectedCount);
-  if ((!targets.found || targets.selectors.length === 0) && uniqueTableScopes.length === 0) {
-    return { found: false, pending: false, failed: false, inputFilesCount: 0 };
-  }
   const fieldText = normalizeBrowserOptUploadText(field);
+  const fieldKey = fieldText.replace(/^上传/, '').replace(/图片/g, '图');
+  const visibleErrorMessages = [...document.querySelectorAll([
+    '.ant-form-item-explain-error',
+    '.ant-form-item-extra',
+    '.el-form-item__error',
+    '[class*="upload-error"]',
+    '[class*="upload-fail"]',
+    '[class*="validate"]',
+    '[class*="error"]'
+  ].join(','))]
+    .filter(browserOptUploadVisible)
+    .map((element) => String(element.textContent || '').trim())
+    .filter(Boolean);
+  const failureMessage = visibleErrorMessages.find((message) => {
+    const normalized = normalizeBrowserOptUploadText(message).replace(/图片/g, '图');
+    return fieldKey && normalized.includes(fieldKey)
+      && /上传失败|上传错误|重新上传|不符合|必须|仅支持|格式错误/.test(message);
+  });
+  if ((!targets.found || targets.selectors.length === 0) && uniqueTableScopes.length === 0) {
+    return {
+      found: false,
+      pending: false,
+      failed: Boolean(failureMessage),
+      failureMessage,
+      inputFilesCount: 0
+    };
+  }
   const inputs = (targets.selectors || []).map((selector) => document.querySelector(selector)).filter(Boolean);
   const scopes = uniqueTableScopes.length > 0 ? uniqueTableScopes : inputs.map((input) => {
     const chain = browserOptUploadAncestorChain(input);
@@ -601,7 +679,7 @@ function getUploadStateByField(field, rowNumber = null, expectedCount = 1) {
   const states = scopes.map((scope, index) => {
     const input = inputs[index] || inputs.find((candidate) => scope.contains(candidate));
     const visibleMatches = (selectors) => [...scope.querySelectorAll(selectors)].filter(browserOptUploadVisible);
-    const failed = visibleMatches([
+    const failed = Boolean(failureMessage) || visibleMatches([
       '.ant-upload-list-item-error',
       '.ant-progress-status-exception',
       '.el-upload-list__item.is-fail',
@@ -637,6 +715,7 @@ function getUploadStateByField(field, rowNumber = null, expectedCount = 1) {
     found: true,
     pending: states.some((state) => state.pending),
     failed: states.some((state) => state.failed),
+    failureMessage,
     completed: completedCount >= expectedCount,
     completedCount,
     inputFilesCount: states.reduce((sum, state) => sum + (state.inputFilesCount || 0), 0),
@@ -746,6 +825,7 @@ function parseEvalJson(raw: string): {
   revealed?: boolean;
   dispatched?: boolean;
   files?: number;
+  failureMessage?: string;
   diagnostic?: unknown;
 } {
   const decoded = JSON.parse(raw.trim()) as unknown;

@@ -2,7 +2,12 @@
  * browser-opt 确定性动作执行器，负责解析自然语言动作并分发到对应 action handler。
  */
 import type { BrowserAgent } from '#browser-core/agent';
-import type { DeterministicAction, SnapshotEvidence, DeterministicExecutionOptions } from '../../type.js';
+import type {
+  BrowserOptFailureKind,
+  DeterministicAction,
+  SnapshotEvidence,
+  DeterministicExecutionOptions,
+} from '../../type.js';
 import { parseDeterministicAction } from '../../utils.js';
 import { executeClickAction } from './utils/click-action.js';
 import { executeFillAction, verifyFillActionEffect } from './utils/fill-action.js';
@@ -15,6 +20,12 @@ import { executeUploadAction, verifyUploadActionEffect } from './utils/upload-ac
 interface ClickDomVerificationResult {
   matched: number;
   active: boolean;
+}
+
+interface DeterministicActionVerificationResult {
+  passed: boolean;
+  message: string;
+  failureKind?: BrowserOptFailureKind;
 }
 
 /** 将自然语言动作直接映射到确定性命令，避免默认依赖 agent-browser chat。 */
@@ -76,7 +87,7 @@ export function verifyDeterministicActionEffect(
   beforeSnapshot: SnapshotEvidence,
   afterSnapshot: SnapshotEvidence,
   actionOutput: string,
-): { passed: boolean; message: string } {
+): DeterministicActionVerificationResult {
   if (action.type === 'open' || action.type === 'press-key') {
     return { passed: true, message: '该动作不要求页面效果校验。' };
   }
@@ -94,7 +105,7 @@ export function verifyDeterministicActionEffect(
   }
 
   if (action.type === 'upload') {
-    return verifyUploadActionEffect(agent, action, afterSnapshot);
+    return verifyUploadActionEffect(agent, action, beforeSnapshot, afterSnapshot, actionOutput);
   }
 
   if (action.type === 'click') {

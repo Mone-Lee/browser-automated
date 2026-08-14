@@ -72,7 +72,7 @@ export class BrowserOptRunner {
     let handoffTriggered = false;
     let fatalError: string | undefined;
     let authStateFallbackUsed = false;
-    let hasFailedStep = false;
+    let hasBlockingFailedStep = false;
     logAuthStateMode(logs, options);
     const openedWithProfile = Boolean(options.profile && !options.statePath);
     let agent = this.agentFactory({
@@ -201,7 +201,7 @@ export class BrowserOptRunner {
       }
 
       for (let index = 0; index < steps.length && !handoffTriggered; index++) {
-        if (hasFailedStep && isHighImpactInstruction(steps[index])) {
+        if (hasBlockingFailedStep && isHighImpactInstruction(steps[index])) {
           fatalError = `已阻止高影响步骤 ${index + 1}：前置步骤失败，未执行“${steps[index]}”。`;
           skippedSteps.push({
             index: index + 1,
@@ -226,7 +226,11 @@ export class BrowserOptRunner {
           handoffTriggered = true;
         }
         if (!result.passed && !result.handoffTriggered) {
-          hasFailedStep = true;
+          if (result.failureKind === 'business-validation') {
+            logs.push(`business-validation-non-blocking: 步骤 ${index + 1} 由页面业务规则拒绝，允许继续执行后续操作。`);
+          } else {
+            hasBlockingFailedStep = true;
+          }
           if (isHighImpactInstruction(steps[index])) {
             fatalError = `高影响步骤 ${index + 1} 执行失败，已停止后续操作。`;
             logs.push(`high-impact-action-failed: ${fatalError}`);

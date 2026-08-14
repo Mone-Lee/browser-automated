@@ -234,6 +234,7 @@ export async function executeStep(
       afterScreenshotPath,
       actionOutput,
       error: actionError,
+      failureKind: classifyFailureKind(actionError),
       logs,
     };
   }
@@ -260,6 +261,7 @@ export async function executeStep(
         actionOutput,
         verification: actionVerification.message,
         error: actionVerification.message,
+        failureKind: actionVerification.failureKind ?? 'execution',
         logs,
       };
     }
@@ -334,6 +336,11 @@ export async function executeStep(
   };
 }
 
+/** 页面明确返回的表单业务校验属于非阻断失败，其余错误继续按执行失败保护后续高影响操作。 */
+function classifyFailureKind(error: string): BrowserOptStepResult['failureKind'] {
+  return error.startsWith('页面业务校验拒绝：') ? 'business-validation' : 'execution';
+}
+
 /** 异步目标缺失时扩大等待窗口，其他动作错误仍保持一次普通重试。 */
 function shouldRetryAction(
   error: string,
@@ -369,6 +376,7 @@ function isMissingActionTarget(error: string): boolean {
 function isTerminalActionError(message: string): boolean {
   return message.startsWith('日期不可选：')
     || message.startsWith('上传失败：')
+    || message.startsWith('页面业务校验拒绝：')
     || message.startsWith('等待上传完成超时：');
 }
 
