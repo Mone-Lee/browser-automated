@@ -27,6 +27,18 @@ function makeTempDir(): string {
   return dir;
 }
 
+/** 为 CLI 输出测试准备按时间排序的历史运行产物。 */
+function createOldArtifactRuns(projectDir: string, count: number): string[] {
+  return Array.from({ length: count }, (_, index) => {
+    const runDir = path.join(projectDir, '.browser-opt', 'artifacts', `old-run-${String(index).padStart(2, '0')}`);
+    fs.mkdirSync(runDir, { recursive: true });
+    fs.writeFileSync(path.join(runDir, 'report.json'), '{}');
+    const modifiedAt = new Date(1_000 + index);
+    fs.utimesSync(runDir, modifiedAt, modifiedAt);
+    return runDir;
+  });
+}
+
 interface RunCliOptions {
   cwd?: string;
   useDefaultAuthStateDir?: boolean;
@@ -429,6 +441,7 @@ describe('browser-opt CLI', () => {
 
   it('resumes a detached Workflow handoff by run id across CLI processes', async () => {
     const projectDir = makeTempDir();
+    const oldArtifacts = createOldArtifactRuns(projectDir, 10);
     const workflowDir = path.join(projectDir, '.browser-opt', 'workflows');
     const saved = runCli([
       'browser-opt',
@@ -470,6 +483,8 @@ describe('browser-opt CLI', () => {
     const completed = await waitForDetachedRunStatus(projectDir, startedRun.runId, 'PASS');
     expect(String(completed.output)).toContain('人工操作完成，恢复 browser-opt 自动化执行。');
     expect(String(completed.output)).toContain('执行成功');
+    expect(String(completed.output)).toContain('产物清理建议');
+    expect(String(completed.output)).toContain(oldArtifacts[0]);
   }, 20_000);
 
   it('resumes a detached immediate flow by run id without opening a second browser session', async () => {
@@ -751,6 +766,52 @@ describe('browser-opt CLI', () => {
     expect(commands).not.toContain('auth-import');
     expect(commands).not.toContain('dashboard start');
     expect(fs.readdirSync(outputDir).some((entry) => fs.existsSync(path.join(outputDir, entry, 'report.json')))).toBe(true);
+  });
+
+  it('keeps success output unchanged when the current run brings artifacts to exactly ten', () => {
+    const projectDir = makeTempDir();
+    createOldArtifactRuns(projectDir, 9);
+
+    const result = runCli([
+      'browser-opt',
+      '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。',
+    ], {}, undefined, { cwd: projectDir, useDefaultAuthStateDir: true });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe('执行成功');
+  });
+
+  it('prints oldest-first cleanup advice after success even with a custom output directory', () => {
+    const projectDir = makeTempDir();
+    const outputDir = makeTempDir();
+    const oldArtifacts = createOldArtifactRuns(projectDir, 11);
+
+    const result = runCli([
+      'browser-opt',
+      '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。',
+      '--output-dir',
+      outputDir,
+    ], {}, undefined, { cwd: projectDir, useDefaultAuthStateDir: true });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('执行成功\n产物清理建议');
+    expect(result.stdout).toContain('运行产物 11 份，超过 10 份');
+    expect(result.stdout).toContain(oldArtifacts[0]);
+    expect(result.stdout).not.toContain(oldArtifacts[1]);
+  });
+
+  it('appends cleanup advice without hiding a failed run result', () => {
+    const projectDir = makeTempDir();
+    createOldArtifactRuns(projectDir, 10);
+
+    const result = runCli([
+      'browser-opt',
+      '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Missing"。',
+    ], {}, undefined, { cwd: projectDir, useDefaultAuthStateDir: true });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('Status: FAIL');
+    expect(result.stdout).toContain('产物清理建议');
   });
 
   it('uses a fresh browser session for each immediate flow execution', () => {

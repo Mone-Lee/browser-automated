@@ -4,10 +4,15 @@
  */
 import type { BrowserOptRunResult } from '../../browser-opt/type.js';
 import { collectFailedBrowserOptSteps, formatBrowserOptStepStatus } from '../../browser-opt/utils.js';
+import {
+  formatBrowserOptArtifactCleanupAdvice,
+  inspectBrowserOptArtifacts,
+} from './artifact-health.js';
 
 export function printBrowserOptResult(result: BrowserOptRunResult): void {
   if (result.passed) {
     console.log('执行成功');
+    printArtifactCleanupAdvice(result);
     return;
   }
 
@@ -61,5 +66,22 @@ export function printBrowserOptResult(result: BrowserOptRunResult): void {
     if (step.error) {
       console.log(`  Error: ${step.error}`);
     }
+  }
+
+  printArtifactCleanupAdvice(result);
+}
+
+/** 任务结果输出完成后检查项目临时产物，检查失败不得覆盖原始 PASS/FAIL。 */
+function printArtifactCleanupAdvice(result: BrowserOptRunResult): void {
+  const advice = inspectBrowserOptArtifacts(
+    process.cwd(),
+    result.report.outputDir,
+    process.env.BROWSER_OPT_HANDOFF_RUN_ID,
+  );
+  if (!advice) {
+    return;
+  }
+  for (const line of formatBrowserOptArtifactCleanupAdvice(advice)) {
+    console.log(line);
   }
 }

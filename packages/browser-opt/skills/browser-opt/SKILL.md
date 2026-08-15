@@ -337,5 +337,9 @@ Expected artifacts:
 
 The assistant response must be concise:
 
-- If the run succeeds, reply only with `执行成功`.
+- If the run succeeds and no cleanup advice is printed, reply only with `执行成功`.
+- If the CLI prints cleanup advice because the current project's `.browser-opt/artifacts/`
+  has more than 10 run directories or temporary artifacts exceed 500 MB, include that
+  advice after the result. It lists the oldest safe deletion candidates first and does not
+  mean any files were deleted. Never delete them unless the user explicitly asks.
 - If the run fails, summarize the failure status, report paths, screenshot paths, and failing step.
