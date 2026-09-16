@@ -1281,7 +1281,7 @@ describe('BrowserOptRunner', () => {
       data: { success: true, data: { origin: 'about:blank', refs: {}, snapshot: '(no interactive elements)' } },
     };
     const stateAgent = buildAgent({
-      snapshots: Array.from({ length: 12 }, () => blankSnapshot),
+      snapshots: Array.from({ length: 62 }, () => blankSnapshot),
       getUrl: () => 'about:blank',
       getTabs: () => [
         { active: true, tabId: 't1', title: 'about:blank', type: 'page', url: 'about:blank' },
