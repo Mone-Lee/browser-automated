@@ -15,6 +15,7 @@ import {
   findClickableRef,
   findSelectableFieldRef,
   findSelectableOption,
+  isHighImpactInstruction,
   isVerificationStep,
   parseDeterministicAction,
   readTextboxValue,
@@ -454,6 +455,11 @@ describe('browser-opt parsing', () => {
       type: 'click',
       target: '确认',
     });
+  });
+
+  it('does not treat a generic dialog confirmation as high impact', () => {
+    expect(isHighImpactInstruction('点击类目选择弹窗右下角的“确认”按钮。')).toBe(false);
+    expect(isHighImpactInstruction('点击“确认删除”按钮。')).toBe(true);
   });
 
   it('does not treat a prerequisite phrase as a verification assertion', () => {

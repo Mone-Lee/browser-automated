@@ -352,10 +352,10 @@ function parseTableCellAssignment(instruction: string): { field: string; value: 
     : null;
 }
 
-/** 判断步骤是否会触发导出、删除或提交等需要前置条件保护的高影响操作。 */
+/** 判断步骤是否会触发导出、删除或提交等需要前置条件保护的高影响操作，通用弹窗确认不单独视为高影响。 */
 export function isHighImpactInstruction(instruction: string): boolean {
   const action = parseDeterministicAction(instruction);
-  return action?.type === 'click' && /导出|删除|提交|发布|保存|确认|支付|退款|上架|下架/.test(instruction);
+  return action?.type === 'click' && /导出|删除|提交|发布|保存|支付|退款|上架|下架/.test(instruction);
 }
 
 /** 识别明确要求打开当前页面开发者工具或控制台的中英文表达，避免把普通“检查页面”误判为 inspect。 */
