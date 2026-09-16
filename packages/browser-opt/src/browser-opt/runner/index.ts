@@ -24,7 +24,7 @@ import {
   splitBrowserOptSteps,
   summarizeSnapshot,
 } from '../utils.js';
-import { captureSettledSnapshot, isAboutBlankOpen } from './evidence.js';
+import { captureSettledSnapshot, isAboutBlankOpen, isBlankInitialSnapshot } from './evidence.js';
 import {
   resumeFromHandoff,
   saveAuthenticatedHandoffState,
@@ -172,6 +172,9 @@ export class BrowserOptRunner {
       }
       if (isAboutBlankOpen(agent, openSnapshot)) {
         throw new Error('浏览器页面未成功打开：当前会话持续停留在 about:blank，且没有可恢复的业务页或登录页。');
+      }
+      if (isBlankInitialSnapshot(openSnapshot)) {
+        throw new Error('浏览器页面未完成渲染：等待并刷新后页面仍为空白，未开始执行业务步骤。');
       }
 
       if (openedWithProfile) {

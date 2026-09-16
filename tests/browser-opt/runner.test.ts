@@ -3159,6 +3159,42 @@ describe('BrowserOptRunner', () => {
     expect(result.report.logs.join('\n')).toContain('open-reload');
   });
 
+  it('does not start business steps when the target page remains blank', async () => {
+    const outputDir = makeTempDir();
+    const blankTargetSnapshot = {
+      raw: JSON.stringify({
+        success: true,
+        data: {
+          origin: 'https://example.com/#/detail?id=1',
+          refs: {},
+          snapshot: '(no interactive elements)',
+        },
+      }),
+      data: {
+        success: true,
+        data: {
+          origin: 'https://example.com/#/detail?id=1',
+          refs: {},
+          snapshot: '(no interactive elements)',
+        },
+      },
+    };
+    const agent = buildAgent({
+      snapshots: Array.from({ length: 62 }, () => blankTargetSnapshot),
+      getUrl: () => 'https://example.com/#/detail?id=1',
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com/#/detail?id=1。\n\n目标：\n1. 点击“暂不处理”。', {
+      outputDir,
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.report.steps).toHaveLength(0);
+    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(result.report.logs.join('\n')).toContain('页面仍为空白，未开始执行业务步骤');
+  });
+
   it('switches from about:blank to a non-empty tab before executing the first step', async () => {
     const outputDir = makeTempDir();
     const blankSnapshot = {
@@ -3167,7 +3203,7 @@ describe('BrowserOptRunner', () => {
     };
     const agent = buildAgent({
       snapshots: [
-        ...Array.from({ length: 6 }, () => blankSnapshot),
+        ...Array.from({ length: 31 }, () => blankSnapshot),
         snapshotJson('登录远方的梦想直播平台', { e1: { role: 'textbox', name: '请输入手机号' } }),
         snapshotJson('登录远方的梦想直播平台', { e1: { role: 'textbox', name: '请输入手机号' } }),
       ],
@@ -3196,7 +3232,7 @@ describe('BrowserOptRunner', () => {
       data: { success: true, data: { origin: 'about:blank', refs: {}, snapshot: '(no interactive elements)' } },
     };
     const agent = buildAgent({
-      snapshots: Array.from({ length: 12 }, () => blankSnapshot),
+      snapshots: Array.from({ length: 62 }, () => blankSnapshot),
       getUrl: () => 'about:blank',
       getTabs: () => [
         { active: true, tabId: 't1', title: 'about:blank', type: 'page', url: 'about:blank' },
@@ -4267,6 +4303,37 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps[0].attempts).toBe(3);
     expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e2');
     expect(result.report.steps[0].logs.join('\n')).toContain('target-wait');
+  });
+
+  it('keeps waiting for a delayed click target in the first business step', async () => {
+    const outputDir = makeTempDir();
+    const loadingSnapshot = snapshotJson('- generic "页面加载中" [ref=e1]', {
+      e1: { role: 'generic', name: '页面加载中' },
+    });
+    const readySnapshot = snapshotJson('- button "暂不处理" [ref=e2]', {
+      e2: { role: 'button', name: '暂不处理' },
+    });
+    const dismissedSnapshot = snapshotJson('- heading "新增商品" [ref=e3]', {
+      e3: { role: 'heading', name: '新增商品' },
+    });
+    const agent = buildAgent({
+      snapshots: [
+        loadingSnapshot,
+        loadingSnapshot,
+        ...Array.from({ length: 19 }, () => loadingSnapshot),
+        readySnapshot,
+        dismissedSnapshot,
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com/goods/create。\n\n目标：\n1. 点击验厂提醒弹窗的“暂不处理”按钮。', {
+      outputDir,
+    });
+
+    expect(result.passed).toBe(true);
+    expect(result.report.steps[0].attempts).toBe(21);
+    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e2');
   });
 
   it('waits for business content when the initial page only rendered an acknowledgement button', async () => {

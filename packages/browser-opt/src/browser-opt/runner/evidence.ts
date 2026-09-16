@@ -12,6 +12,8 @@ interface CaptureSettledSnapshotOptions {
   targetUrl?: string;
 }
 
+const INITIAL_BLANK_WAIT_ATTEMPTS = 30;
+
 /** 采集一份机器可读快照并同时落盘，供动作匹配与报告复用。 */
 export function captureSnapshot(agent: BrowserAgent, filePath: string): SnapshotEvidence {
   const output = agent.snapshotJson();
@@ -42,7 +44,7 @@ export function captureSettledSnapshot(
 ): SnapshotEvidence {
   let snapshot = captureSnapshot(agent, filePath);
   let blankWaits = 0;
-  for (let attempt = 1; attempt <= 5 && isBlankInitialSnapshot(snapshot); attempt += 1) {
+  for (let attempt = 1; attempt <= INITIAL_BLANK_WAIT_ATTEMPTS && isBlankInitialSnapshot(snapshot); attempt += 1) {
     blankWaits = attempt;
     logs.push(`open-wait ${attempt}: snapshot 仍为空白页，等待页面接管后重试。`);
     agent.waitMs(500);
@@ -54,7 +56,7 @@ export function captureSettledSnapshot(
     agent.reload();
     agent.waitMs(500);
     snapshot = captureSnapshot(agent, filePath);
-    for (let attempt = 1; attempt <= 5 && isBlankInitialSnapshot(snapshot); attempt += 1) {
+    for (let attempt = 1; attempt <= INITIAL_BLANK_WAIT_ATTEMPTS && isBlankInitialSnapshot(snapshot); attempt += 1) {
       logs.push(`open-reload-wait ${attempt}: 刷新后 snapshot 仍为空白页，继续短暂等待。`);
       agent.waitMs(500);
       snapshot = captureSnapshot(agent, filePath);

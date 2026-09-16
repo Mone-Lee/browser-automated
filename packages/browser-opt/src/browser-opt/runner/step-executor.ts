@@ -26,9 +26,10 @@ import {
   buildHandoffContext,
 } from './handoff.js';
 
-// 普通错误只重试一次；目标尚未渲染时按 500ms 间隔折算为约 10 秒的等待窗口。
+// 普通错误只重试一次；目标尚未渲染时按 500ms 间隔等待，首个点击步骤为延迟浮层预留更长窗口。
 const ORDINARY_ACTION_ATTEMPTS = 2;
 const CLICK_TARGET_ATTEMPTS = 20;
+const INITIAL_CLICK_TARGET_ATTEMPTS = 60;
 const FILL_TARGET_ATTEMPTS = 10;
 const UPLOAD_TARGET_ATTEMPTS = 10;
 
@@ -92,8 +93,9 @@ export async function executeStep(
   let actionOutput = '';
   let actionError: string | undefined;
   const parsedAction = parseDeterministicAction(instruction);
+  const actionRetryLimit = targetRetryLimit(parsedAction, options.alreadyOpenedUrl !== undefined);
 
-  while (attempts < targetRetryLimit(parsedAction)) {
+  while (attempts < actionRetryLimit) {
     attempts += 1;
     try {
       if (!isVerificationStep(instruction) || (parsedAction && parsedAction.type !== 'assert-text')) {
@@ -127,7 +129,7 @@ export async function executeStep(
         logs.push(`terminal-failure: ${actionError}`);
         break;
       }
-      if (!shouldRetryAction(actionError, attempts, parsedAction)) {
+      if (!shouldRetryAction(actionError, attempts, actionRetryLimit)) {
         break;
       }
 
@@ -345,21 +347,21 @@ function classifyFailureKind(error: string): BrowserOptStepResult['failureKind']
 function shouldRetryAction(
   error: string,
   attempts: number,
-  action: ReturnType<typeof parseDeterministicAction>,
+  retryLimit: number,
 ): boolean {
   if (isMissingActionTarget(error)) {
-    return attempts < targetRetryLimit(action);
+    return attempts < retryLimit;
   }
   return attempts < ORDINARY_ACTION_ATTEMPTS;
 }
 
 /** 点击、输入与上传定位按动作内部探测开销设置等待次数，兼顾异步渲染与失败收敛速度。 */
-function targetRetryLimit(action: ReturnType<typeof parseDeterministicAction>): number {
+function targetRetryLimit(action: ReturnType<typeof parseDeterministicAction>, isInitialStep: boolean): number {
   if (action?.type === 'fill') {
     return FILL_TARGET_ATTEMPTS;
   }
   if (action?.type === 'click') {
-    return CLICK_TARGET_ATTEMPTS;
+    return isInitialStep ? INITIAL_CLICK_TARGET_ATTEMPTS : CLICK_TARGET_ATTEMPTS;
   }
   if (action?.type === 'upload') {
     return UPLOAD_TARGET_ATTEMPTS;
