@@ -26,12 +26,9 @@ import {
   buildHandoffContext,
 } from './handoff.js';
 
-// 普通错误只重试一次；目标尚未渲染时按 500ms 间隔等待，首个点击步骤为延迟浮层预留更长窗口。
+// 普通错误只重试一次；目标尚未渲染时最多按 500ms 间隔重试 5 次。
 const ORDINARY_ACTION_ATTEMPTS = 2;
-const CLICK_TARGET_ATTEMPTS = 20;
-const INITIAL_CLICK_TARGET_ATTEMPTS = 60;
-const FILL_TARGET_ATTEMPTS = 10;
-const UPLOAD_TARGET_ATTEMPTS = 10;
+const TARGET_ACTION_ATTEMPTS = 5;
 
 /** 执行单个步骤，负责前后快照、动作重试、验证和步骤级日志记录。 */
 export async function executeStep(
@@ -93,7 +90,7 @@ export async function executeStep(
   let actionOutput = '';
   let actionError: string | undefined;
   const parsedAction = parseDeterministicAction(instruction);
-  const actionRetryLimit = targetRetryLimit(parsedAction, options.alreadyOpenedUrl !== undefined);
+  const actionRetryLimit = targetRetryLimit(parsedAction);
 
   while (attempts < actionRetryLimit) {
     attempts += 1;
@@ -143,6 +140,34 @@ export async function executeStep(
       actionSnapshot = retrySnapshot;
       logs.push(`retry-snapshot: ${retrySnapshotPath}`);
       logs.push(`retry-state: ${summarizeSnapshot(retrySnapshot)}`);
+      if (shouldTriggerLoginHandoff(instruction, options.alreadyOpenedUrl, retrySnapshot)) {
+        const fallbackAgent = options.retryAuthStateFallback?.();
+        if (fallbackAgent) {
+          logs.push(`auth-state-fallback-retry: 步骤 ${index} 重试前检测到登录态失效`);
+          return executeStep(fallbackAgent, outputDir, index, instruction, options);
+        }
+        const handoff = triggerLoginHandoff(agent, logs, `步骤 ${index} 重试前检测到登录态失效`);
+        const resumed = await resumeFromHandoff(agent, logs, handoff, options.handoff);
+        if (resumed) {
+          const resumedSnapshot = captureTransientSnapshot(agent);
+          saveAuthenticatedHandoffState(agent, options.authStateSavePath, logs, resumedSnapshot);
+          return executeStep(agent, outputDir, index, instruction, options);
+        }
+        return {
+          index,
+          instruction,
+          passed: false,
+          handoffTriggered: true,
+          attempts,
+          beforeSnapshotPath,
+          afterSnapshotPath,
+          beforeScreenshotPath,
+          afterScreenshotPath,
+          actionOutput: handoff.output,
+          verification: handoff.message,
+          logs,
+        };
+      }
     }
   }
 
@@ -355,16 +380,10 @@ function shouldRetryAction(
   return attempts < ORDINARY_ACTION_ATTEMPTS;
 }
 
-/** 点击、输入与上传定位按动作内部探测开销设置等待次数，兼顾异步渲染与失败收敛速度。 */
-function targetRetryLimit(action: ReturnType<typeof parseDeterministicAction>, isInitialStep: boolean): number {
-  if (action?.type === 'fill') {
-    return FILL_TARGET_ATTEMPTS;
-  }
-  if (action?.type === 'click') {
-    return isInitialStep ? INITIAL_CLICK_TARGET_ATTEMPTS : CLICK_TARGET_ATTEMPTS;
-  }
-  if (action?.type === 'upload') {
-    return UPLOAD_TARGET_ATTEMPTS;
+/** 点击、输入和上传在目标未渲染时使用统一的有限等待窗口，以便尽快收敛失败。 */
+function targetRetryLimit(action: ReturnType<typeof parseDeterministicAction>): number {
+  if (action?.type === 'fill' || action?.type === 'click' || action?.type === 'upload') {
+    return TARGET_ACTION_ATTEMPTS;
   }
   return ORDINARY_ACTION_ATTEMPTS;
 }

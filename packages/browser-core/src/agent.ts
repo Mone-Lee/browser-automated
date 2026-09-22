@@ -566,9 +566,11 @@ export class BrowserAgent {
   /** 关闭浏览器会话；这里吞掉异常，保证清理阶段尽量顺利完成。 */
   close(): void {
     try {
-      this.run(['close']);
+      this.runBestEffort(['--session', this.sessionId, 'close']);
     } catch {
       // 清理阶段忽略关闭失败，常见原因是会话已经提前结束。
+    } finally {
+      this.browserOpened = false;
     }
   }
 }

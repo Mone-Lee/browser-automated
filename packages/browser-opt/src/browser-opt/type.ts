@@ -62,6 +62,8 @@ export interface BrowserOptRunnerOptions {
   sessionName?: string;
   statePath?: string;
   reuseRunningBrowser?: boolean;
+  /** state 失效切换 Profile 时使用独立 session，避免复用刚关闭的 daemon/socket。 */
+  authStateFallbackSessionId?: string;
   liveViewport?: boolean;
   closeOnComplete?: boolean;
   outputDir?: string;

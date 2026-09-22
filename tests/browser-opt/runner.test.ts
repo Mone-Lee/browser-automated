@@ -1303,6 +1303,8 @@ describe('BrowserOptRunner', () => {
 
     const result = await runner.run('测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。', {
       outputDir,
+      sessionId: 'project-session',
+      authStateFallbackSessionId: 'profile-session',
       statePath: authStatePath,
       authStateSavePath: authStatePath,
       authStateFallbackProfile: 'Default',
@@ -1310,6 +1312,8 @@ describe('BrowserOptRunner', () => {
 
     expect(result.passed).toBe(true);
     expect(capturedOptions).toHaveLength(2);
+    expect(capturedOptions[0].sessionId).toBe('project-session');
+    expect(capturedOptions[1].sessionId).toBe('profile-session');
     expect(capturedOptions[0].statePath).toBeUndefined();
     expect(capturedOptions[1]).toEqual(expect.objectContaining({ profile: 'Default', liveViewport: true }));
     expect(capturedOptions[1]).not.toHaveProperty('statePath');
@@ -1323,15 +1327,9 @@ describe('BrowserOptRunner', () => {
     expect(result.report.logs.join('\n')).toContain('auth-state-fallback: state 登录态疑似失效，切换到 profile Default。');
   });
 
-  it('switches interactive login handoff to the fallback profile agent', async () => {
+  it('keeps an expired login in the current browser for interactive handoff', async () => {
     const outputDir = makeTempDir();
-    const authStatePath = path.join(makeTempDir(), 'auth-state.json');
     const stateAgent = buildAgent({
-      snapshots: [
-        snapshotJson('登录远方的梦想直播平台', { e1: { role: 'textbox', name: '请输入手机号' } }),
-      ],
-    });
-    const profileAgent = buildAgent({
       snapshots: [
         snapshotJson('登录远方的梦想直播平台', { e1: { role: 'textbox', name: '请输入手机号' } }),
         snapshotJson('创建直播页', { e2: { role: 'textbox', name: '直播间名称' } }),
@@ -1343,37 +1341,46 @@ describe('BrowserOptRunner', () => {
     });
     const capturedOptions: AgentOptions[] = [];
     const waitForUserResume = vi.fn(async () => {});
-    const agents = [stateAgent, profileAgent];
-    const runner = new BrowserOptRunner((options) => {
-      capturedOptions.push(options ?? {});
-      return agents.shift() ?? profileAgent;
-    });
+    const runner = new BrowserOptRunner(makeFactory(stateAgent, capturedOptions));
 
     const result = await runner.run('执行创建安选公开直播流程：\n1. 访问 https://test-live.ifengqun.com/live/create?time=2\n2. 直播间名称输入“安选公开直播自动化”', {
       outputDir,
-      statePath: authStatePath,
-      authStateSavePath: authStatePath,
-      authStateFallbackProfile: 'Default',
+      profile: 'Default',
       handoff: {
         waitForUserResume,
       },
     });
 
     expect(result.passed).toBe(true);
-    expect(capturedOptions).toHaveLength(2);
-    expect(capturedOptions[0].statePath).toBeUndefined();
-    expect(capturedOptions[1]).toEqual(expect.objectContaining({ profile: 'Default', liveViewport: true }));
-    expect(capturedOptions[1]).not.toHaveProperty('statePath');
-    expect((stateAgent.close as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
-    expect((stateAgent.handoff as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
-    expect((profileAgent.open as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
-    expect((profileAgent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e1');
-    expect((profileAgent.handoff as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
-    expect((profileAgent.resume as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect(capturedOptions).toHaveLength(1);
+    expect(capturedOptions[0]).toEqual(expect.objectContaining({ profile: 'Default' }));
+    expect((stateAgent.close as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect((stateAgent.handoff as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((stateAgent.resume as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
     expect(waitForUserResume).toHaveBeenCalledTimes(1);
-    expect(result.report.logs.join('\n')).toContain('auth-state-fallback: state 登录态疑似失效，切换到 profile Default。');
-    expect(result.report.logs.join('\n')).toContain('profile-password-suggestions: 已聚焦登录输入框 @e1');
-    expect((profileAgent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e2', '安选公开直播自动化');
+    expect(result.report.logs.join('\n')).not.toContain('auth-state-fallback:');
+    expect((stateAgent.fill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e2', '安选公开直播自动化');
+  });
+
+  it('stops action retries as soon as a relogin elsewhere invalidates the current session', async () => {
+    const outputDir = makeTempDir();
+    const agent = buildAgent({
+      snapshots: [
+        snapshotJson('商品编辑页', {}),
+        snapshotJson('商品编辑页', {}),
+        snapshotJson('登录失效！您的账号已经在别的地方登录', { e1: { role: 'button', name: '确定' } }),
+      ],
+    });
+    const runner = new BrowserOptRunner(makeFactory(agent));
+
+    const result = await runner.run('测试 https://example.com。\n1. 点击“提交”。', { outputDir });
+
+    expect(result.report.status).toBe('HANDOFF');
+    expect(result.report.steps[0]).toEqual(expect.objectContaining({ attempts: 1, handoffTriggered: true }));
+    expect((agent.handoff as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((agent.close as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(result.report.steps[0].logs.join('\n')).toContain('步骤 1 重试前检测到登录态失效');
+    expect(result.report.steps[0].logs.join('\n')).not.toContain('target-wait 2');
   });
 
   it('keeps the current state agent waiting for handoff without creating a fallback agent', async () => {
@@ -4305,7 +4312,7 @@ describe('BrowserOptRunner', () => {
     expect(result.report.steps[0].logs.join('\n')).toContain('target-wait');
   });
 
-  it('keeps waiting for a delayed click target in the first business step', async () => {
+  it('limits delayed click target retries in the first business step', async () => {
     const outputDir = makeTempDir();
     const loadingSnapshot = snapshotJson('- generic "页面加载中" [ref=e1]', {
       e1: { role: 'generic', name: '页面加载中' },
@@ -4320,7 +4327,7 @@ describe('BrowserOptRunner', () => {
       snapshots: [
         loadingSnapshot,
         loadingSnapshot,
-        ...Array.from({ length: 19 }, () => loadingSnapshot),
+        ...Array.from({ length: 4 }, () => loadingSnapshot),
         readySnapshot,
         dismissedSnapshot,
       ],
@@ -4331,9 +4338,9 @@ describe('BrowserOptRunner', () => {
       outputDir,
     });
 
-    expect(result.passed).toBe(true);
-    expect(result.report.steps[0].attempts).toBe(21);
-    expect((agent.click as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('e2');
+    expect(result.passed).toBe(false);
+    expect(result.report.steps[0].attempts).toBe(5);
+    expect((agent.click as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
   });
 
   it('waits for business content when the initial page only rendered an acknowledgement button', async () => {

@@ -129,6 +129,7 @@ export class BrowserOptRunner {
         agent.close();
         const fallbackAgent = this.agentFactory({
           namespace: 'browser-opt',
+          sessionId: options.authStateFallbackSessionId ?? options.sessionId,
           profile: options.authStateFallbackProfile,
           sessionName: options.sessionName,
           reuseRunningBrowser: options.reuseRunningBrowser ?? false,
@@ -290,6 +291,10 @@ export class BrowserOptRunner {
 
 /** 记录本轮浏览器登录态来源，便于排查默认 state 与 profile 导入是否命中。 */
 function logAuthStateMode(logs: string[], options: BrowserOptRunnerOptions): void {
+  if (options.reuseRunningBrowser) {
+    logs.push('auth-state-mode: reuse-running-browser');
+    return;
+  }
   if (options.statePath) {
     const fallback = options.authStateFallbackProfile ? `, fallback-profile=${options.authStateFallbackProfile}` : '';
     logs.push(`auth-state-mode: state ${options.statePath}${fallback}`);

@@ -775,11 +775,21 @@ describe('BrowserAgent', () => {
   });
 
   describe('close()', () => {
-    it('swallows errors so cleanup always succeeds', () => {
+    it('targets only the configured session and swallows cleanup errors', () => {
       mockSpawnSync.mockReturnValue(makeErrorResult('session not found'));
 
-      const agent = new BrowserAgent({ sessionId: 'test-session' });
+      const agent = new BrowserAgent({
+        sessionId: 'test-session',
+        profile: 'Default',
+        reuseRunningBrowser: true,
+        liveViewport: true,
+      });
       expect(() => agent.close()).not.toThrow();
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'agent-browser',
+        ['--session', 'test-session', 'close'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
     });
   });
 
