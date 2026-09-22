@@ -5,9 +5,10 @@
 import {
   browserOptTemplate,
   extractBrowserOptUrl,
+  splitBrowserOptSteps,
 } from '../../browser-opt/utils.js';
-import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
+import { execFileSync, spawn } from 'node:child_process';
 import {
   findBrowserOptWorkflowById,
   loadBrowserOptWorkflows,
@@ -17,6 +18,7 @@ import {
   saveBrowserOptWorkflow,
 } from '../../browser-opt/workflow/index.js';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
 import type { BrowserOptHandoffContext, BrowserOptRunnerOptions } from '../../browser-opt/type.js';
@@ -30,6 +32,7 @@ import {
   parseCliArgs,
   resolveLiveViewport,
   resolveProfile,
+  resolveReuseRunningBrowser,
   resolveStatePath,
 } from '../utils/args.js';
 import { BROWSER_OPT_USAGE, HANDOFF_DONE_ANSWERS, LIVE_VIEWPORT_DASHBOARD_URL } from '../utils/constants.js';
@@ -46,6 +49,15 @@ interface BrowserOptDetachedRun {
   startedAt: string;
 }
 
+interface BrowserOptManagedSessionState {
+  sessionIds: string[];
+}
+
+interface BrowserOptSessionPlan {
+  sessionId: string;
+  authStateFallbackSessionId?: string;
+}
+
 type BrowserOptDetachedRunStatus = 'RUNNING' | 'HANDOFF' | 'PASS' | 'FAIL';
 
 const BROWSER_OPT_EXIT_CODE_FAILURE = 1;
@@ -54,8 +66,12 @@ const BROWSER_OPT_EXIT_CODE_AMBIGUOUS = 3;
 const BROWSER_OPT_EXIT_CODE_NOT_FOUND = 4;
 const DEFAULT_BROWSER_PROFILE = 'Default';
 const DEFAULT_AUTH_STATE_DIR = '.browser-opt/states';
+const MANAGED_SESSION_STATE_FILE = 'browser-opt-sessions.json';
 const DEFAULT_HANDOFF_RUN_DIR = '.browser-opt/handoffs';
 const HANDOFF_SIGNAL_POLL_INTERVAL_MS = 250;
+const NEW_BROWSER_WINDOW_PATTERN = '(?:(?:新开|全新|新的|独立)(?:一个|的)?\\s*(?:Chrome|谷歌浏览器)(?:\\s*(?:窗口|实例))?|(?:Chrome|谷歌浏览器)(?:\\s*(?:窗口|实例))?\\s*(?:新开|全新|新的|独立))';
+const NEW_BROWSER_WINDOW_RE = new RegExp(NEW_BROWSER_WINDOW_PATTERN, 'i');
+const NEW_BROWSER_WINDOW_STEP_RE = new RegExp(`^(?:请)?${NEW_BROWSER_WINDOW_PATTERN}[。.!！]*$`, 'i');
 
 export async function cmdBrowserOpt(args: string[]): Promise<void> {
   const parsed = parseCliArgs(args);
@@ -131,6 +147,10 @@ export async function cmdBrowserOpt(args: string[]): Promise<void> {
     resumeWorkflowCommand(parsed.flags);
     return;
   }
+  if (subcommand === 'stop' && !isImmediateFlow) {
+    stopWorkflowCommand(parsed.flags);
+    return;
+  }
 
   const text = positionalText;
   if (!text) {
@@ -146,27 +166,45 @@ async function executeBrowserOptFlow(
   text: string,
   flags: Record<string, string | boolean>,
 ): Promise<void> {
-  const liveViewport = resolveLiveViewport(flags);
-  const requestedProfile = resolveProfile(flags) ?? DEFAULT_BROWSER_PROFILE;
-  const authState = resolveBrowserOptAuthState(flags, requestedProfile);
-  const outputDir = getStringFlag(flags, 'output-dir');
-  const useAgentChat = getBooleanFlag(flags, 'agent-chat');
-  const handoffSignalPath = getStringFlag(flags, 'handoff-signal');
+  const executionFlags = applyNaturalLanguageBrowserMode(text, flags);
+  const executionText = stripNaturalLanguageBrowserModeSteps(text);
+  const liveViewport = resolveLiveViewport(executionFlags);
+  // 读取调用方显式指定的 Chrome Profile。
+  const configuredProfile = resolveProfile(executionFlags);
+  // 读取调用方显式指定的 state 文件或环境变量中的 state 路径。
+  const configuredStatePath = resolveStatePath(executionFlags);
+  /**
+   * 显式指定 Profile 时必须启动对应的独立浏览器上下文，不能连接其他运行中的浏览器， Profile 与 focused-browser 复用互斥，因此强制关闭运行中浏览器复用 (false)。
+   * 没有 Profile 时，再根据 state、clean-browser 和 reuse-focused-browser 等参数决定连接模式。
+   */
+  const reuseRunningBrowser = configuredProfile
+    ? false
+    : resolveReuseRunningBrowser(executionFlags, configuredStatePath, false);
+  // 未指定 Profile 时使用 Default，供 state 文件命名和 profile 回退逻辑使用。
+  const requestedProfile = configuredProfile ?? DEFAULT_BROWSER_PROFILE;
+  // 根据浏览器连接模式选择 state、profile 或外部浏览器当前登录态。
+  const authState = resolveBrowserOptAuthState(executionFlags, requestedProfile, reuseRunningBrowser);
+  const outputDir = getStringFlag(executionFlags, 'output-dir');
+  const useAgentChat = getBooleanFlag(executionFlags, 'agent-chat');
+  const handoffSignalPath = getStringFlag(executionFlags, 'handoff-signal');
+  const sessionPlan = await prepareBrowserOptSession(executionFlags, reuseRunningBrowser);
 
   const { BrowserOptRunner } = await import('../../browser-opt/runner/index.js');
   const runner = new BrowserOptRunner();
   const runnerOptions: BrowserOptRunnerOptions = {
-    sessionId: resolveBrowserOptSessionId(flags),
+    sessionId: sessionPlan.sessionId,
+    authStateFallbackSessionId: sessionPlan.authStateFallbackSessionId,
     profile: authState.profile,
     statePath: authState.statePath,
     authStateSavePath: authState.authStateSavePath,
     authStateFallbackProfile: authState.fallbackProfile,
+    reuseRunningBrowser,
     liveViewport,
     outputDir,
     useAgentChat,
     handoff: createBrowserOptHandoffOptions(liveViewport, handoffSignalPath),
   };
-  const result = await runner.run(text, runnerOptions);
+  const result = await runner.run(executionText, runnerOptions);
 
   printBrowserOptResult(result);
   if (result.passed) {
@@ -237,6 +275,7 @@ function matchWorkflowCommand(query: string, flags: Record<string, string | bool
 
 /** 先解析查询或指定 ID，只有结果唯一时才进入现有 BrowserOptRunner。 */
 async function runWorkflowCommand(query: string, flags: Record<string, string | boolean>): Promise<void> {
+  const executionFlags = applyNaturalLanguageBrowserMode(query, flags);
   const loaded = loadBrowserOptWorkflows(getStringFlag(flags, 'workflow-dir'));
   printWorkflowWarnings(loaded.warnings);
   const workflowId = getStringFlag(flags, 'workflow-id');
@@ -247,7 +286,7 @@ async function runWorkflowCommand(query: string, flags: Record<string, string | 
       printAvailableWorkflows(loaded.workflows);
       process.exit(BROWSER_OPT_EXIT_CODE_NOT_FOUND);
     }
-    await executeBrowserOptFlow(renderBrowserOptWorkflowFlow(workflow), flags);
+    await executeBrowserOptFlow(renderBrowserOptWorkflowFlow(workflow), executionFlags);
     return;
   }
   if (!query.trim()) {
@@ -264,11 +303,12 @@ async function runWorkflowCommand(query: string, flags: Record<string, string | 
     printWorkflowMatch(result);
     process.exit(BROWSER_OPT_EXIT_CODE_NOT_FOUND);
   }
-  await executeBrowserOptFlow(renderBrowserOptWorkflowFlow(result.matched.workflow), flags);
+  await executeBrowserOptFlow(renderBrowserOptWorkflowFlow(result.matched.workflow), executionFlags);
 }
 
 /** 后台启动可跨 Codex turn 恢复的即时流程或 Workflow，handoff 期间不依赖临时 PTY 会话。 */
 function startDetachedFlowCommand(query: string, flags: Record<string, string | boolean>): void {
+  const executionFlags = applyNaturalLanguageBrowserMode(query, flags);
   const immediateFlow = getStringFlag(flags, 'flow')?.trim();
   const workflow = immediateFlow ? undefined : resolveDetachedWorkflow(query, flags);
   const runId = randomUUID();
@@ -279,7 +319,7 @@ function startDetachedFlowCommand(query: string, flags: Record<string, string | 
   fs.mkdirSync(runDir, { recursive: true });
 
   const outputFd = fs.openSync(outputPath, 'a');
-  const child = spawn(process.execPath, buildDetachedFlowArgs(workflow?.id, immediateFlow, signalPath, flags), {
+  const child = spawn(process.execPath, buildDetachedFlowArgs(workflow?.id, immediateFlow, signalPath, executionFlags), {
     detached: true,
     stdio: ['ignore', outputFd, outputFd],
     env: {
@@ -333,6 +373,20 @@ function resumeWorkflowCommand(flags: Record<string, string | boolean>): void {
     return;
   }
   console.log(`已发送恢复信号：${metadata.runId}`);
+}
+
+/** 停止仍在运行的后台 Workflow，避免 handoff 或异常重试在脱离当前终端后继续执行。 */
+function stopWorkflowCommand(flags: Record<string, string | boolean>): void {
+  const metadata = loadDetachedRun(flags);
+  const running = isProcessRunning(metadata.pid);
+  if (running) {
+    process.kill(metadata.pid, 'SIGTERM');
+  }
+  if (getBooleanFlag(flags, 'json')) {
+    console.log(JSON.stringify({ status: running ? 'STOP_REQUESTED' : 'ALREADY_STOPPED', ...metadata }, null, 2));
+    return;
+  }
+  console.log(running ? `已请求停止后台任务：${metadata.runId}` : `后台任务已经结束：${metadata.runId}`);
 }
 
 /** start 与 run 共用 Workflow 唯一匹配规则，避免后台入口选择不同的流程。 */
@@ -528,20 +582,26 @@ function formatWorkflowDisplayPath(filePath: string): string {
 interface BrowserOptAuthState {
   profile?: string;
   statePath?: string;
-  authStateSavePath: string;
+  authStateSavePath?: string;
   fallbackProfile?: string;
 }
 
 /**
- * 登录态复用策略：
- * 1. 默认 state 存在时优先加载，避免每次从完整 Chrome profile 启动。
- * 2. 默认 state 不存在时由唯一主 agent 使用 profile 打开，并把 cookies/storage 保存成 state。
- * 3. 默认 state 失效时切换到 profile 窗口，让交互式 handoff 可使用 Chrome 密码管理器。
- * 4. 显式 --state 保持隔离语义，不自动回退到 profile。
+ * browser-opt 托管 Chrome 时只复用登录态，不复用上一次运行遗留的页面：
+ * 1. 优先加载已有 state；没有 state 时用 profile 打开并保存 cookies/storage。
+ * 2. 默认 state 失效时切换一次 profile；显式 --state 不自动回退。
+ * 3. focused-browser 直接使用外部浏览器的登录态，不再加载 state 或 profile。
  */
-function resolveBrowserOptAuthState(flags: Record<string, string | boolean>, profile: string): BrowserOptAuthState {
+function resolveBrowserOptAuthState(
+  flags: Record<string, string | boolean>,
+  profile: string,
+  reuseRunningBrowser: boolean,
+): BrowserOptAuthState {
   const configuredStatePath = resolveStatePath(flags);
   const authStateSavePath = configuredStatePath ?? defaultBrowserOptStatePath(profile);
+  if (reuseRunningBrowser) {
+    return {};
+  }
   if (fs.existsSync(authStateSavePath)) {
     return {
       statePath: authStateSavePath,
@@ -556,6 +616,51 @@ function resolveBrowserOptAuthState(flags: Record<string, string | boolean>, pro
   };
 }
 
+/** 识别流程开头或说明文本里的新开浏览器要求，不把普通页面“新窗口”操作误判成运行模式。 */
+function requestsNewBrowserWindow(flow: string): boolean {
+  const description = flow
+    .split(/(?:\r?\n)?\s*(?:目标|步骤|预期结果)[:：]/, 1)[0]
+    ?.replace(/https?:\/\/\S+/gi, ' ')
+    ?? '';
+  return NEW_BROWSER_WINDOW_RE.test(description)
+    || splitBrowserOptSteps(flow).some(isNewBrowserWindowStep);
+}
+
+/** 判断单个 Workflow 步骤是否只表达新开 Chrome 窗口的运行模式。 */
+function isNewBrowserWindowStep(step: string): boolean {
+  return NEW_BROWSER_WINDOW_STEP_RE.test(step.trim());
+}
+
+/** 从编号步骤中移除浏览器运行模式，避免它被步骤执行器误判为页面操作。 */
+function stripNaturalLanguageBrowserModeSteps(flow: string): string {
+  return flow
+    .split('\n')
+    .filter((line) => {
+      const match = line.match(/^\s*(?:目标[:：]\s*)?\d+[\.)、]\s*(.+)$/);
+      return !match || !isNewBrowserWindowStep(match[1]);
+    })
+    .join('\n');
+}
+
+/** 把 Workflow 查询中的浏览器模式要求转换为参数，确保匹配后不会随查询文本丢失。 */
+function applyNaturalLanguageBrowserMode(
+  text: string,
+  flags: Record<string, string | boolean>,
+): Record<string, string | boolean> {
+  const hasExplicitMode = getBooleanFlag(flags, 'clean-browser')
+    || getBooleanFlag(flags, 'reuse-focused-browser')
+    || getBooleanFlag(flags, 'keep-previous-browser')
+    || Boolean(resolveProfile(flags))
+    || Boolean(resolveStatePath(flags));
+  if (hasExplicitMode) {
+    return flags;
+  }
+  if (requestsNewBrowserWindow(text)) {
+    return { ...flags, 'keep-previous-browser': true };
+  }
+  return flags;
+}
+
 /** 默认 state 文件按 profile 分开保存，避免 Work/Default 等登录态互相覆盖。 */
 function defaultBrowserOptStatePath(profile: string): string {
   const stateDir = process.env.BROWSER_OPT_AUTH_STATE_DIR || path.resolve(process.cwd(), DEFAULT_AUTH_STATE_DIR);
@@ -563,14 +668,111 @@ function defaultBrowserOptStatePath(profile: string): string {
   return path.join(stateDir, `browser-opt-${stateName}.json`);
 }
 
-/** 每次独立执行默认创建新 session；只有调用方显式指定时才复用已有浏览器。 */
-function resolveBrowserOptSessionId(flags: Record<string, string | boolean>): string {
+/**
+ * 托管 Chrome 每次使用全新 session，并记录本轮主实例与 profile fallback 的 ID。
+ * 默认启动前关闭记录中的上一轮 session；要求保留时继续记录旧 session，留待后续默认运行清理。
+ * focused-browser 不参与托管实例清理。
+ */
+async function prepareBrowserOptSession(
+  flags: Record<string, string | boolean>,
+  reuseRunningBrowser: boolean,
+): Promise<BrowserOptSessionPlan> {
   const configuredSession = getStringFlag(flags, 'session')?.trim();
-  if (configuredSession) {
-    return configuredSession;
+  if (reuseRunningBrowser) {
+    return { sessionId: configuredSession ?? createBrowserOptSessionId() };
   }
 
+  const keepPreviousBrowser = getBooleanFlag(flags, 'keep-previous-browser');
+  const statePath = managedSessionStatePath();
+  const previousSessionIds = loadManagedSessionIds(statePath);
+  if (previousSessionIds.length === 0 && !keepPreviousBrowser) {
+    previousSessionIds.push(legacyManagedSessionId());
+  }
+
+  if (!keepPreviousBrowser) {
+    for (const sessionId of previousSessionIds) {
+      terminateManagedSession(sessionId);
+    }
+  }
+
+  const sessionId = configuredSession ?? createBrowserOptSessionId();
+  const authStateFallbackSessionId = createBrowserOptSessionId();
+  saveManagedSessionIds(
+    statePath,
+    keepPreviousBrowser
+      ? [...new Set([...previousSessionIds, sessionId, authStateFallbackSessionId])]
+      : [sessionId, authStateFallbackSessionId],
+  );
+  return { sessionId, authStateFallbackSessionId };
+}
+
+/**
+ * 直接终止 browser-opt 托管的 agent-browser daemon。
+ * `agent-browser close` 在 Chrome 已退出但 daemon 尚存时会短暂重启 Chrome，因此清理旧会话时绕过该命令。
+ */
+function terminateManagedSession(sessionId: string): void {
+  if (path.basename(sessionId) !== sessionId) {
+    return;
+  }
+
+  try {
+    const pidPath = path.join(
+      os.homedir(),
+      '.agent-browser',
+      'namespaces',
+      'browser-opt',
+      'run',
+      `${sessionId}.pid`,
+    );
+    const pid = Number.parseInt(fs.readFileSync(pidPath, 'utf-8').trim(), 10);
+    if (!Number.isSafeInteger(pid) || pid <= 0) {
+      return;
+    }
+
+    const command = execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf-8' }).trim();
+    const executableName = path.basename(command.split(/\s+/, 1)[0] ?? '');
+    if (!executableName.startsWith('agent-browser')) {
+      return;
+    }
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    // 进程已退出或运行目录已清理时无需继续关闭，避免 close 命令重新拉起 Chrome。
+  }
+}
+
+/** 生成不会复用 daemon/socket 生命周期的 browser-opt session ID。 */
+function createBrowserOptSessionId(): string {
   return `browser-opt-${randomUUID().replaceAll('-', '').slice(0, 16)}`;
+}
+
+/** 首次升级时兼容清理旧版按项目路径生成的稳定 session。 */
+function legacyManagedSessionId(): string {
+  const projectHash = createHash('sha256').update(process.cwd()).digest('hex').slice(0, 16);
+  return `browser-opt-${projectHash}`;
+}
+
+/** session 记录与登录 state 放在同一项目数据目录，测试和自定义目录也能保持隔离。 */
+function managedSessionStatePath(): string {
+  const stateDir = process.env.BROWSER_OPT_AUTH_STATE_DIR || path.resolve(process.cwd(), DEFAULT_AUTH_STATE_DIR);
+  return path.join(stateDir, MANAGED_SESSION_STATE_FILE);
+}
+
+/** 读取上一轮可能存活的 session；损坏记录按无记录处理，由旧版稳定 ID 兜底。 */
+function loadManagedSessionIds(statePath: string): string[] {
+  try {
+    const state = JSON.parse(fs.readFileSync(statePath, 'utf-8')) as BrowserOptManagedSessionState;
+    return Array.isArray(state.sessionIds)
+      ? state.sessionIds.filter((sessionId): sessionId is string => typeof sessionId === 'string' && sessionId.length > 0)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/** 在浏览器启动前记录本轮 session，确保异常退出后下一次调用仍能完成清理。 */
+function saveManagedSessionIds(statePath: string, sessionIds: string[]): void {
+  fs.mkdirSync(path.dirname(statePath), { recursive: true });
+  fs.writeFileSync(statePath, JSON.stringify({ sessionIds }, null, 2));
 }
 
 /** 读取终端输入，供 handoff 暂停点等待用户确认继续。 */

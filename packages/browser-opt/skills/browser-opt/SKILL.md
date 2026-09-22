@@ -126,6 +126,7 @@ Poll `status` until it returns `PASS`, `FAIL`, or `HANDOFF`. `RUNNING` only mean
 ```bash
 browser-opt resume --run-id "<runId>" --json
 browser-opt status --run-id "<runId>" --json
+browser-opt stop --run-id "<runId>" --json
 ```
 
 The detached task executes the requested flow exactly once. `status` is read-only and `resume` only sends a one-time signal to that original process. Never start a second direct flow, `run`, or `start` command to simulate resume.
@@ -303,6 +304,9 @@ Keep the returned `runId`, poll it with `status`, and use `resume` after every h
 Optional runtime flags:
 
 ```bash
+browser-opt "<flow>" --clean-browser
+browser-opt "<flow>" --keep-previous-browser
+browser-opt "<flow>" --reuse-focused-browser
 browser-opt "<flow>" --profile Default
 browser-opt "<flow>" --state ./.browser-opt/states/browser-opt-default.json
 browser-opt "<flow>" --no-live-viewport
@@ -312,17 +316,24 @@ browser-opt "<flow>" --agent-chat
 
 Auth state reuse policy:
 
-- `browser-opt` first checks its saved auth state under `.browser-opt/states/`.
+- `browser-opt` records the managed session IDs for the current project. Before every run it closes the recorded previous sessions, then starts the main Chrome and any Profile fallback with fresh session IDs so tabs, form values, and daemon/socket lifecycle cannot leak into the next Workflow.
+- Only authentication state is reused across runs. The first call initializes from the selected Profile and saves state; later calls load that state into the fresh instance.
+- Translate natural-language requests such as `新开 Chrome`、`使用全新的 Chrome 实例` or `在独立 Chrome 窗口中执行` into `--keep-previous-browser`; do not leave that browser-mode instruction as a business step. This starts a new managed instance while retaining earlier managed instances; a later default run will clean up all recorded managed instances.
+- A saved Workflow may place `新开 Chrome 窗口` as a standalone first item in `steps`; treat it as the same runtime mode and remove it before business-step execution.
+- `--clean-browser` remains a compatibility alias for the default fresh-instance behavior. `--profile` and `--state` select the authentication source without preserving old tabs or page state.
+- `--reuse-focused-browser` remains an advanced compatibility option for explicitly attaching to an externally CDP-accessible Chrome; it is not the default reuse mechanism.
+- In managed mode, `browser-opt` first checks its saved auth state under `.browser-opt/states/`.
 - If a default state file exists, it loads that state first, so only cookies/storage are reused and prior Chrome tabs are not restored.
 - If the default state opens on a login screen or later redirects there, close the state window and replace it once with the selected Chrome profile before entering handoff. Keep that profile window and the original `browser-opt` runner alive for resume so the operator can use Chrome's password manager.
 - Saved workflows keep the original runner alive as a detached task and use `runId` for handoff recovery across Codex turns; an `exec_command` session id is never a durable recovery handle.
+- Use `browser-opt stop --run-id "<runId>" --json` when a detached run must be cancelled; closing its Chrome window is not a cancellation signal.
 - Programmatic runs use the same one-time profile fallback when the default state is invalid.
 - If no default state file exists, the single main agent opens the target directly with `--profile Default` and saves state from that same window. Do not create a separate profile importer.
 - Pass `--profile <name>` to choose a different Chrome profile for first import and default-state fallback.
 - Pass `--state <path>` to use a custom state file without automatic profile fallback.
-- Do not rely on focused-browser reuse for login import: ordinary Chrome is usually not CDP-accessible, and auto-connect can attach to the wrong temporary browser.
+- Do not start concurrent managed runs in the same project: a newer invocation intentionally closes the previous managed Chrome. Use `--reuse-focused-browser` only when explicitly working with an external CDP-accessible Chrome.
 
-It explicitly pins the system's standard Chrome executable and isolates the `browser-opt` agent-browser namespace, so a previously installed Chrome for Testing daemon cannot be reused accidentally. It shows and keeps that actual system Chrome browser by default so the user can watch the operation and inspect the final page state. This must be a real Chrome window, not the agent tool's built-in browser such as the Copilot/Codex in-app browser, and it must not open the agent-browser dashboard at `http://localhost:4848`. Use `--no-live-viewport` only when the user explicitly wants headless execution. `--agent-chat` is a legacy compatibility mode. It may require `AI_GATEWAY_API_KEY`; avoid it when the caller can inspect snapshots and produce deterministic actions.
+It pins the system's standard Chrome executable and isolates the `browser-opt` agent-browser namespace, so the managed session cannot accidentally reuse another tool's Chrome for Testing daemon. Both managed reuse and isolated mode operate a real Chrome window rather than the agent tool's built-in browser such as the Copilot/Codex in-app browser, and they must not open the agent-browser dashboard at `http://localhost:4848`. Use `--no-live-viewport` only when the user explicitly wants headless execution. `--agent-chat` is a legacy compatibility mode. It may require `AI_GATEWAY_API_KEY`; avoid it when the caller can inspect snapshots and produce deterministic actions.
 
 ## Output
 

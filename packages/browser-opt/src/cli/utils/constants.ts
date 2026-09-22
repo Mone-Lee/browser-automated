@@ -14,7 +14,7 @@ export const BROWSER_OPT_USAGE = `使用方式：
   browser-opt --version
   browser-opt version
   browser-opt check-update [--json] [--no-cache]
-  browser-opt <自然语言流程> [--profile <name>] [--state <path>] [--session <id>] [--no-live-viewport] [--output-dir <dir>] [--agent-chat]
+  browser-opt <自然语言流程> [--clean-browser|--keep-previous-browser|--reuse-focused-browser] [--profile <name>] [--state <path>] [--session <id>] [--no-live-viewport] [--output-dir <dir>] [--agent-chat]
   browser-opt save "<名称>" --flow "<完整流程>" [--workflow-dir <目录>] [--force]
   browser-opt run "<查询语句>" [--workflow-dir <目录>]
   browser-opt run --workflow-id "<ID>" [--workflow-dir <目录>]
@@ -22,5 +22,6 @@ export const BROWSER_OPT_USAGE = `使用方式：
   browser-opt start --workflow-id "<ID>" [--workflow-dir <目录>] [--json]
   browser-opt status --run-id "<ID>" [--json]
   browser-opt resume --run-id "<ID>" [--json]
+  browser-opt stop --run-id "<ID>" [--json]
   browser-opt list [--workflow-dir <目录>] [--json]
   browser-opt match "<查询语句>" [--workflow-dir <目录>] [--json]`;

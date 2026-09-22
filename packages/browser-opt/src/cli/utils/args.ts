@@ -56,19 +56,26 @@ export function resolveStatePath(flags: Record<string, string | boolean>): strin
 }
 
 export function resolveReuseRunningBrowser(
+  // 读取 clean-browser 和 reuse-focused-browser 等布尔型浏览器模式参数。
   flags: Record<string, string | boolean>,
+  // 传入 state 时必须启动独立浏览器，不能与运行中浏览器连接同时使用。
   statePath?: string,
+  // 当调用方没有显式模式参数时使用的默认值。
   defaultValue = false,
 ): boolean {
+  // state 文件需要在受控浏览器上下文中加载，因此优先禁止运行中浏览器复用。
   if (statePath) {
     return false;
   }
+  // clean-browser 明确要求启动新的独立浏览器。
   if (getBooleanFlag(flags, 'clean-browser')) {
     return false;
   }
+  // reuse-focused-browser 明确要求连接当前可发现的运行中浏览器。
   if (getBooleanFlag(flags, 'reuse-focused-browser')) {
     return true;
   }
+  // 没有显式覆盖时，返回调用方传入的默认模式。
   return defaultValue;
 }
 

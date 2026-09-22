@@ -118,6 +118,8 @@ npx --yes browser-e2e setup --with-deps
 
 ### browser-opt：一次性执行与 Workflow 复用
 
+`browser-opt` 每次调用都会根据项目记录关闭上一次由它托管的 Chrome，再用全新的 session 启动新实例，避免连续执行相同 URL 的 Workflow 时继承前一次填写的表单、标签页状态或 daemon/socket 生命周期。登录态通过 `.browser-opt/states/` 中保存的 state 恢复；首次没有 state 时会从默认 Profile 初始化并保存。`--clean-browser` 保留为兼容参数；`--profile`、`--state` 可显式选择登录态来源。`--reuse-focused-browser` 仅作为连接外部可调试 Chrome 的高级兼容选项，使用该模式时不会自动关闭外部浏览器。
+
 ```bash
 browser-opt "测试 https://example.com 的搜索功能。
 

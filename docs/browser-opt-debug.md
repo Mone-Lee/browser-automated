@@ -117,9 +117,11 @@ Skill 会先匹配当前项目中的 Workflow。名称精确命中或唯一候�
 
 ## 登录态与 handoff
 
-`browser-opt` 默认优先使用当前项目 `.browser-opt/states/` 下保存的 state 文件，只复用 cookies/storage，不恢复历史 Chrome 标签页。首次没有 state 时，唯一主 agent 直接使用 `--profile Default` 打开目标页并保存 state，不会先开一个导入窗口再切换窗口。
+`browser-opt` 会在项目数据目录记录本轮可能存活的 session ID，不扫描或连接用户日常 Chrome，也不要求用户开启远程调试。每次调用先关闭记录中的旧实例，再用全新的 session 启动 Chrome，避免继承旧标签页、表单值和 agent-browser daemon/socket 生命周期；profile fallback 同样使用新的 session。跨运行只通过当前项目 `.browser-opt/states/` 下的 state 文件复用 cookies/storage。首次没有 state 时，唯一主 agent 直接使用 `--profile Default` 打开目标页并保存 state。`--clean-browser` 保留为兼容参数，`--profile` 和 `--state` 用于选择登录态来源；只有显式 `--reuse-focused-browser` 会连接外部可调试 Chrome，且不会自动关闭它。
 
 当已有默认 state 打开目标页面后被拦到登录页时，CLI 关闭当前 state 窗口，切换到所选 Chrome Profile 的可见实例后再进入 handoff，以便人工使用 Chrome 密码管理器：
+
+后台 Workflow 可使用 `browser-opt stop --run-id "<ID>"` 终止，避免已脱离原终端的 handoff 或异常重试继续运行。
 
 1. 在可见浏览器里手动完成登录、验证码、OAuth 或 MFA。
 2. 回到终端输入 `done`、`ok`、`继续` 或 `完成`。

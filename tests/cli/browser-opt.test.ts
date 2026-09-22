@@ -1,7 +1,7 @@
 /**
  * 覆盖 browser-opt CLI 的用户侧参数处理，并通过桩命令避免真的启动浏览器会话。
  */
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -153,6 +153,7 @@ if (command === 'open') {
 function extractLoggedSessions(commands: string): string[] {
   return commands
     .split('\n')
+    .filter((command) => !/\bclose\s*$/.test(command))
     .map((command) => command.match(/(?:^|\s)--session\s+(\S+)/)?.[1])
     .filter((session): session is string => Boolean(session));
 }
@@ -519,7 +520,42 @@ describe('browser-opt CLI', () => {
     expect(commands.split('\n').filter((command) => /\bopen https:\/\/example\.com\b/.test(command))).toHaveLength(1);
   }, 20_000);
 
-  it('uses a fresh browser session when rerunning the same saved Workflow', () => {
+  it('stops a detached Workflow that is waiting for handoff', async () => {
+    const projectDir = makeTempDir();
+    const flow = '测试 https://example.com。\n1. handoff 给操作人员：请手动选择“商品白底图”的本地真实图片，并在确认完成后恢复自动化。';
+    const started = runCli([
+      'browser-opt',
+      'start',
+      '--flow',
+      flow,
+      '--json',
+    ], {}, undefined, { cwd: projectDir });
+    const startedRun = JSON.parse(started.stdout) as { runId: string; pid: number };
+    await waitForDetachedRunStatus(projectDir, startedRun.runId, 'HANDOFF');
+
+    const stopped = runCli([
+      'browser-opt',
+      'stop',
+      '--run-id',
+      startedRun.runId,
+      '--json',
+    ], {}, undefined, { cwd: projectDir });
+
+    expect(stopped.status).toBe(0);
+    expect(JSON.parse(stopped.stdout).status).toBe('STOP_REQUESTED');
+    let running = true;
+    for (let attempt = 0; attempt < 40 && running; attempt += 1) {
+      try {
+        process.kill(startedRun.pid, 0);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      } catch {
+        running = false;
+      }
+    }
+    expect(running).toBe(false);
+  }, 20_000);
+
+  it('resets the project browser session when rerunning the same saved Workflow', () => {
     const workflowDir = makeTempDir();
     const firstOutputDir = makeTempDir();
     const secondOutputDir = makeTempDir();
@@ -548,6 +584,8 @@ describe('browser-opt CLI', () => {
       '--output-dir',
       firstOutputDir,
     ], { AGENT_BROWSER_LOG: firstCommandLog, BROWSER_OPT_AUTH_STATE_DIR: stateDir });
+    const firstCommands = fs.readFileSync(firstCommandLog, 'utf-8');
+    const firstSessions = extractLoggedSessions(firstCommands);
     const second = runCli([
       'browser-opt',
       'run',
@@ -561,13 +599,16 @@ describe('browser-opt CLI', () => {
 
     expect(first.status).toBe(0);
     expect(second.status).toBe(0);
-    const firstSessions = extractLoggedSessions(fs.readFileSync(firstCommandLog, 'utf-8'));
     const secondSessions = extractLoggedSessions(fs.readFileSync(secondCommandLog, 'utf-8'));
     expect(new Set(firstSessions).size).toBe(1);
     expect(new Set(secondSessions).size).toBe(1);
     expect(firstSessions[0]).not.toBe(secondSessions[0]);
     expect(firstSessions[0]).toMatch(/^browser-opt-[a-f0-9]{16}$/);
     expect(secondSessions[0]).toMatch(/^browser-opt-[a-f0-9]{16}$/);
+    expect(firstCommands).not.toMatch(/\bclose\s*$/m);
+    expect(fs.readFileSync(secondCommandLog, 'utf-8')).not.toMatch(/\bclose\s*$/m);
+    expect(firstCommands).toContain('state load');
+    expect(fs.readFileSync(secondCommandLog, 'utf-8')).toContain('state load');
   });
 
   it('reuses an explicitly configured browser session for a saved Workflow', () => {
@@ -601,6 +642,36 @@ describe('browser-opt CLI', () => {
 
     expect(result.status).toBe(0);
     expect(new Set(extractLoggedSessions(fs.readFileSync(commandLog, 'utf-8')))).toEqual(new Set(['caller-managed-session']));
+  });
+
+  it('opens a new Chrome when a saved Workflow query requests it', () => {
+    const workflowDir = makeTempDir();
+    const outputDir = makeTempDir();
+    const commandLog = path.join(makeTempDir(), 'agent-browser.log');
+    expect(runCli([
+      'browser-opt',
+      'save',
+      '自然语言浏览器模式流程',
+      '--flow',
+      '测试 https://example.com。\\n1. 验证页面包含 "Example"。',
+      '--workflow-dir',
+      workflowDir,
+    ]).status).toBe(0);
+
+    const result = runCli([
+      'browser-opt',
+      'run',
+      '请新开 Chrome 执行自然语言浏览器模式流程',
+      '--workflow-dir',
+      workflowDir,
+      '--output-dir',
+      outputDir,
+    ], { AGENT_BROWSER_LOG: commandLog });
+
+    expect(result.status).toBe(0);
+    const commands = fs.readFileSync(commandLog, 'utf-8');
+    expect(commands).not.toContain('--auto-connect');
+    expect(commands).toContain('--profile Default');
   });
 
   it('runs a selected saved Workflow by stable ID', () => {
@@ -736,36 +807,132 @@ describe('browser-opt CLI', () => {
     expect(result.stdout).toContain('自然语言流程示例');
   });
 
-  it('uses --output-dir and exits zero for a passing flow', () => {
+  it('closes the previous project-managed Chrome and starts a clean instance by default', () => {
+    const stateDir = makeTempDir();
+    const firstOutputDir = makeTempDir();
+    const secondOutputDir = makeTempDir();
+    const firstCommandLog = path.join(makeTempDir(), 'first-agent-browser.log');
+    const secondCommandLog = path.join(makeTempDir(), 'second-agent-browser.log');
+    const flow = '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。';
+    const first = runCli([
+      'browser-opt',
+      flow,
+      '--output-dir',
+      firstOutputDir,
+    ], { AGENT_BROWSER_LOG: firstCommandLog, BROWSER_OPT_AUTH_STATE_DIR: stateDir });
+    const firstCommands = fs.readFileSync(firstCommandLog, 'utf-8');
+    const firstSessions = extractLoggedSessions(firstCommands);
+    const second = runCli([
+      'browser-opt',
+      flow,
+      '--output-dir',
+      secondOutputDir,
+    ], { AGENT_BROWSER_LOG: secondCommandLog, BROWSER_OPT_AUTH_STATE_DIR: stateDir });
+
+    expect(first.status).toBe(0);
+    expect(second.status).toBe(0);
+    const secondCommands = fs.readFileSync(secondCommandLog, 'utf-8');
+    const secondSessions = extractLoggedSessions(secondCommands);
+    expect(new Set(firstSessions).size).toBe(1);
+    expect(new Set(secondSessions).size).toBe(1);
+    expect(firstSessions[0]).not.toBe(secondSessions[0]);
+    expect(firstSessions[0]).toMatch(/^browser-opt-[a-f0-9]{16}$/);
+    expect(firstCommands).not.toMatch(/\bclose\s*$/m);
+    expect(secondCommands).not.toMatch(/\bclose\s*$/m);
+    expect(firstCommands).toContain('--profile Default');
+    expect(firstCommands).toContain('state save');
+    expect(secondCommands).toContain('state load');
+    expect(firstCommands).not.toContain('--auto-connect');
+    expect(secondCommands).not.toContain('--auto-connect');
+    expect(fs.readdirSync(firstOutputDir).some((entry) => fs.existsSync(path.join(firstOutputDir, entry, 'report.json')))).toBe(true);
+    expect(fs.readdirSync(secondOutputDir).some((entry) => fs.existsSync(path.join(secondOutputDir, entry, 'report.json')))).toBe(true);
+  });
+
+  it('terminates the previous managed daemon without invoking agent-browser close', async () => {
+    const fakeHome = makeTempDir();
+    const stateDir = makeTempDir();
     const outputDir = makeTempDir();
     const commandLog = path.join(makeTempDir(), 'agent-browser.log');
-    const result = runCli([
-      'browser-opt',
-      '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。',
-      '--output-dir',
-      outputDir,
-    ], { AGENT_BROWSER_LOG: commandLog });
+    const sessionId = 'browser-opt-previous';
+    const daemonPath = path.join(makeTempDir(), 'agent-browser-daemon');
+    fs.symlinkSync('/bin/sleep', daemonPath);
+    const daemon = spawn(daemonPath, ['30'], { stdio: 'ignore' });
+    const daemonExited = new Promise<boolean>((resolve) => {
+      const timeout = setTimeout(() => resolve(false), 2_000);
+      daemon.once('exit', () => {
+        clearTimeout(timeout);
+        resolve(true);
+      });
+    });
 
-    expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe('执行成功');
-    expect(result.stdout).not.toContain('Status: PASS');
-    expect(result.stdout).not.toContain(outputDir);
-    const commands = fs.readFileSync(commandLog, 'utf-8');
-    expect(commands).not.toContain('--session-name');
-    expect(commands).toContain('--profile Default');
-    expect(commands).not.toContain('close --all');
-    expect(commands).toContain('state save');
-    expect(commands).not.toContain('--auto-connect');
-    expect(commands).not.toContain('--state ');
-    expect(commands).toContain('open https://example.com');
-    expect(commands.trim().split('\n').every((command) => command.startsWith('--profile Default '))).toBe(true);
-    expect(commands).toMatch(/--profile Default --session browser-opt-[a-f0-9]{16} --headed open https:\/\/example\.com/);
-    expect(commands.split('\n').filter((command) => /\bopen https:\/\/example\.com\b/.test(command))).toHaveLength(1);
-    expect(commands).not.toContain('close');
-    expect(commands).toContain('browser-opt-default.json');
-    expect(commands).not.toContain('auth-import');
-    expect(commands).not.toContain('dashboard start');
-    expect(fs.readdirSync(outputDir).some((entry) => fs.existsSync(path.join(outputDir, entry, 'report.json')))).toBe(true);
+    try {
+      const runDir = path.join(fakeHome, '.agent-browser', 'namespaces', 'browser-opt', 'run');
+      fs.mkdirSync(runDir, { recursive: true });
+      fs.writeFileSync(path.join(runDir, `${sessionId}.pid`), String(daemon.pid));
+      fs.writeFileSync(path.join(stateDir, 'browser-opt-sessions.json'), JSON.stringify({ sessionIds: [sessionId] }));
+
+      const result = runCli([
+        'browser-opt',
+        '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。',
+        '--output-dir',
+        outputDir,
+      ], {
+        HOME: fakeHome,
+        AGENT_BROWSER_LOG: commandLog,
+        BROWSER_OPT_AUTH_STATE_DIR: stateDir,
+      });
+
+      expect(result.status).toBe(0);
+      expect(await daemonExited).toBe(true);
+      expect(fs.readFileSync(commandLog, 'utf-8')).not.toMatch(/\bclose\s*$/m);
+    } finally {
+      daemon.kill('SIGKILL');
+    }
+  });
+
+  it('keeps the previous managed Chrome when the flow requests a new Chrome window', async () => {
+    const fakeHome = makeTempDir();
+    const stateDir = makeTempDir();
+    const outputDir = makeTempDir();
+    const workflowDir = makeTempDir();
+    const sessionId = 'browser-opt-previous';
+    const daemonPath = path.join(makeTempDir(), 'agent-browser-daemon');
+    fs.symlinkSync('/bin/sleep', daemonPath);
+    const daemon = spawn(daemonPath, ['30'], { stdio: 'ignore' });
+
+    try {
+      const runDir = path.join(fakeHome, '.agent-browser', 'namespaces', 'browser-opt', 'run');
+      fs.mkdirSync(runDir, { recursive: true });
+      fs.writeFileSync(path.join(runDir, `${sessionId}.pid`), String(daemon.pid));
+      fs.writeFileSync(path.join(stateDir, 'browser-opt-sessions.json'), JSON.stringify({ sessionIds: [sessionId] }));
+      fs.writeFileSync(path.join(workflowDir, 'new-chrome-window.json'), JSON.stringify({
+        id: 'new-chrome-window',
+        name: '新开 Chrome 窗口流程',
+        target: { url: 'https://example.com' },
+        steps: ['新开 Chrome 窗口', '验证页面包含 "Example"。'],
+        createdAt: '2026-09-22T00:00:00.000Z',
+        updatedAt: '2026-09-22T00:00:00.000Z',
+      }));
+
+      const result = runCli([
+        'browser-opt',
+        'run',
+        '--workflow-id',
+        'new-chrome-window',
+        '--workflow-dir',
+        workflowDir,
+        '--output-dir',
+        outputDir,
+      ], { HOME: fakeHome, BROWSER_OPT_AUTH_STATE_DIR: stateDir });
+
+      expect(result.status).toBe(0);
+      expect(() => process.kill(daemon.pid!, 0)).not.toThrow();
+      const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'browser-opt-sessions.json'), 'utf-8')) as { sessionIds: string[] };
+      expect(state.sessionIds).toContain(sessionId);
+      expect(state.sessionIds).toHaveLength(3);
+    } finally {
+      daemon.kill('SIGKILL');
+    }
   });
 
   it('keeps success output unchanged when the current run brings artifacts to exactly ten', () => {
@@ -814,7 +981,7 @@ describe('browser-opt CLI', () => {
     expect(result.stdout).toContain('产物清理建议');
   });
 
-  it('uses a fresh browser session for each immediate flow execution', () => {
+  it('keeps --clean-browser as a compatible alias for the default fresh-instance behavior', () => {
     const stateDir = makeTempDir();
     fs.writeFileSync(path.join(stateDir, 'browser-opt-default.json'), JSON.stringify({ cookies: [], origins: [] }));
     const firstCommandLog = path.join(makeTempDir(), 'first-agent-browser.log');
@@ -822,12 +989,13 @@ describe('browser-opt CLI', () => {
     const args = [
       'browser-opt',
       '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。',
+      '--clean-browser',
       '--output-dir',
       makeTempDir(),
     ];
 
     expect(runCli(args, { AGENT_BROWSER_LOG: firstCommandLog, BROWSER_OPT_AUTH_STATE_DIR: stateDir }).status).toBe(0);
-    args[3] = makeTempDir();
+    args[4] = makeTempDir();
     expect(runCli(args, { AGENT_BROWSER_LOG: secondCommandLog, BROWSER_OPT_AUTH_STATE_DIR: stateDir }).status).toBe(0);
 
     const firstSessions = extractLoggedSessions(fs.readFileSync(firstCommandLog, 'utf-8'));
@@ -835,6 +1003,42 @@ describe('browser-opt CLI', () => {
     expect(new Set(firstSessions).size).toBe(1);
     expect(new Set(secondSessions).size).toBe(1);
     expect(firstSessions[0]).not.toBe(secondSessions[0]);
+    const firstCommands = fs.readFileSync(firstCommandLog, 'utf-8');
+    expect(firstCommands).not.toMatch(/\bclose\s*$/m);
+    expect(firstCommands).not.toContain('--auto-connect');
+    expect(firstCommands).toContain(`state load ${path.join(stateDir, 'browser-opt-default.json')}`);
+  });
+
+  it('does not close an external Chrome when --reuse-focused-browser is requested', () => {
+    const commandLog = path.join(makeTempDir(), 'agent-browser.log');
+    const result = runCli([
+      'browser-opt',
+      '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。',
+      '--reuse-focused-browser',
+      '--output-dir',
+      makeTempDir(),
+    ], { AGENT_BROWSER_LOG: commandLog });
+
+    expect(result.status).toBe(0);
+    const commands = fs.readFileSync(commandLog, 'utf-8');
+    expect(commands).toContain('--auto-connect');
+    expect(commands).not.toMatch(/(?:^|\n).*\bclose\b/);
+  });
+
+  it('opens a new Chrome when requested in natural language', () => {
+    const outputDir = makeTempDir();
+    const commandLog = path.join(makeTempDir(), 'agent-browser.log');
+    const result = runCli([
+      'browser-opt',
+      '请新开一个 Chrome 实例测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。',
+      '--output-dir',
+      outputDir,
+    ], { AGENT_BROWSER_LOG: commandLog });
+
+    expect(result.status).toBe(0);
+    const commands = fs.readFileSync(commandLog, 'utf-8');
+    expect(commands).not.toContain('--auto-connect');
+    expect(commands).toContain('--profile Default');
   });
 
   it('writes default browser-opt state and artifacts under .browser-opt', () => {
@@ -843,6 +1047,7 @@ describe('browser-opt CLI', () => {
     const result = runCli([
       'browser-opt',
       '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。',
+      '--clean-browser',
     ], { AGENT_BROWSER_LOG: commandLog }, undefined, { cwd: projectDir, useDefaultAuthStateDir: true });
 
     const canonicalProjectDir = fs.realpathSync(projectDir);
@@ -860,6 +1065,7 @@ describe('browser-opt CLI', () => {
     const result = runCli([
       'browser-opt',
       '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Missing"。',
+      '--clean-browser',
     ], { AGENT_BROWSER_LOG: commandLog }, undefined, { cwd: projectDir, useDefaultAuthStateDir: true });
 
     const canonicalProjectDir = fs.realpathSync(projectDir);
@@ -900,6 +1106,7 @@ describe('browser-opt CLI', () => {
     const result = runCli([
       'browser-opt',
       '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。',
+      '--clean-browser',
       '--output-dir',
       outputDir,
     ], { AGENT_BROWSER_LOG: commandLog, BROWSER_OPT_AUTH_STATE_DIR: stateDir });
@@ -915,7 +1122,7 @@ describe('browser-opt CLI', () => {
     expect(fs.readFileSync(findLatestReportJson(outputDir), 'utf-8')).toContain(`auth-state-mode: state ${statePath}, fallback-profile=Default`);
   });
 
-  it('replaces an invalid default state window with the selected profile', () => {
+  it('replaces an invalid default state window with the selected profile in a fresh session', () => {
     const outputDir = makeTempDir();
     const commandLog = path.join(makeTempDir(), 'agent-browser.log');
     const resumeMarker = path.join(makeTempDir(), 'resume-marker');
@@ -926,6 +1133,7 @@ describe('browser-opt CLI', () => {
     const result = runCli([
       'browser-opt',
       '测试 https://example.com。\n\n目标：\n1. 验证页面包含 "Example"。',
+      '--clean-browser',
       '--output-dir',
       outputDir,
     ], {
@@ -1063,6 +1271,7 @@ describe('browser-opt CLI', () => {
     expect(commands).not.toContain('resume');
     expect(commands.split('\n').filter((command) => /\bopen https:\/\/example\.com\/live\/create\b/.test(command))).toHaveLength(1);
     expect(commands).toContain('fill @e2 安选公开直播自动化');
+    expect(commands).not.toContain('state load');
     expect(commands).toContain('state save');
   });
 

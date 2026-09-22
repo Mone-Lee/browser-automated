@@ -372,7 +372,7 @@ LLM 生成测试语义、命名、断言
 - [x] 实现 `browser-opt save/list/match/run`。
 - [x] 实现 workflow matcher。
 - [x] 支持中文名称、稳定 ID、同名覆盖保护和无效文件诊断。
-- [x] Workflow 运行复用现有 BrowserOptRunner；独立执行使用新 session，handoff 通过原进程恢复同一 session。
+- [x] Workflow 运行复用现有 BrowserOptRunner；默认根据项目记录关闭旧托管 Chrome，再用全新 session 启动实例，handoff 通过原进程恢复本次 session。
 
 验收：
 
