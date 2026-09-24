@@ -14,6 +14,7 @@ const DEFAULT_CLEAN_BROWSER_ARGS = [
   '--disable-session-crashed-bubble',
   '--no-first-run',
   '--no-default-browser-check',
+  '--no-startup-window',
 ];
 const AGENT_BROWSER_INSTALL_HINT = '请先安装 agent-browser，例如：npm install -g agent-browser。';
 
@@ -107,9 +108,12 @@ export class BrowserAgent {
     this.executablePath = options.executablePath ?? resolveSystemChromeExecutable() ?? null;
     this.statePath = options.statePath ?? null;
     this.reuseRunningBrowser = options.reuseRunningBrowser ?? false;
-    this.browserArgs =
-      options.browserArgs ??
-      (!this.profile && (!this.reuseRunningBrowser || this.statePath) ? DEFAULT_CLEAN_BROWSER_ARGS : []);
+    // 托管会话禁止 Chrome 额外创建启动页，目标标签页交给自动化命令打开。
+    this.browserArgs = options.browserArgs ?? (
+      this.profile
+        ? ['--no-startup-window']
+        : !this.reuseRunningBrowser || this.statePath ? DEFAULT_CLEAN_BROWSER_ARGS : []
+    );
     this.liveViewportReady = false;
     this.browserOpened = false;
   }
@@ -563,10 +567,10 @@ export class BrowserAgent {
     return `RESUME: continuing browser session ${this.sessionId}.`;
   }
 
-  /** 关闭浏览器会话；这里吞掉异常，保证清理阶段尽量顺利完成。 */
+  /** 关闭时保留启动配置，避免命令执行前因配置变化重启浏览器；清理失败不阻断主流程。 */
   close(): void {
     try {
-      this.runBestEffort(['--session', this.sessionId, 'close']);
+      this.runBestEffort(this.buildGlobalArgs(['close'], this.headed));
     } catch {
       // 清理阶段忽略关闭失败，常见原因是会话已经提前结束。
     } finally {
