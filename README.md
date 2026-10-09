@@ -193,6 +193,27 @@ browser-opt run "执行示例首页验证流程"
 
 Workflow 默认保存到调用项目的 `.browser-opt/workflows/`；运行证据默认保存到 `.browser-opt/artifacts/`。
 
+例如，`.browser-opt/workflows/示例首页验证流程.json` 的内容如下：
+
+```json
+{
+  "id": "示例首页验证流程",
+  "name": "示例首页验证流程",
+  "target": {
+    "url": "https://example.com"
+  },
+  "steps": [
+    "验证页面包含\"Example Domain\"。",
+    "点击\"More information\"链接。",
+    "验证跳转后的页面可以正常访问。"
+  ],
+  "createdAt": "2026-10-09T08:00:00.000Z",
+  "updatedAt": "2026-10-09T08:00:00.000Z"
+}
+```
+
+`id` 必须与 JSON 文件名一致；`target.url` 已表示需要打开的页面，因此 `steps` 只需填写页面打开后的操作和验证步骤。
+
 ### Workflow 查询与匹配
 
 列出当前项目保存的 Workflow：
