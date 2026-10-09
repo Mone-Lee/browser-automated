@@ -5,6 +5,11 @@ packages/**/dist/
 .agent-browser/
 .browser-automated/
 *.png
+# README 使用的 browser-opt 说明图需要随仓库发布。
+!docs/images/browser-opt-auth-state.png
+!docs/images/browser-opt-files.png
+!docs/images/browser-opt-failure-report.png
+!docs/images/browser-opt-high-impact-guard.png
 *.jpg
 *.jpeg
 *.pdf
