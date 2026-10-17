@@ -1,5 +1,5 @@
 /**
- * monorepo 发版入口，按目标发布两个自包含的 CLI package。
+ * monorepo 发版入口，按目标发布自包含的 CLI package。
  */
 import { execSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 const NPMJS_REGISTRY = 'https://registry.npmjs.org/';
 const LOCKFILE_URL = new URL('../package-lock.json', import.meta.url);
 const RELEASE_TYPES = new Set(['patch', 'minor', 'major']);
-const TARGETS = new Set(['all', 'browser-opt', 'browser-e2e']);
+const TARGETS = new Set(['all', 'browser-opt', 'browser-e2e', 'browser-test']);
 const PACKAGE_BY_TARGET = {
   'browser-opt': {
     name: 'browser-opt',
@@ -18,6 +18,11 @@ const PACKAGE_BY_TARGET = {
     name: 'browser-e2e',
     dir: 'packages/browser-e2e',
     tagPrefix: 'browser-e2e',
+  },
+  'browser-test': {
+    name: 'browser-test',
+    dir: 'packages/browser-test',
+    tagPrefix: 'browser-test',
   },
 };
 
@@ -45,14 +50,14 @@ function parseArgs() {
 
   if (!RELEASE_TYPES.has(releaseType)) {
     console.error(`\nInvalid release type: "${releaseType}"`);
-    console.error('Usage: npm run release -- [all|browser-opt|browser-e2e] [patch|minor|major]');
+    console.error('Usage: npm run release -- [all|browser-opt|browser-e2e|browser-test] [patch|minor|major]');
     console.error('Dry run: npm run release:dry-run -- [target] [patch|minor|major]');
     process.exit(1);
   }
 
   if (first && !TARGETS.has(first) && !RELEASE_TYPES.has(first)) {
     console.error(`\nInvalid release target: "${first}"`);
-    console.error('Usage: npm run release -- [all|browser-opt|browser-e2e] [patch|minor|major]');
+    console.error('Usage: npm run release -- [all|browser-opt|browser-e2e|browser-test] [patch|minor|major]');
     process.exit(1);
   }
 
@@ -61,7 +66,7 @@ function parseArgs() {
 
 function resolveReleaseTargets(target) {
   return target === 'all'
-    ? ['browser-opt', 'browser-e2e']
+    ? ['browser-opt', 'browser-e2e', 'browser-test']
     : [target];
 }
 

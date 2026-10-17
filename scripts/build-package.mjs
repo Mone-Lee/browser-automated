@@ -7,12 +7,12 @@ import { chmodSync, rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const PACKAGE_NAMES = new Set(['browser-opt', 'browser-e2e']);
+const PACKAGE_NAMES = new Set(['browser-opt', 'browser-e2e', 'browser-test']);
 const packageName = process.argv[2];
 const typecheckOnly = process.argv.includes('--typecheck');
 
 if (!packageName || !PACKAGE_NAMES.has(packageName)) {
-  console.error('Usage: node scripts/build-package.mjs <browser-opt|browser-e2e> [--typecheck]');
+  console.error('Usage: node scripts/build-package.mjs <browser-opt|browser-e2e|browser-test> [--typecheck]');
   process.exit(1);
 }
 

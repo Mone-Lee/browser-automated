@@ -6,6 +6,7 @@ import { execSync } from 'node:child_process';
 const PACKAGES = [
   'browser-opt',
   'browser-e2e',
+  'browser-test',
 ];
 
 function run(command) {

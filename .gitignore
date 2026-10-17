@@ -4,6 +4,7 @@ packages/**/dist/
 *.tsbuildinfo
 .agent-browser/
 .browser-automated/
+.browser-test/
 # 未在 README 中引用的内部实现文档不随仓库发布。
 /docs/browser-opt-debug.md
 /docs/browser-opt-token-efficiency.md

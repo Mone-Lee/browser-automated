@@ -1,0 +1,23 @@
+{
+  "name": "browser-test",
+  "version": "0.1.0",
+  "description": "OMS／中台用例驱动测试工具，由 AI 助手编排并按证据判断",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": { ".": "./dist/index.js" },
+  "imports": {
+    "#browser-core/*": { "types": "./dist/browser-core/*.d.ts", "default": "./dist/browser-core/*.js" }
+  },
+  "bin": { "browser-test": "dist/cli/browser-test.js" },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs browser-test",
+    "typecheck": "node ../../scripts/build-package.mjs browser-test --typecheck"
+  },
+  "engines": { "node": ">=24" },
+  "dependencies": {},
+  "peerDependencies": { "agent-browser": ">=0.33.1 <0.35.0" },
+  "peerDependenciesMeta": { "agent-browser": { "optional": true } },
+  "license": "ISC"
+}

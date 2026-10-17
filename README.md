@@ -1,7 +1,7 @@
 # browser-automated
 
 > [!IMPORTANT]
-> 当前只有 `browser-opt` 可用。`browser-e2e` **尚未实现**，仓库中的相关目录仅用于后续开发，请勿安装、调用或用于生产流程。
+> `browser-test` 仍处于技术设计和分步实现阶段：当前仅提供包配置、构建和 `--help` 入口，不能用于执行测试或生产流程。`browser-e2e` **尚未实现**，请勿安装、调用或用于生产流程。
 
 `browser-automated` 当前主要维护 `browser-opt`：一个面向真实 Chrome 的自然语言浏览器操作工具。它可以立即执行一次操作，也可以保存和复用项目级 Workflow，并为每次运行产出截图、页面快照、日志和 PASS/FAIL 报告。
 
@@ -13,9 +13,27 @@
 | --- | --- | --- | --- |
 | `browser-opt` | ✅ 可用 | 是 | 执行自然语言浏览器流程，保存 Workflow 和运行证据 |
 | `browser-core` | 🔒 内部模块 | 否 | 为上层工具提供浏览器连接、session 和 handoff 能力，不独立发布 |
-| `browser-e2e` | 🚧 规划中 | 否 | 未来用于匹配、执行和生成 Playwright 测试 |
+| `browser-test` | 🧩 设计中 | 否 | 面向 Web 与微信小程序的 Gherkin 用例驱动测试工具 |
+| `browser-e2e` | ⏸️ 已暂停 | 否 | 保留现有规划代码，当前不继续测试生成主线 |
 
-当前需要浏览器自动操作、页面调试或运行证据时，请使用 `browser-opt`。如果目标是生成可进入 CI 的 Playwright 测试，请等待 `browser-e2e` 后续实现。
+当前需要浏览器自动操作、页面调试或运行证据时，请使用 `browser-opt`。`browser-test` 的实现完成前，不提供可运行的用例测试能力；Playwright 测试生成主线已经暂停。
+
+## browser-test（设计中）
+
+`browser-test` 是独立 CLI，不扩展 `browser-opt`，也不处理 Workflow 与测试用例的互转。目标是将 XMind 用例经人工确认转换为可读的 `.feature` 文件，并在 Web 或微信开发者工具模拟器中执行，产出可复现的逐步结论和运行证据。
+
+设计以 `.feature` 为唯一执行入口：步骤原文就是断言口径，运行器不会改写或放宽预期。执行时优先使用确定性规则判断；规则无法覆盖时才由 AI 辅助判断；配置、登录、数据场景或证据不足时结论为 `BLOCKED`。mock 与真实服务的结果会分别标注，不能互相替代。
+
+规划支持的 target 包括本地 mock、本地代理、在线 Web 环境，以及微信开发者工具的 mock／真实服务环境。页面入口、路由别名、登录态和小程序项目路径由业务项目的 `project.json` 配置；可复现数据场景由独立 mocks 包提供，不在运行时临时生成。
+
+目前可用于验证骨架是否可构建：
+
+```bash
+npm run build -w browser-test
+node packages/browser-test/dist/cli/browser-test.js --help
+```
+
+后续命令、Feature 协议、运行产物、退出码及分步验收标准请见 [browser-test 技术设计文档](docs/browser-test-technical-plan.md)。其中的命令示例代表目标接口，待对应实施步骤完成后才可使用。
 
 ## browser-opt 特性
 
@@ -343,16 +361,17 @@ browser-opt stop --run-id "<runId>" --json
 
 当运行证据超过 10 份，或 `artifacts` 与已结束的 `handoffs` 合计超过 500 MB 时，CLI 会给出按时间排序的清理建议，但不会自动删除文件。确认运行正常且不再需要排查后，可以手动清理对应的临时目录；不要删除仍需复用的 Workflow 和 State。
 
-## browser-e2e 规划
+## browser-e2e 状态
 
-`browser-e2e` 的目标是匹配已有 E2E 用例、执行测试，并生成 Playwright 测试代码。目前该能力**尚未实现**，README 暂不提供安装和使用命令；在正式实现并验证前，仓库内的占位代码和脚本不代表可用功能。
+`browser-e2e` 原计划匹配已有 E2E 用例、执行测试并生成 Playwright 代码，目前该主线已经暂停。仓库保留现有占位代码，不提供安装和使用命令。
 
 ## 仓库结构
 
 - `packages/browser-core/src`：底层浏览器适配、session、handoff 与基础类型；不独立发布
 - `packages/browser-opt/src`：`browser-opt` 包源码与 CLI
 - `packages/browser-opt/skills`：随 `browser-opt` 发布的 Skill
-- `packages/browser-e2e`：尚未实现的规划目录，不提供可用 CLI
+- `packages/browser-test`：Gherkin 用例驱动测试工具的实现目录（当前为最小骨架）
+- `packages/browser-e2e`：已暂停的规划目录，不提供可用 CLI
 - `packages/*/dist`：构建产物，由构建命令生成
 
 ## 开发
@@ -413,4 +432,4 @@ npm run release browser-opt minor
 npm run release:browser-opt minor
 ```
 
-`browser-opt` 的构建会把共享底层代码编译进自己的 `dist/browser-core`，不会单独发布 core 包。`browser-e2e` 尚未实现，不应执行相关发版命令。
+各 CLI 的构建会把共享底层代码编译进自己的 `dist/browser-core`，不会单独发布 core 包。`browser-e2e` 已暂停，不应执行相关发版命令。
