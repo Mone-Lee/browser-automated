@@ -1,44 +1,39 @@
 # browser-test 技术设计：Gherkin 驱动的 Web 与微信小程序测试
 
-> 本文是 `browser-test` 的目标设计，也是从零实现的路线图。当前包只保留最小骨架（包配置、构建、`--help` 入口），文中所有能力均按第 9 章的步骤逐步实现，实现前不能当作现有 CLI 的使用说明。
+> 本文是 `browser-test` 的目标设计，也是从零实现的路线图。当前按“用户仅持有 XMind 用例”重新收敛范围。此前的项目预设类型、校验与读取代码已移除，当前从 XMind 导入开始实施。CLI 仍仅提供帮助和版本查询，其余能力按第 9 章逐步实现，实现前不能当作现有 CLI 的使用说明。
 
 ## 1. 背景与目标
 
-OMS／中台与微信小程序测试用例以 XMind 维护，开发联调和问题回归更适合直接运行可读的 Gherkin。把每条用例改写成测试代码接入成本高；纯自然语言 UI 执行又缺少稳定的数据、明确的断言口径和可信的结果。
+Web 应用与微信小程序测试用例以 XMind 维护，开发联调和问题回归更适合直接运行可读的 Gherkin。把每条用例改写成测试代码接入成本高；纯自然语言 UI 执行又缺少稳定的数据、明确的断言口径和可信的结果。
 
-`browser-test` 的做法是：**一个 `.feature` 文件 + 一条命令 + 一份可读报告**。
+`browser-test` 的起点是：**用户手上只有一个包含测试用例的 XMind 文件**。先导入并确认用例，再执行并输出报告，不要求访问业务仓库或准备项目配置。
 
 - XMind 用例经 AI 引导生成并由人确认，落成 `.feature`。
-- 运行时由 AI 读取步骤，Web 通过 agent-browser、小程序通过微信开发者工具 `wechatide` 在真实运行时中操作和观测；mock target 通过业务仓库的场景适配器提供可复现数据。
+- 运行时由 AI 读取步骤，Web 通过 agent-browser、小程序通过微信开发者工具 `wechatide` 在真实运行时中操作和观测。
 - 确定性规则优先判定，AI 只负责动作选择和规则无法覆盖的局部语义判断；证据不足一律 BLOCKED。
 
 核心原则：
 
 - `.feature` 是唯一执行入口，步骤原文即断言口径，运行器不得改写步骤或放宽预期。
-- 每次运行记录 feature 摘要、target 和 seed，结论只引用本次运行的实际页面证据。
+- 每次运行记录 feature 摘要、实际执行入口、运行平台和用户补充的信息来源，结论只引用本次运行的实际页面证据。
 - 操作前后均观测；写操作失败或结果不明时不自动重试。
-- 配置、环境、登录或证据不满足时停止，并输出明确的阻塞原因。
+- 环境、登录、用例数据前提或证据不满足时停止，并输出明确的阻塞原因。
 - 默认产物只服务复现和排查，不预生成中间资产。
 
 ### 1.1 支持范围
 
-聚焦 OMS／中台 Web 和微信开发者工具模拟器中的小程序。APP 用例可导入，但标记为不支持。
+聚焦 Web 应用 和微信开发者工具模拟器中的小程序。APP 用例可导入，但标记为不支持。
 
-| target | 含义 | 用途 |
-| --- | --- | --- |
-| `local-msw` | 本地前端 + MSW 场景 | 联调自测、稳定问题回归 |
-| `local-proxy` | 本地前端 + 真实测试后端 | 联调真实接口 |
-| `online` | 线上或测试环境页面 | 只读断言优先 |
-| `wechat-devtools-mock` | 微信开发者工具模拟器 + 小程序 mock 场景 | 小程序联调自测、稳定问题回归 |
-| `wechat-devtools-live` | 微信开发者工具模拟器 + 真实测试后端 | 小程序真实接口联调 |
+首期先打通 Web 的只读用例闭环，再接入已在微信开发者工具中运行的小程序。执行使用现有环境，工具不要求接入 mock 或修改业务代码。Web 与小程序交互或预期不同时使用独立 Scenario，不为跨端复用放宽断言。
 
-同一平台、业务语义一致的 feature 只切换 `--target` 即可运行；Web 与小程序交互或预期不同时使用独立 Scenario，不为追求跨端复用而放宽断言。mock 与 live 的结论分别标注，互不替代；后端落库、跨系统同步和真实授权结果必须引用 live 证据。
+用户无需预先提供路由、应用映射、源码路径或登录态文件。XMind 中已有的信息原样保留；执行时缺少入口或登录条件，再按当前步骤请求补充或人工接管。工具和运行环境的安装仍属于执行能力准备，不属于业务项目配置。
 
 ### 1.2 非目标
 
 - 不引入 Cucumber 运行时和 step definition 代码。
 - 不改变 `browser-opt` 的 Workflow 行为，不做 XMind 与 Workflow 的互转。
 - 不恢复 `browser-e2e` 测试代码生成，不建设替代真实系统的演示业务系统。
+- 当前不设计或接入 `project.json`、业务路由源码解析、路由表、URL 拼接规则、应用与环境预设、mock 场景配置；后续有实际效率需求时再评估。
 - 不预先建设 PageModel、ExecutionPlan、数据清单、checkpoint 和批量执行；出现真实需求后再独立评估。
 - 首期小程序范围限定为微信开发者工具模拟器，不把模拟器结论等同于真机微信、原生授权或设备能力验证。
 
@@ -49,7 +44,6 @@ flowchart TB
     subgraph Input[输入]
         XM[XMind 用例]
         FE[.feature 文件]
-        PJ[project.json<br/>平台 / target / 路由 / 登录态]
     end
 
     subgraph BT[packages/browser-test]
@@ -58,7 +52,6 @@ flowchart TB
         FG[feature-gen.ts<br/>AI 起草 + TODO 引导]
         FP[feature.ts<br/>解析 + 拒绝 TODO]
         RUN[run.ts<br/>单命令编排]
-        SC[scenario.ts<br/>场景 reset 与就绪校验]
         EX[executor.ts<br/>统一动作与观测协议]
         BR[browser.ts<br/>Web 适配]
         WX[wechatide.ts<br/>小程序适配]
@@ -74,9 +67,8 @@ flowchart TB
         WI[wechatide<br/>初始化 / 自动化 / 调试取证]
     end
 
-    subgraph Biz[业务仓库]
-        MK[独立 mocks 包<br/>handler / fixture / 场景清单]
-        APP[OMS／中台页面]
+    subgraph Biz[被测运行环境]
+        APP[Web 应用页面]
         MP[微信小程序]
     end
 
@@ -84,16 +76,12 @@ flowchart TB
 
     XM --> XI --> FG --> FE
     FE --> CLI
-    PJ --> RUN
     CLI --> FP --> RUN
-    RUN --> SC --> MK
+    RUN <-->|执行时补充入口或人工登录| U[用户]
     RUN --> EX
     EX --> BR --> AB --> APP
     EX --> WX --> WI --> MP
-    MK -. 提供数据 .-> APP
-    MK -. 提供数据 .-> MP
     EX --> VD --> RP --> OUT
-    SC --> OUT
     EX --> OUT
 ```
 
@@ -103,9 +91,8 @@ flowchart TB
 | `packages/browser-core` | agent-browser 适配、浏览器启动与会话等通用底层，构建时编译进各 CLI 的 `dist/browser-core`，不独立发布 |
 | `packages/browser-opt` | 自然语言操作与 Workflow，保持现有边界 |
 | `packages/browser-e2e` | 现有测试生成方向代码，本次不扩展 |
-| 业务仓库独立 mocks 包 | Web 的 MSW handler、小程序场景适配器、fixture 和场景清单，与业务接口类型共同维护 |
 
-技术栈：Node.js 24+、TypeScript、ESM、agent-browser、微信开发者工具 `wechatide`；按需引入 Zod（CLI 输入与配置校验）和 fflate（读取 XMind ZIP 中的 `content.json`），在对应步骤实现时再加入依赖。AI 调用经 Vercel AI Gateway。`wechatide` 按[微信开发者工具 Skills 官方文档](https://developers.weixin.qq.com/miniprogram/dev/devtools/Skills.html)接入，运行时读取当前安装版本随附的 Skill 和工具参数，不在包内复制固定工具清单。
+技术栈：Node.js 24+、TypeScript、ESM、agent-browser、微信开发者工具 `wechatide`；按需引入 Zod（输入与结果校验）和 fflate（读取 XMind ZIP 中的 `content.json`），在对应步骤实现时再加入依赖。AI 调用经 Vercel AI Gateway。`wechatide` 按[微信开发者工具 Skills 官方文档](https://developers.weixin.qq.com/miniprogram/dev/devtools/Skills.html)接入，运行时读取当前安装版本随附的 Skill 和工具参数，不在包内复制固定工具清单。
 
 ## 3. 端到端时序
 
@@ -118,13 +105,11 @@ sequenceDiagram
     participant X as xmind.ts
     participant G as feature-gen.ts
     participant AI as AI
-    participant MF as 数据场景清单
 
     U->>C: feature gen --xmind cases.xmind --case TC-001
     C->>X: 读取节点
     X-->>C: 原文(前置/操作/预期)、节点 ID、模块路径
-    C->>MF: 读取候选 scenarioId
-    C->>G: 原文 + 候选场景
+    C->>G: 用例原文与来源
     G->>AI: 起草 Gherkin
     AI-->>G: 草案（歧义处标 TODO）
     loop 每条 TODO
@@ -144,21 +129,22 @@ sequenceDiagram
     participant C as CLI run
     participant F as feature.ts
     participant R as run.ts
-    participant M as msw-client.ts
     participant B as browser.ts
     participant AB as agent-browser
     participant P as 页面
     participant V as verdict.ts
     participant RP as report.ts
 
-    U->>C: run x.feature --target local-msw
+    U->>C: run x.feature
     C->>F: 解析
     F-->>C: 步骤（文件、行号、原文）；含 TODO 则拒绝
-    C->>R: feature + target + seed
-    R->>M: reset(runId, scenarioId, seed)
-    M->>P: POST /__browser-test/scenario/reset
-    M->>P: 校验 __BROWSER_TEST_MSW__.ready
-    M-->>R: 就绪；不匹配则 BLOCKED
+    C->>R: 已确认的 feature
+    R->>R: 检查用例中的入口与当前运行条件
+    opt 缺少入口或需要登录
+        R->>U: 请求本次访问地址或人工接管
+        U-->>R: 补充地址或完成登录
+    end
+    R->>B: 观测页面并核对用例前置条件；不足则 BLOCKED
     loop 按原文顺序执行每个步骤
         alt Given／When 或继承其语义的 And
             R->>B: 步骤原文
@@ -186,10 +172,10 @@ sequenceDiagram
 小程序沿用相同的解析、逐步执行、判定与报告流程，只替换环境准备和执行适配器：
 
 1. `wechatide.ts` 先调用 `check_devtools_status`，`--skill-version` 取自当前安装 `skill.yaml` 的 `version`；返回 `openid` 且无 `warning` 才继续，同一运行中不重复检查。同时校验开发者工具不低于 Nightly Electron Build 2.02.2607032，服务端口已开启；未登录或首次 `clientName` 授权弹窗进入 HANDOFF，未确认前不执行其他工具。
-2. 打开前读取项目的 `project.config.json`，`appid` 缺失、为空或为 `touristappid` 时 BLOCKED，不自行补全；通过 `project_open_window` 打开项目，再用运行时信息工具核对当前项目、页面和运行时。
-3. mock target 在打开业务页面前重置场景并校验 `runId`、`scenarioId`、版本和 seed；live target 明确记录真实数据来源。
+2. 连接用户已打开的小程序，通过运行时信息核对当前项目、页面和运行时；未打开目标项目或无法确认时，请用户打开或确认后继续。不读取业务源码或要求配置项目路径映射。
+3. 在现有环境中核对用例的数据前提，缺少数据时 BLOCKED，不自动构造 mock 或修改业务工程。
 4. 页面操作使用 automator 的导航、页面、元素和视口类工具；每个动作前后重新查询页面和目标元素。工具名与参数以安装包 `miniprogram-tools/references/tools.yaml` 的 `inputSchema` 为准，不凭记忆编写。
-5. 失败时按需通过 debugger 类工具读取 console、network 并截图补充证据，不以刷新或重试掩盖原始失败。模拟器刷新成功不代表编译通过，场景 reset 或刷新后须用单文件编译工具校验，再进入业务步骤。
+5. 失败时按需通过 debugger 类工具读取 console、network 并截图补充证据，不以刷新或重试掩盖原始失败。模拟器可见不等于业务页面可用，进入步骤前须核对页面实际状态。
 
 `browser-test` 运行器以命令行调用 `wechatide`（`-c <clientName> -t <tool> --<field> value`，object／array 参数通过 `--<field>-file` 传 JSON 文件，运行后清理临时文件），确保每次调用的工具和参数明确；`wechatide` 返回 `pending + taskId` 时保留任务信息并遵守官方异步任务协议。交互式 Agent 可按下方配置通过 MCP 直接使用同一组 DevTools 能力。登录等会阻塞执行的任务进入 HANDOFF；写操作、上传等动作不因超时或状态未知而重复发起。
 
@@ -208,17 +194,19 @@ sequenceDiagram
 ### 4.1 生成规则
 
 1. 导入：读取 XMind 节点的前置条件、操作、预期、节点 ID 和模块路径，保留原文，不改写。
-2. 起草：前置条件 → Given，操作 → When，每条预期拆成独立 Then／And，模块路径 → Feature 名，数据前提 → 推荐 `@scenario:<scenarioId>`；已有 Web feature 的 `@msw` 保持兼容。
-3. 引导确认：AI 不自行补全不确定的语义，而是留下 `# TODO(确认): …` 并在终端逐条提问。
-4. 落盘：人工看 diff 后确认；文件头保留来源节点，便于回溯。
+2. 起草：前置条件 → Given，操作 → When，每条预期拆成独立 Then／And，模块路径 → Feature 名，数据前提保留为自然语言 Given。
+3. 页面描述：保留用例中的应用名称、页面名称和导航操作；原文有 URL 时保留，没有时不补造地址、不读取路由源码，也不要求用户填写路径。
+4. 引导确认：只确认用例语义、操作和预期中的歧义，留下 `# TODO(确认): …` 并逐条提问。缺少执行地址不阻塞生成，也不因此添加 TODO；运行条件在执行时补充。
+5. 落盘：人工看 diff 后确认；文件头保留来源节点，便于回溯。
 
 ```gherkin
 # source: cases.xmind#node-7f3a  商品管理/产品服务类型维护/列表页面
-@case:TC-001 @target:local-msw @msw:serviceType.list.multiple
+@case:TC-001
 Feature: 产品服务类型列表
 
   Scenario: 列表页面字段与按钮展示校验
-    Given 已登录并打开【商品管理-产品服务类型维护】页面
+    Given 已登录应用 A
+    And 打开【商品管理-产品服务类型维护】页面
     And 页面存在已有的类型数据
     When 查看列表页面
     Then 列表展示“类型名称”“关联前台类目”“须上传资质文件数量”
@@ -231,8 +219,9 @@ Feature: 产品服务类型列表
 
 - 含 `# TODO(确认)` 的 feature，`run` 拒绝执行并提示位置。
 - 一条预期对应一个 Then／And，报告可逐条定位。
-- 生成只依赖 XMind 原文与场景清单，不探查页面；定位留给执行阶段。
-- `.feature` 提交到业务仓库，人工修改以它为准；XMind 更新后重新生成只输出差异，不覆盖已确认文件。
+- 生成只依赖 XMind 原文和用户对用例语义的确认，不读取业务仓库、不要求场景清单，也不探查页面。元素定位留给执行阶段。
+- 一份 XMind 可覆盖多个应用，保留原文应用名称并按业务模块组织 feature，不要求预先注册应用标识或给整份 XMind 绑定地址。
+- `.feature` 保存到调用方指定目录，不要求业务仓库；人工修改以它为准；XMind 更新后重新生成只输出差异，不覆盖已确认文件。
 - 开发者也可以直接编写 feature，不必经过 XMind。
 
 ### 4.2 解析与标签
@@ -241,12 +230,18 @@ Feature: 产品服务类型列表
 
 | 标签 | 含义 |
 | --- | --- |
-| `@case:<id>` | 对应的 XMind 用例编号 |
-| `@target:<name>` | 默认 target，可被命令行 `--target` 覆盖 |
-| `@scenario:<scenarioId>` | 与平台无关的数据场景；仅 mock target 生效 |
-| `@msw:<scenarioId>` | 本场景需要的 MSW 数据场景，仅 `local-msw` 生效，其他 target 忽略并在报告注明使用真实数据 |
+| `@case:<id>` | 对应的 XMind 用例编号；原文缺失时使用来源节点定位，不编造业务编号 |
 
-页面入口和登录态通过 `project.json` 解决，不另建页面模型。Web 配置 `baseUrl`、路由别名和登录态文件；小程序配置项目绝对路径、页面路由别名和 `wechatide` clientName，不保存或猜测 CLI access token。服务端口开启、`clientName` 授权和（若走 MCP）MCP Token 是三层独立校验，任一缺失都按 BLOCKED 或 HANDOFF 处理。
+本阶段不引入 application、target 或数据场景标签作为执行前提；已有探索性标签不代表本阶段支持对应能力，解析时须明确提示尚不支持，不能静默忽略其语义。
+
+### 4.3 执行时获取必要信息
+
+1. 生成阶段保留“打开商品管理”等自然语言描述，不把它转换为路由配置。
+2. 执行阶段使用用例中明确的完整 URL，或向用户请求本次访问地址；不从应用名称猜测域名，不拼接 hash／history 路由。用户可直接提供目标页面完整地址。
+3. 进入应用后，根据页面实际可见的菜单、链接和按钮导航；无法唯一确定时展示候选并请求确认，无法继续则 BLOCKED。
+4. 登录或验证码需要人工操作时进入 HANDOFF；恢复后重新观测并核对登录结果，不要求用户预先制作登录态文件。
+5. 非交互执行缺少必要信息时 BLOCKED，并说明缺少什么。只提供 XMind 足以开始导入与生成，不代表能无条件完成执行。
+6. 报告记录本次实际访问地址、平台及用户补充信息的来源，不自动保存为项目预设。首期每个场景只执行一个应用，跨应用场景明确 BLOCKED。
 
 ## 5. 运行时执行
 
@@ -270,9 +265,9 @@ Then 只观测和判断，不产生业务写操作。
 
 ### 5.3 写操作与环境
 
-- `local-msw` 和 `wechat-devtools-mock` 允许提交、删除等写操作；`online` 和 `wechat-devtools-live` 默认禁止，可由项目配置显式开放已审核场景。
+- 首期仅执行只读用例；遇到提交、删除等业务写操作明确 BLOCKED。后续根据实际使用需求单独设计写操作支持。
 - 写操作结果不明时停止，不自动重试。
-- Web 登录、验证码或微信开发者工具登录需要人工完成时进入 HANDOFF，人工完成后继续，不形成额外结果类型；登录态按 target 隔离。微信业务登录、微信开发者工具登录和用户授权分别记录，不互相替代。
+- Web 登录、验证码或微信开发者工具登录需要人工完成时进入 HANDOFF，人工完成后继续，不形成额外结果类型；不同应用和环境的会话不混用。微信业务登录、微信开发者工具登录和用户授权分别记录，不互相替代。
 
 ### 5.4 运行状态
 
@@ -283,8 +278,8 @@ stateDiagram-v2
     PARSING --> BLOCKED: feature 含 TODO 或无法解析
     PREPARING --> HANDOFF: 需要登录或验证码
     HANDOFF --> EXECUTING: 人工完成
-    PREPARING --> EXECUTING: 环境与数据场景就绪
-    PREPARING --> BLOCKED: 环境或数据场景未就绪
+    PREPARING --> EXECUTING: 页面与用例前置条件就绪
+    PREPARING --> BLOCKED: 页面或用例前置条件未就绪
     EXECUTING --> REPORTING
     EXECUTING --> BLOCKED: 无安全动作或证据不足
     REPORTING --> PASS
@@ -292,55 +287,30 @@ stateDiagram-v2
     REPORTING --> BLOCKED
 ```
 
-结论只有 `PASS / FAIL / BLOCKED`。首期不建设 checkpoint，中断后用相同 feature、target 和 seed 重新运行。
+结论只有 `PASS / FAIL / BLOCKED`。首期不建设 checkpoint，中断后重新检查环境与前置条件，再运行相同 feature；不承诺现有环境的数据可确定性复现。
 
-## 6. 可复现数据场景协议
+## 6. 用例前置条件与后续评估
 
-mock target 提供可复现的正常、边界、异常响应和状态迁移，只证明客户端在给定响应下的表现，不代表后端真实行为。
+XMind 中的业务前置条件仍须保留并在执行时核对，例如“已登录”“存在三条待审核记录”。取消工具的前置配置，不等于跳过用例前置条件。
 
-**落地决策：独立 mocks 包，最小化渗透业务仓库。**
-
-- handler、fixture、平台适配器和场景清单放在独立 mocks 包，通过只读依赖接口类型包保证与真实接口一致。
-- Web 业务仓库只在 dev 入口增加一处按开关加载的 MSW 引用，生产构建不打包。
-- 小程序优先复用业务统一请求层的测试适配器；若项目无法提供稳定注入点，再使用仅测试环境可访问的 mock HTTP 服务。automator 的 wx API 模拟能力用于模拟微信 API 或少量受控分支，不默认承担完整业务请求 mock。
-- Web 的 reset 端点与 `__BROWSER_TEST_MSW__` 就绪标记、小程序的场景 reset 与就绪查询均由 mocks 包提供，业务页面不自行拼装场景数据。
-- 场景采用“AI 起草 + 人审入库”：AI 依据接口类型生成 handler 与 fixture，人工 review 后赋予稳定的 `scenarioId` 与默认 seed。运行只引用已入库场景，不在运行时现场生成数据。
-
-Web 打开页面前，运行器调用仅限本地测试模式的端点：
-
-```text
-POST /__browser-test/scenario/reset
-{
-  "runId": "...",
-  "scenarioId": "serviceType.list.multiple",
-  "version": "1",
-  "seed": 42,
-  "parameters": { "count": 3 }
-}
-```
-
-响应至少包含 `scenarioId`、版本、seed 和数据摘要；页面暴露 `__BROWSER_TEST_MSW__ = { runId, scenarioId, version, ready: true }`。运行器核对本地 origin、runId、scenarioId、版本与 ready，任何不匹配都在浏览器动作前 BLOCKED。
-
-小程序 mock 使用相同的 reset 请求与返回字段，但由项目场景适配器暴露就绪查询；场景必须在首次业务请求前完成初始化。若小程序启动即请求数据，应提供仅测试构建启用的启动门禁或测试启动页。未匹配请求不得静默访问真实后端。每次运行独立重置，不继承前一次状态；Web 的 MSW 调用或小程序的场景调用写入 `trace.log`，摘要写入 `result.json`。
+- 使用页面实际证据核对当前数据，无法确认则 BLOCKED。
+- 数据不足时说明缺少的条件，由用户准备后重新执行；不将预期改写为适应当前页面的数据。
+- 本阶段不引入 mocks 包、fixture、scenarioId、reset 端点或 seed，也不要求修改业务源码。
+- 项目预设、路由辅助、登录态预设和可复现数据场景均暂缓；在实际使用中确认重复补充信息成为效率问题后，再评估必要性与接入边界，当前不制定其配置协议。
 
 ## 7. 命令、产物与退出码
 
 ```bash
 browser-test feature gen --xmind cases.xmind --case TC-001 --out features/
-browser-test run features/service-type-list.feature --target local-msw [--seed 42]
-browser-test run features/service-type-list.feature --target local-proxy
-browser-test run features/service-type-list.feature --target online
-browser-test run features/service-type-list.feature --target wechat-devtools-mock [--seed 42]
-browser-test run features/service-type-list.feature --target wechat-devtools-live
+browser-test run features/service-type-list.feature
 ```
 
 执行输出示例：
 
 ```text
-[1/4] MSW   reset scenario serviceType.list.multiple (seed=42)   ok   3 条数据
-[2/4] Given 已登录并打开…页面   agent-browser open /product-service-types   ok   shots/01.png
-[3/4] When  查看列表            agent-browser snapshot                      ok   shots/02.png
-[4/4] Then  …三列               PASS  表头: 类型名称 | 关联前台类目 | 须上传资质文件数量 | 操作
+[1/3] Given 已登录并打开…页面   页面导航并核对前置条件   ok   shots/01.png
+[2/3] When  查看列表            agent-browser snapshot                      ok   shots/02.png
+[3/3] Then  …三列               PASS  表头: 类型名称 | 关联前台类目 | 须上传资质文件数量 | 操作
       And   【新增】按钮         PASS  button "新增" (e12)
       And   每条记录【编辑】【删除】  FAIL  第 3 行缺少“删除”   shots/03.png
 
@@ -354,24 +324,22 @@ runs/20261013-1612/
 ├── result.json   # 每步：text / status / by(rule|ai|action) / evidence / 耗时
 ├── report.md     # 人读：失败步骤置顶，附截图、实际文本、复现命令
 ├── shots/        # 01.png 02.png …（失败步骤必有）
-└── trace.log     # agent-browser／wechatide 命令与数据场景调用的原始记录
+└── trace.log     # agent-browser／wechatide 命令与用户补充信息的记录（不含凭证）
 ```
 
 ```json
 {
   "feature": "features/service-type-list.feature",
-  "target": "local-msw",
+  "environment": { "url": "https://example.com/products", "source": "user-input" },
   "platform": "web",
   "runtime": "browser",
-  "dataMode": "mock",
-  "scenario": { "id": "serviceType.list.multiple", "version": "1", "seed": 42, "ready": true },
   "status": "FAIL",
   "steps": [
     { "text": "Given 已登录并打开…页面", "status": "PASS", "by": "action", "shot": "shots/01.png" },
     { "text": "Then 列表展示…三列", "status": "PASS", "by": "rule", "actual": ["类型名称", "关联前台类目", "须上传资质文件数量", "操作"], "shot": "shots/02.png" },
     { "text": "And 每条记录都有【编辑】【删除】按钮", "status": "FAIL", "by": "rule", "actual": "第 3 行仅有【编辑】", "shot": "shots/03.png" }
   ],
-  "rerun": "browser-test run features/service-type-list.feature --target local-msw --seed 42"
+  "rerun": "browser-test run features/service-type-list.feature"
 }
 ```
 
@@ -383,15 +351,11 @@ runs/20261013-1612/
 
 | 模块 | 职责 |
 | --- | --- |
-| `types.ts` | Feature、Step、StepResult、RunResult、Target 等类型与配置 schema |
+| `types.ts` | 随实际实现定义 XMind 节点、Feature、Step、动作与结果类型，不预定义项目配置类型 |
 | `xmind.ts` | 读取 XMind，保留原文、节点 ID、模块路径 |
-| `feature-gen.ts` | 起草 Gherkin，输出 `# source`、`@scenario` 推荐与 `# TODO(确认)` 引导 |
+| `feature-gen.ts` | 仅根据 XMind 原文起草 Gherkin，保留页面自然语言描述、`# source` 与用例语义的 TODO 引导 |
 | `feature.ts` | 解析 Gherkin，保留文件与行号；拒绝含 TODO 的 feature |
-| `project.ts` | 读取 `project.json`，解析平台、target、Web baseUrl、小程序项目路径、路由与登录态 |
 | `executor.ts` | 定义跨平台的原子动作、页面观测、截图和执行结果协议 |
-| `scenario.ts` | 定义跨平台场景 reset、就绪校验和数据摘要协议 |
-| `msw-client.ts` | 实现 Web MSW 场景 reset 与 `__BROWSER_TEST_MSW__` 校验 |
-| `wechat-scenario.ts` | 实现小程序请求层或 mock HTTP 场景 reset 与就绪校验 |
 | `browser.ts` | 通过 browser-core 执行原子动作，采集快照与截图 |
 | `wechatide.ts` | 调用微信开发者工具官方 Skills，完成环境门禁、小程序操作、观测与调试取证 |
 | `verdict.ts` | 确定性规则优先，AI 判断兜底，统一输出 PASS／FAIL／BLOCKED |
@@ -405,37 +369,30 @@ runs/20261013-1612/
 
 | 步骤 | 实现内容 | 最小验收 |
 | --- | --- | --- |
-| 1 | 类型与配置 schema、`project.json` 读取，区分 platform、runtime 和 dataMode | 构建、typecheck 通过；非法配置和不兼容组合被拒绝 |
-| 2 | `feature.ts`：Gherkin 解析与 TODO 拒绝 | 步骤带行号；含 TODO 的 feature 被拒绝 |
-| 3 | `executor.ts`、`browser.ts` 与 `report.ts`：统一执行协议、Web 原子动作、快照、截图、最小报告 | 对一个静态页面完成 open + snapshot，产出 `result.json` 与截图 |
-| 4 | `verdict.ts` 与 `run.ts`：Then 规则判定、`run` 命令（先支持 `online` 只读） | 一份 feature 一条命令得到逐步结论；证据不足为 BLOCKED；退出码正确 |
-| 5 | `xmind.ts` 与 `feature-gen.ts`：XMind → feature 引导生成 | 一条 XMind 用例经确认生成 feature 并可执行 |
-| 6 | `msw-client.ts` 与 mocks 包场景：`local-msw` | 正常 fixture 稳定 PASS；注入“第三行缺按钮”稳定 FAIL；同 seed 可复现 |
-| 7 | `local-proxy`、Web 登录态隔离与 HANDOFF、线上写操作限制 | 同一 feature 只切换 Web target 即可运行；报告标明 mock／live 范围 |
-| 8 | `wechatide.ts`：官方状态门禁、项目打开、导航、元素操作、观测、截图与诊断证据 | 一个真实小程序列表页完成只读 live 流程；正常步骤 PASS、定位歧义 BLOCKED，报告可复现 |
-| 9 | 小程序 mocks 场景适配器与 `wechat-devtools-mock` | 正常 fixture 稳定 PASS；故障 fixture 稳定 FAIL；同 seed 可复现；未匹配请求不访问 live |
-| 10 | 小程序业务登录、微信开发者工具 HANDOFF、写操作限制与环境元数据 | 报告包含 Skill、开发者工具、基础库和构建版本；模拟器结论不标为真机结论 |
-| 11 | 发布 Skill 与文档 | AI 助手可按 Skill 完成 Web 和小程序 feature 的生成与执行 |
+| 1 | `xmind.ts`：XMind 导入 | 只提供 XMind 即可列出用例，保留原文、层级、节点 ID 与来源；无业务仓库、无配置文件也能完成 |
+| 2 | `feature-gen.ts`：引导生成 | 仅用 XMind 生成草案并确认语义；页面名称保留为自然语言；不要求路由、应用注册或 mock 清单 |
+| 3 | `feature.ts`：Gherkin 解析与 TODO 拒绝 | 步骤带行号，含语义 TODO 被拒绝；无 URL 的合法用例可解析 |
+| 4 | `executor.ts`、`browser.ts` 与最小报告 | 执行时请求缺失地址，通过可见页面导航并观测；无法唯一定位则 BLOCKED；产出实际截图与结果 |
+| 5 | `verdict.ts`、`run.ts`：Web 只读闭环与 HANDOFF | XMind → feature → 页面执行 → 报告完整打通；登录可接管，数据不足与非交互缺入口明确 BLOCKED；退出码正确 |
+| 6 | `wechatide.ts`：已打开小程序的只读流程 | 不读取业务源码，核对当前项目与页面，完成操作、观测、判定和报告；运行环境不符则阻塞或接管 |
+| 7 | 发布 Skill 与文档 | AI 助手可从用户提供的 XMind 开始，按需补充运行信息完成 Web／小程序用例闭环 |
 
-首个 Web 纵向闭环选择一个真实、可本地启动的列表页面（如“产品服务类型维护”），在独立 mocks 包中建立其场景，打通 `XMind → feature → MSW → agent-browser → report`。小程序随后选择一个已在开发者工具稳定运行的真实列表页，打通 `feature → 场景 reset → wechatide → report`。两个闭环都必须包含正常与故障 fixture；仅有解析结果、类型定义、命令成功或模拟报告不算闭环完成。
+首个闭环选择 XMind 中一个单应用的只读列表用例，使用已有可访问页面，打通 `XMind → feature → agent-browser → report`。验收必须覆盖实际 PASS、可观察的不满足预期时 FAIL，以及入口、数据或定位不足时 BLOCKED；可用工具自身的测试页面验证失败分支，不要求被测业务接入 fixture。小程序随后复用相同协议接入用户已打开的运行环境。仅有解析结果、类型定义、命令成功或模拟报告不算闭环完成。
 
 ## 10. 测试策略与风险控制
 
-测试优先覆盖：feature 解析与 TODO 拒绝、数据场景 reset 协议、跨平台动作编排、Then 判定、报告结构与退出码，每一步实现时同步补充。
+测试优先覆盖：XMind 原文保留、无配置生成、feature 解析与 TODO 拒绝、执行时信息补充、跨平台动作编排、Then 判定、报告结构与退出码，每一步实现时同步补充。
 
 | 风险 | 控制 |
 | --- | --- |
 | 自然语言含义不明确 | 报告原文、候选和截图并 BLOCKED；稳定后再沉淀规则 |
-| mock fixture 漂移 | 复用业务接口类型、CI 校验平台适配器、live 契约抽检 |
 | `wechatide` 版本或工具参数变化 | 每次运行读取安装包随附 Skill；先检查 `versionRelation`，不在代码中写死未验证参数 |
-| 小程序自定义组件无法稳定定位 | 提供稳定测试标识并限定组件范围；候选不唯一或不可见时 BLOCKED |
-| 小程序启动请求早于场景 reset | 测试构建提供启动门禁或测试启动页；就绪身份不匹配时禁止进入业务动作 |
+| 小程序自定义组件无法稳定定位 | 按实际页面观测限定候选；无法唯一定位或不可见时 BLOCKED，不要求改业务代码 |
 | 模拟器通过被当成真机通过 | 报告记录 runtime 为 devtools；授权、原生组件和设备能力另做真机验证 |
-| mock 通过被当成真实通过 | mock、live 分别标注；live 缺数据不得降级为 mock 通过 |
 | 页面缺陷被固化为预期 | 预期只来自 feature；页面实际结果只作为 actual |
 | 页面元素 ref 变化 | 每步重新获取快照，优先 role、label、test id 与唯一文本 |
 | 模型误判 | 确定性规则优先；AI 结论标注来源并保留证据 |
 | 重复提交 | 写动作不自动重试；结果不明立即 BLOCKED |
 | 产物膨胀 | 运行目录固定四类产物；新增资产必须证明排查确有需要 |
 
-建设顺序固定为：先打通一个 `local-msw` Web 场景的可见闭环，再复用统一执行协议接入 `wechatide` 的只读 live 流程和 mock 场景，最后才评估真机、批量、跨系统和更严格的审计能力。工程验收要求类型检查、构建和测试通过，且不影响现有 browser-opt 命令、Workflow 与发布流程。
+建设顺序固定为：先完成无配置的 XMind 导入与用例确认，再打通 Web 只读执行闭环，随后接入已运行的小程序。路由、预设、mock 与跨系统能力不列入本阶段验收。工程验收要求对应的类型检查、构建和测试通过，且不影响现有 browser-opt 命令、Workflow 与发布流程。
