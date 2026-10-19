@@ -1,6 +1,6 @@
 # browser-test 技术设计：Gherkin 驱动的 Web 与微信小程序测试
 
-> 本文是 `browser-test` 的目标设计，也是从零实现的路线图。当前按“用户仅持有 XMind 用例”重新收敛范围。此前的项目预设类型、校验与读取代码已移除，当前从 XMind 导入开始实施。CLI 仍仅提供帮助和版本查询，其余能力按第 9 章逐步实现，实现前不能当作现有 CLI 的使用说明。
+> 本文是 `browser-test` 的目标设计，也是从零实现的路线图。当前按“用户仅持有 XMind 用例”重新收敛范围。此前的项目预设类型、校验与读取代码已移除，已完成第 1 步 XMind 导入，可使用 `xmind list --xmind <文件> [--json]`；格式与识别边界见包 README。其余能力按第 9 章逐步实现，实现前不能当作现有 CLI 的使用说明。
 
 ## 1. 背景与目标
 
@@ -106,7 +106,7 @@ sequenceDiagram
     participant G as feature-gen.ts
     participant AI as AI
 
-    U->>C: feature gen --xmind cases.xmind --case TC-001
+    U->>C: feature gen --xmind cases.xmind
     C->>X: 读取节点
     X-->>C: 原文(前置/操作/预期)、节点 ID、模块路径
     C->>G: 用例原文与来源
@@ -201,7 +201,6 @@ sequenceDiagram
 
 ```gherkin
 # source: cases.xmind#node-7f3a  商品管理/产品服务类型维护/列表页面
-@case:TC-001
 Feature: 产品服务类型列表
 
   Scenario: 列表页面字段与按钮展示校验
@@ -224,13 +223,11 @@ Feature: 产品服务类型列表
 - `.feature` 保存到调用方指定目录，不要求业务仓库；人工修改以它为准；XMind 更新后重新生成只输出差异，不覆盖已确认文件。
 - 开发者也可以直接编写 feature，不必经过 XMind。
 
-### 4.2 解析与标签
+### 4.2 解析与来源定位
 
 运行器解析 Feature、Scenario、Given、When、Then、And 和标签，每个步骤保留文件、行号与原文。
 
-| 标签 | 含义 |
-| --- | --- |
-| `@case:<id>` | 对应的 XMind 用例编号；原文缺失时使用来源节点定位，不编造业务编号 |
+XMind 用例不定义独立的 `caseId`。原文已有编号时，它仍作为主题标题或原始节点内容保留，但不提升为必填字段或 `@case` 标签；原文缺失编号时不自动生成。生成文件通过 `# source: <文件>#<节点 ID>` 记录来源，导入结果通过文件、画布 ID 和节点 ID 定位原始主题。
 
 本阶段不引入 application、target 或数据场景标签作为执行前提；已有探索性标签不代表本阶段支持对应能力，解析时须明确提示尚不支持，不能静默忽略其语义。
 
@@ -301,7 +298,7 @@ XMind 中的业务前置条件仍须保留并在执行时核对，例如“已�
 ## 7. 命令、产物与退出码
 
 ```bash
-browser-test feature gen --xmind cases.xmind --case TC-001 --out features/
+browser-test feature gen --xmind cases.xmind --out features/
 browser-test run features/service-type-list.feature
 ```
 
@@ -369,7 +366,7 @@ runs/20261013-1612/
 
 | 步骤 | 实现内容 | 最小验收 |
 | --- | --- | --- |
-| 1 | `xmind.ts`：XMind 导入 | 只提供 XMind 即可列出用例，保留原文、层级、节点 ID 与来源；无业务仓库、无配置文件也能完成 |
+| 1（已实现） | `xmind.ts`：XMind 导入及 `xmind list` CLI | 只提供 XMind 即可列出用例，保留原文、层级、节点 ID 与来源；无业务仓库、无配置文件也能完成 |
 | 2 | `feature-gen.ts`：引导生成 | 仅用 XMind 生成草案并确认语义；页面名称保留为自然语言；不要求路由、应用注册或 mock 清单 |
 | 3 | `feature.ts`：Gherkin 解析与 TODO 拒绝 | 步骤带行号，含语义 TODO 被拒绝；无 URL 的合法用例可解析 |
 | 4 | `executor.ts`、`browser.ts` 与最小报告 | 执行时请求缺失地址，通过可见页面导航并观测；无法唯一定位则 BLOCKED；产出实际截图与结果 |

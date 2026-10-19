@@ -1,7 +1,7 @@
 # browser-automated
 
 > [!IMPORTANT]
-> `browser-test` 仍处于分步实现阶段：当前主线为从 XMind 开始的无配置流程，项目预设代码已移除；CLI 仍仅提供帮助和版本查询，不能用于执行测试或生产流程。`browser-e2e` **尚未实现**，请勿安装、调用或用于生产流程。
+> `browser-test` 仍处于分步实现阶段：当前主线为从 XMind 开始的无配置流程，项目预设代码已移除；已支持无配置 XMind 导入和用例列表，尚不能执行测试。`browser-e2e` **尚未实现**，请勿安装、调用或用于生产流程。
 
 `browser-automated` 当前主要维护 `browser-opt`：一个面向真实 Chrome 的自然语言浏览器操作工具。它可以立即执行一次操作，也可以保存和复用项目级 Workflow，并为每次运行产出截图、页面快照、日志和 PASS/FAIL 报告。
 
@@ -26,11 +26,11 @@
 
 当前阶段只要求用户提供包含测试用例的 XMind，不读取业务路由源码，也不要求准备 `project.json`、应用映射或 mock 场景。页面描述保留为自然语言；执行时缺少地址再请求补充，需要登录时人工接管，通过实际页面导航与观测完成测试。先打通 Web 单应用只读闭环，再接入已运行的微信小程序。前置配置等实际使用证明能提高效率后再评估。
 
-范围与当前实现状态见 [browser-test 包说明](packages/browser-test/README.md)。目前可验证包构建与 CLI 帮助：
+范围与当前实现状态见 [browser-test 包说明](packages/browser-test/README.md)。目前可构建并导入 XMind：
 
 ```bash
 npm run build -w browser-test
-node packages/browser-test/dist/cli/browser-test.js --help
+node packages/browser-test/dist/cli/browser-test.js xmind list --xmind /path/to/cases.xmind
 ```
 
 后续命令、Feature 协议、运行产物、退出码及分步验收标准请见 [browser-test 技术设计文档](docs/browser-test-technical-plan.md)。其中的命令示例代表目标接口，待对应实施步骤完成后才可使用。
@@ -370,7 +370,7 @@ browser-opt stop --run-id "<runId>" --json
 - `packages/browser-core/src`：底层浏览器适配、session、handoff 与基础类型；不独立发布
 - `packages/browser-opt/src`：`browser-opt` 包源码与 CLI
 - `packages/browser-opt/skills`：随 `browser-opt` 发布的 Skill
-- `packages/browser-test`：Gherkin 用例驱动测试工具的实现目录（仅有 CLI 骨架，XMind 导入与执行主流程待实现）
+- `packages/browser-test`：Gherkin 用例驱动测试工具的实现目录（已实现 XMind 导入，生成与执行主流程待实现）
 - `packages/browser-e2e`：已暂停的规划目录，不提供可用 CLI
 - `packages/*/dist`：构建产物，由构建命令生成
 
