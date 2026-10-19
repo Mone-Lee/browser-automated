@@ -1,0 +1,53 @@
+/**
+ * 定义导入用例及其来源；保留原始节点，供后续生成阶段回溯而不依赖项目配置。
+ */
+
+/** 通过文件、画布和节点共同定位原始主题，节点 ID 不等同于业务用例编号。 */
+export interface XMindSource {
+  /** 导入文件的绝对路径。 */
+  file: string;
+  sheetId: string;
+  nodeId: string;
+}
+
+/** 保留原文与层级的主题节点，既用于用例分组，也用于保存尚未识别的内容。 */
+export interface XMindNode {
+  id: string;
+  title: string;
+  /** 从画布根主题到当前主题的标题序列，包含当前标题，不含画布名称。 */
+  path: string[];
+  source: XMindSource;
+  /** 按原始子主题类别分组，例如附属主题 attached、自由主题 detached。 */
+  children: Record<string, XMindNode[]>;
+  /** 原始主题对象，保留备注、标签等未参与结构化提取的属性。 */
+  raw: Record<string, unknown>;
+}
+
+/** 按字段或嵌套布局识别出的用例；不定义业务用例编号，原文编号仅保留在主题内容中。 */
+export interface XMindCase {
+  title: string;
+  source: XMindSource;
+  /** 字段标记识别为 sections；依据前置条件及操作子树识别为 nested，语义仍需确认。 */
+  structure: 'sections' | 'nested';
+  /** 从根主题到用例父主题的标题序列，不含用例自身标题。 */
+  modulePath: string[];
+  /** 用例主题及完整子树，保留未归入前置、操作或预期分组的内容。 */
+  node: XMindNode;
+  /** 前置字段节点及其子树，同行内容保留在标题中；无字段时为空数组。 */
+  preconditions: XMindNode[];
+  /** 操作字段或嵌套布局中的操作节点，保留原有顺序与完整子树。 */
+  steps: XMindNode[];
+  /** 预期字段或操作的直属附属节点；嵌套布局可通过路径及操作子树追溯对应关系，尚非独立断言。 */
+  expectedResults: XMindNode[];
+}
+
+/** 单个文件的导入结果，仅表达原文结构与识别情况，不包含执行结论。 */
+export interface XMindImport {
+  /** 导入文件的绝对路径。 */
+  file: string;
+  /** 按原文件顺序保存所有画布及完整主题树，包括未识别为用例的节点。 */
+  sheets: { id: string; title: string; root: XMindNode }[];
+  cases: XMindCase[];
+  /** 需人工确认的非致命问题及其来源；格式错误则由导入接口抛出异常。 */
+  warnings: { source: XMindSource; message: string }[];
+}
