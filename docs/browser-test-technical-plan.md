@@ -92,6 +92,8 @@ flowchart TB
 | `packages/browser-opt` | 自然语言操作与 Workflow，保持现有边界 |
 | `packages/browser-e2e` | 现有测试生成方向代码，本次不扩展 |
 
+`browser-test` 的 Skill 只负责把用户意图映射到当前阶段已经实现的 CLI 能力，不在 Skill 内复制解析或执行逻辑。开发阶段即可把仓库内 Skill 安装或链接到本机 Agent Skills 目录，通过 `/browser-test` 做本地联调；尚未实现的能力必须明确提示当前边界，不能用临时提示词模拟成功。
+
 技术栈：Node.js 24+、TypeScript、ESM、agent-browser、微信开发者工具 `wechatide`；按需引入 Zod（输入与结果校验）和 fflate（读取 XMind ZIP 中的 `content.json`），在对应步骤实现时再加入依赖。AI 调用经 Vercel AI Gateway。`wechatide` 按[微信开发者工具 Skills 官方文档](https://developers.weixin.qq.com/miniprogram/dev/devtools/Skills.html)接入，运行时读取当前安装版本随附的 Skill 和工具参数，不在包内复制固定工具清单。
 
 ## 3. 端到端时序
@@ -302,6 +304,8 @@ browser-test feature gen --xmind cases.xmind --out features/
 browser-test run features/service-type-list.feature
 ```
 
+本地开发从第 2 步开始同时提供 Skill 调用入口。安装或链接仓库内 Skill 后，可在支持 Skills 的 Agent 中使用 `/browser-test` 加自然语言请求；Skill 将请求转换为同一套 `browser-test` CLI 命令。CLI 是唯一功能实现入口，Skill 联调不维护另一套业务逻辑。
+
 执行输出示例：
 
 ```text
@@ -359,6 +363,7 @@ runs/20261013-1612/
 | `report.ts` | 生成 `result.json`、`report.md` 与失败步骤摘要 |
 | `run.ts` | 单命令串联解析、目标准备、执行、判定与报告 |
 | `cli/browser-test.ts` | 命令入口与退出码 |
+| `skills/browser-test/SKILL.md` | 面向 Agent 的调用说明、能力边界与 CLI 映射；用于从第 2 步开始的本地联调 |
 
 ## 9. 实施步骤与验收
 
@@ -367,12 +372,13 @@ runs/20261013-1612/
 | 步骤 | 实现内容 | 最小验收 |
 | --- | --- | --- |
 | 1（已实现） | `xmind.ts`：XMind 导入及 `xmind list` CLI | 只提供 XMind 即可列出用例，保留原文、层级、节点 ID 与来源；无业务仓库、无配置文件也能完成 |
-| 2 | `feature-gen.ts`：引导生成 | 仅用 XMind 生成草案并确认语义；页面名称保留为自然语言；不要求路由、应用注册或 mock 清单 |
-| 3 | `feature.ts`：Gherkin 解析与 TODO 拒绝 | 步骤带行号，含语义 TODO 被拒绝；无 URL 的合法用例可解析 |
-| 4 | `executor.ts`、`browser.ts` 与最小报告 | 执行时请求缺失地址，通过可见页面导航并观测；无法唯一定位则 BLOCKED；产出实际截图与结果 |
-| 5 | `verdict.ts`、`run.ts`：Web 只读闭环与 HANDOFF | XMind → feature → 页面执行 → 报告完整打通；登录可接管，数据不足与非交互缺入口明确 BLOCKED；退出码正确 |
-| 6 | `wechatide.ts`：已打开小程序的只读流程 | 不读取业务源码，核对当前项目与页面，完成操作、观测、判定和报告；运行环境不符则阻塞或接管 |
-| 7 | 发布 Skill 与文档 | AI 助手可从用户提供的 XMind 开始，按需补充运行信息完成 Web／小程序用例闭环 |
+| 2 | Skill 调用入口与本地联调骨架 | 仓库内提供可安装或链接的 `browser-test` Skill；通过 `/browser-test` 可调用第 1 步的 `xmind list`，调用尚未实现的命令时明确说明能力边界；Skill 与 CLI 参数映射可在发布前持续联调 |
+| 3 | `feature-gen.ts`：引导生成 | 仅用 XMind 生成草案并确认语义；页面名称保留为自然语言；不要求路由、应用注册或 mock 清单；Skill 可调用该能力 |
+| 4 | `feature.ts`：Gherkin 解析与 TODO 拒绝 | 步骤带行号，含语义 TODO 被拒绝；无 URL 的合法用例可解析；Skill 可验证拒绝提示与定位信息 |
+| 5 | `executor.ts`、`browser.ts` 与最小报告 | 执行时请求缺失地址，通过可见页面导航并观测；无法唯一定位则 BLOCKED；产出实际截图与结果 |
+| 6 | `verdict.ts`、`run.ts`：Web 只读闭环与 HANDOFF | XMind → feature → 页面执行 → 报告完整打通；登录可接管，数据不足与非交互缺入口明确 BLOCKED；退出码正确 |
+| 7 | `wechatide.ts`：已打开小程序的只读流程 | 不读取业务源码，核对当前项目与页面，完成操作、观测、判定和报告；运行环境不符则阻塞或接管 |
+| 8 | 完善 Skill、发布与文档 | 固化安装、升级和调用说明，完成发布包校验；AI 助手可从用户提供的 XMind 开始，按需补充运行信息完成 Web／小程序用例闭环 |
 
 首个闭环选择 XMind 中一个单应用的只读列表用例，使用已有可访问页面，打通 `XMind → feature → agent-browser → report`。验收必须覆盖实际 PASS、可观察的不满足预期时 FAIL，以及入口、数据或定位不足时 BLOCKED；可用工具自身的测试页面验证失败分支，不要求被测业务接入 fixture。小程序随后复用相同协议接入用户已打开的运行环境。仅有解析结果、类型定义、命令成功或模拟报告不算闭环完成。
 
@@ -392,4 +398,4 @@ runs/20261013-1612/
 | 重复提交 | 写动作不自动重试；结果不明立即 BLOCKED |
 | 产物膨胀 | 运行目录固定四类产物；新增资产必须证明排查确有需要 |
 
-建设顺序固定为：先完成无配置的 XMind 导入与用例确认，再打通 Web 只读执行闭环，随后接入已运行的小程序。路由、预设、mock 与跨系统能力不列入本阶段验收。工程验收要求对应的类型检查、构建和测试通过，且不影响现有 browser-opt 命令、Workflow 与发布流程。
+建设顺序固定为：先完成无配置的 XMind 导入，再建立 Skill 调用入口用于逐步本地联调，然后完成用例确认并打通 Web 只读执行闭环，随后接入已运行的小程序。路由、预设、mock 与跨系统能力不列入本阶段验收。工程验收要求对应的类型检查、构建和测试通过，且不影响现有 browser-opt 命令、Workflow 与发布流程。
