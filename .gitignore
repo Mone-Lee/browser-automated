@@ -10,6 +10,7 @@ packages/**/dist/
 /docs/browser-opt-token-efficiency.md
 /docs/implementation-plan.md
 /docs/project-structure.md
+/docs/browser-test-development.md
 *.png
 # README 使用的 browser-opt 说明图需要随仓库发布。
 !docs/images/browser-opt-auth-state.png

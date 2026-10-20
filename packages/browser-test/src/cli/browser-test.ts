@@ -11,6 +11,7 @@ const help = `browser-test ${VERSION}
   browser-test --version
 
 --json 将完整结果输出到标准输出；--output 将相同内容写入 JSON 文件。
+当前仅支持 XMind 导入；feature gen、Gherkin 解析、run 和报告尚未实现。
 `;
 
 /** 校验参数后导入指定文件，错误统一使用工具错误退出码。 */
@@ -22,6 +23,9 @@ async function main(args: string[]): Promise<void> {
   if (args.length === 1 && ['--version', '-v'].includes(args[0])) {
     console.log(VERSION);
     return;
+  }
+  if (args[0] === 'feature' || args[0] === 'run') {
+    throw new Error('该能力尚未实现：当前仅支持 XMind 导入，请使用 xmind list --xmind <文件>；生成、解析、执行和报告将在后续阶段开放');
   }
   if (args[0] !== 'xmind' || args[1] !== 'list') throw new Error('不支持的命令，请使用 --help 查看用法');
   let filename: string | undefined;

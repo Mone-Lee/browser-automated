@@ -1,6 +1,6 @@
 # browser-test 技术设计：Gherkin 驱动的 Web 与微信小程序测试
 
-> 本文是 `browser-test` 的目标设计，也是从零实现的路线图。当前按“用户仅持有 XMind 用例”重新收敛范围。此前的项目预设类型、校验与读取代码已移除，已完成第 1 步 XMind 导入，可使用 `xmind list --xmind <文件> [--json]`；格式与识别边界见包 README。其余能力按第 9 章逐步实现，实现前不能当作现有 CLI 的使用说明。
+> 本文是 `browser-test` 的目标设计，也是从零实现的路线图。当前按“用户仅持有 XMind 用例”重新收敛范围。此前的项目预设类型、校验与读取代码已移除，已完成第 1 步 XMind 导入和第 2 步 Skill 调用入口与本地联调骨架，可使用 `xmind list --xmind <文件> [--json]`；格式、识别边界和 Skill 安装方式见包 README。其余能力按第 9 章逐步实现，实现前不能当作现有 CLI 的使用说明。
 
 ## 1. 背景与目标
 
@@ -372,7 +372,7 @@ runs/20261013-1612/
 | 步骤 | 实现内容 | 最小验收 |
 | --- | --- | --- |
 | 1（已实现） | `xmind.ts`：XMind 导入及 `xmind list` CLI | 只提供 XMind 即可列出用例，保留原文、层级、节点 ID 与来源；无业务仓库、无配置文件也能完成 |
-| 2 | Skill 调用入口与本地联调骨架 | 仓库内提供可安装或链接的 `browser-test` Skill；通过 `/browser-test` 可调用第 1 步的 `xmind list`，调用尚未实现的命令时明确说明能力边界；Skill 与 CLI 参数映射可在发布前持续联调 |
+| 2（已实现） | Skill 调用入口与本地联调骨架 | 仓库内提供可安装或链接的 `browser-test` Skill；通过 `/browser-test` 可调用第 1 步的 `xmind list`，调用尚未实现的命令时明确说明能力边界；Skill 与 CLI 参数映射可在发布前持续联调 |
 | 3 | `feature-gen.ts`：引导生成 | 仅用 XMind 生成草案并确认语义；页面名称保留为自然语言；不要求路由、应用注册或 mock 清单；Skill 可调用该能力 |
 | 4 | `feature.ts`：Gherkin 解析与 TODO 拒绝 | 步骤带行号，含语义 TODO 被拒绝；无 URL 的合法用例可解析；Skill 可验证拒绝提示与定位信息 |
 | 5 | `executor.ts`、`browser.ts` 与最小报告 | 执行时请求缺失地址，通过可见页面导航并观测；无法唯一定位则 BLOCKED；产出实际截图与结果 |

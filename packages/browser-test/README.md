@@ -2,7 +2,7 @@
 
 面向 Web 与微信小程序的用例驱动测试工具。当前设计从“用户只有一个包含测试用例的 XMind 文件”出发：导入原文、确认 Gherkin、执行步骤并输出证据报告。
 
-已实现第一步：无配置导入 XMind 并列出用例。尚不能生成或执行 Gherkin。
+已实现第 1、2 步：无配置导入 XMind 并列出用例，以及 Skill 调用入口。尚不能生成或执行 Gherkin。
 
 ```bash
 npm run build -w browser-test
