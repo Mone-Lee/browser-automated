@@ -17,6 +17,7 @@ packages/**/dist/
 !docs/images/browser-opt-files.png
 !docs/images/browser-opt-failure-report.png
 !docs/images/browser-opt-high-impact-guard.png
+!docs/images/gherkin-output-example.png
 *.jpg
 *.jpeg
 *.pdf

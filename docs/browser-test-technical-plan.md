@@ -1,12 +1,12 @@
 # browser-test 技术设计：Gherkin 驱动的 Web 与微信小程序测试
 
-> 本文是 `browser-test` 的目标设计，也是从零实现的路线图。当前按“用户仅持有 XMind 用例”重新收敛范围。此前的项目预设类型、校验与读取代码已移除，已完成第 1 步 XMind 导入和第 2 步 Skill 调用入口与本地联调骨架，可使用 `xmind list --xmind <文件> [--json]`；格式、识别边界和 Skill 安装方式见包 README。其余能力按第 9 章逐步实现，实现前不能当作现有 CLI 的使用说明。
+> 本文是 `browser-test` 的目标设计，也是从零实现的路线图。当前按“用户仅持有 XMind 用例，或用截图从大型 XMind 中选取了局部用例”重新收敛范围。此前的项目预设类型、校验与读取代码已移除，已完成第 1 步 XMind 导入和第 2 步 Skill 调用入口与本地联调骨架：XMind 可使用 `xmind list --xmind <文件> [--json]`，局部用例截图由 Skill 中的 Agent 直接解释。格式、识别边界和 Skill 安装方式见包 README 及开发记录。其余能力按第 9 章逐步实现，实现前不能当作现有 CLI 的使用说明。
 
 ## 1. 背景与目标
 
 Web 应用与微信小程序测试用例以 XMind 维护，开发联调和问题回归更适合直接运行可读的 Gherkin。把每条用例改写成测试代码接入成本高；纯自然语言 UI 执行又缺少稳定的数据、明确的断言口径和可信的结果。
 
-`browser-test` 的起点是：**用户手上只有一个包含测试用例的 XMind 文件**。先导入并确认用例，再执行并输出报告，不要求访问业务仓库或准备项目配置。
+`browser-test` 的起点是：**用户手上只有一个包含测试用例的 XMind 文件，或者从其中截取的局部用例图片**。先导入或解释并确认用例，再执行并输出报告，不要求访问业务仓库或准备项目配置。
 
 - XMind 用例经 AI 引导生成并由人确认，落成 `.feature`。
 - 运行时由 AI 读取步骤，Web 通过 agent-browser、小程序通过微信开发者工具 `wechatide` 在真实运行时中操作和观测。
@@ -43,7 +43,12 @@ Web 应用与微信小程序测试用例以 XMind 维护，开发联调和问题
 flowchart TB
     subgraph Input[输入]
         XM[XMind 用例]
+        IM[局部用例截图]
         FE[.feature 文件]
+    end
+
+    subgraph Skill[Skill 入口]
+        VI[Agent 视觉解释<br/>仅保留可见分支]
     end
 
     subgraph BT[packages/browser-test]
@@ -75,6 +80,7 @@ flowchart TB
     OUT[(runs/时间戳/<br/>result.json report.md shots trace.log)]
 
     XM --> XI --> FG --> FE
+    IM --> VI --> U
     FE --> CLI
     CLI --> FP --> RUN
     RUN <-->|执行时补充入口或人工登录| U[用户]
@@ -92,7 +98,7 @@ flowchart TB
 | `packages/browser-opt` | 自然语言操作与 Workflow，保持现有边界 |
 | `packages/browser-e2e` | 现有测试生成方向代码，本次不扩展 |
 
-`browser-test` 的 Skill 只负责把用户意图映射到当前阶段已经实现的 CLI 能力，不在 Skill 内复制解析或执行逻辑。开发阶段即可把仓库内 Skill 安装或链接到本机 Agent Skills 目录，通过 `/browser-test` 做本地联调；尚未实现的能力必须明确提示当前边界，不能用临时提示词模拟成功。
+`browser-test` 的 Skill 负责把 XMind 意图映射到当前阶段已经实现的 CLI 能力，不在 Skill 内复制 XMind 解析或执行逻辑。局部用例截图例外地由 Agent 直接解释，因为它们是对话中的用例选择介质，不是 CLI 可导入的 XMind 结构化文件；解释只保留可见层级和原文，裁切或模糊信息显式标记待确认。开发阶段即可把仓库内 Skill 安装或链接到本机 Agent Skills 目录，通过 `/browser-test` 做本地联调；尚未实现的能力必须明确提示当前边界，不能用临时提示词模拟成功。
 
 技术栈：Node.js 24+、TypeScript、ESM、agent-browser、微信开发者工具 `wechatide`；按需引入 Zod（输入与结果校验）和 fflate（读取 XMind ZIP 中的 `content.json`），在对应步骤实现时再加入依赖。AI 调用经 Vercel AI Gateway。`wechatide` 按[微信开发者工具 Skills 官方文档](https://developers.weixin.qq.com/miniprogram/dev/devtools/Skills.html)接入，运行时读取当前安装版本随附的 Skill 和工具参数，不在包内复制固定工具清单。
 
@@ -110,7 +116,7 @@ sequenceDiagram
 
     U->>C: feature gen --xmind cases.xmind
     C->>X: 读取节点
-    X-->>C: 原文(前置/操作/预期)、节点 ID、模块路径
+    X-->>C: 原文(前置/操作/预期)、模块路径
     C->>G: 用例原文与来源
     G->>AI: 起草 Gherkin
     AI-->>G: 草案（歧义处标 TODO）
@@ -195,14 +201,14 @@ sequenceDiagram
 
 ### 4.1 生成规则
 
-1. 导入：读取 XMind 节点的前置条件、操作、预期、节点 ID 和模块路径，保留原文，不改写。
+1. 导入：读取 XMind 节点的前置条件、操作、预期和模块路径，保留原文，不改写。
 2. 起草：前置条件 → Given，操作 → When，每条预期拆成独立 Then／And，模块路径 → Feature 名，数据前提保留为自然语言 Given。
 3. 页面描述：保留用例中的应用名称、页面名称和导航操作；原文有 URL 时保留，没有时不补造地址、不读取路由源码，也不要求用户填写路径。
 4. 引导确认：只确认用例语义、操作和预期中的歧义，留下 `# TODO(确认): …` 并逐条提问。缺少执行地址不阻塞生成，也不因此添加 TODO；运行条件在执行时补充。
-5. 落盘：人工看 diff 后确认；文件头保留来源节点，便于回溯。
+5. 落盘：人工看 diff 后确认；文件头保留来源文件与模块路径、标题，便于回溯。
 
 ```gherkin
-# source: cases.xmind#node-7f3a  商品管理/产品服务类型维护/列表页面
+# source: cases.xmind  商品管理/产品服务类型维护/列表页面
 Feature: 产品服务类型列表
 
   Scenario: 列表页面字段与按钮展示校验
@@ -225,11 +231,34 @@ Feature: 产品服务类型列表
 - `.feature` 保存到调用方指定目录，不要求业务仓库；人工修改以它为准；XMind 更新后重新生成只输出差异，不覆盖已确认文件。
 - 开发者也可以直接编写 feature，不必经过 XMind。
 
+### 4.1.1 输出内容范围（以示例图为准）
+
+最终 Gherkin 的内容范围以下图为准：
+
+![Gherkin 输出示例](images/gherkin-output-example.png)
+
+图中只出现以下内容元素，生成与解析都不得扩展到额外业务字段。图片中的中文关键字用于表达步骤语义；实际输出的关键字按 Gherkin 语法书写。使用本地化关键字时遵循 Gherkin 对应语言的语法要求。
+
+| 元素 | 图中体现 | 说明 |
+|------|----------|------|
+| 优先级标签 | `@p2` | 仅来自 XMind 原文的优先级，原文没有则不写 |
+| 场景标题 | `场景: LD-14 …` | 原文编号作为标题文本的一部分保留，不拆成独立字段或标签 |
+| 步骤 | 假如 / 而且 / 当 / 那么 / 而且 | 表达 Given / And / When / Then / And 的语义；关键字按 Gherkin 语法书写，前置条件、操作、预期按原文拆分，保留页面自然语言描述 |
+| 待确认注释 | `# 待确认: …` | 仅用于用例语义、文案等歧义，紧跟相关步骤 |
+
+限制：
+
+- 不输出图中没有的字段：`nodeId`、`sheetId`、`caseId`、application、target、数据场景标签、`@case` 等一律不生成。
+- 不为追溯引入额外元数据；来源定位依赖文件头 `# source` 注释与场景标题，见 4.2。
+- 步骤文字保留原文，不补造 URL、路由、元素定位或断言细节。
+- 解析器遇到上述范围之外的标签或字段，按 4.2 提示尚不支持，不静默忽略。
+- 待确认注释是 Gherkin 注释，不是额外字段；图中的 `# 待确认` 与 4.1 示例中的 `# TODO(确认)` 都表示待确认内容，运行时必须识别并拒绝执行含待确认项的 feature。
+
 ### 4.2 解析与来源定位
 
 运行器解析 Feature、Scenario、Given、When、Then、And 和标签，每个步骤保留文件、行号与原文。
 
-XMind 用例不定义独立的 `caseId`。原文已有编号时，它仍作为主题标题或原始节点内容保留，但不提升为必填字段或 `@case` 标签；原文缺失编号时不自动生成。生成文件通过 `# source: <文件>#<节点 ID>` 记录来源，导入结果通过文件、画布 ID 和节点 ID 定位原始主题。
+XMind 用例不定义独立的 `caseId`。原文已有编号时，它仍作为主题标题或原始节点内容保留，但不提升为必填字段或 `@case` 标签；原文缺失编号时不自动生成。生成文件通过 `# source: <文件> / <模块路径> / <标题>` 记录来源，导入结果通过来源文件、模块路径和标题定位原始主题；同一路径下出现重名用例时应提示。
 
 本阶段不引入 application、target 或数据场景标签作为执行前提；已有探索性标签不代表本阶段支持对应能力，解析时须明确提示尚不支持，不能静默忽略其语义。
 
@@ -353,7 +382,7 @@ runs/20261013-1612/
 | 模块 | 职责 |
 | --- | --- |
 | `types.ts` | 随实际实现定义 XMind 节点、Feature、Step、动作与结果类型，不预定义项目配置类型 |
-| `xmind.ts` | 读取 XMind，保留原文、节点 ID、模块路径 |
+| `xmind.ts` | 读取 XMind，保留原文、模块路径 |
 | `feature-gen.ts` | 仅根据 XMind 原文起草 Gherkin，保留页面自然语言描述、`# source` 与用例语义的 TODO 引导 |
 | `feature.ts` | 解析 Gherkin，保留文件与行号；拒绝含 TODO 的 feature |
 | `executor.ts` | 定义跨平台的原子动作、页面观测、截图和执行结果协议 |
@@ -371,8 +400,8 @@ runs/20261013-1612/
 
 | 步骤 | 实现内容 | 最小验收 |
 | --- | --- | --- |
-| 1（已实现） | `xmind.ts`：XMind 导入及 `xmind list` CLI | 只提供 XMind 即可列出用例，保留原文、层级、节点 ID 与来源；无业务仓库、无配置文件也能完成 |
-| 2（已实现） | Skill 调用入口与本地联调骨架 | 仓库内提供可安装或链接的 `browser-test` Skill；通过 `/browser-test` 可调用第 1 步的 `xmind list`，调用尚未实现的命令时明确说明能力边界；Skill 与 CLI 参数映射可在发布前持续联调 |
+| 1（已实现） | `xmind.ts`：XMind 导入及 `xmind list` CLI | 只提供 XMind 即可列出用例，保留原文、层级与来源文件；无业务仓库、无配置文件也能完成 |
+| 2（已实现） | Skill 调用入口与本地联调骨架 | 仓库内提供可安装或链接的 `browser-test` Skill；通过 `/browser-test` 可调用第 1 步的 `xmind list`，也可解释用于选取局部分支的思维导图截图；调用尚未实现的命令时明确说明能力边界；Skill 与 CLI 参数映射可在发布前持续联调 |
 | 3 | `feature-gen.ts`：引导生成 | 仅用 XMind 生成草案并确认语义；页面名称保留为自然语言；不要求路由、应用注册或 mock 清单；Skill 可调用该能力 |
 | 4 | `feature.ts`：Gherkin 解析与 TODO 拒绝 | 步骤带行号，含语义 TODO 被拒绝；无 URL 的合法用例可解析；Skill 可验证拒绝提示与定位信息 |
 | 5 | `executor.ts`、`browser.ts` 与最小报告 | 执行时请求缺失地址，通过可见页面导航并观测；无法唯一定位则 BLOCKED；产出实际截图与结果 |
