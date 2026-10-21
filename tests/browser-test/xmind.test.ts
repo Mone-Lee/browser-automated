@@ -19,6 +19,7 @@ const caseNode = {
   ]),
   notes: { plain: { content: '备注\n不改写' } }, labels: ['TC-001'],
 };
+const caseAttributes = { notes: caseNode.notes, labels: caseNode.labels };
 const content = [{ id: 'sheet-1', title: '测试用例', rootTopic: topic('root', '商品管理', [caseNode]) }];
 
 afterEach(() => {
@@ -38,36 +39,35 @@ function fixture(value: unknown = content): string {
 }
 
 describe('XMind 无配置导入', () => {
-  it('保留原文、层级、节点 ID、属性和来源，不编造业务编号', async () => {
+  it('保留原文、层级和属性，不编造业务编号', async () => {
     const file = fixture();
     const result = await importXMind(file);
     expect(result.cases).toHaveLength(1);
     expect(result.warnings).toEqual([]);
     expect(result.cases[0]).toMatchObject({
       title: '列表展示', modulePath: ['商品管理'],
-      source: { file, sheetId: 'sheet-1', nodeId: 'case-1' },
-      node: { raw: caseNode, path: ['商品管理', '列表展示'] },
+      node: { raw: caseAttributes, path: ['商品管理', '列表展示'] },
     });
     expect(result.cases[0].preconditions[0].children.attached[0].title).toBe(originalText);
     expect(result.cases[0].expectedResults[0].children.attached.map(node => node.title)).toEqual(['展示“名称”', '存在【新增】按钮']);
     expect(result.cases[0]).not.toHaveProperty('caseId');
   });
 
-  it('遍历多画布与自由主题，相同标题按来源区分', async () => {
+  it('遍历多画布与自由主题，相同标题按模块路径区分', async () => {
     const second = { id: 'sheet-2', title: '其他画布', rootTopic: {
       id: 'root', title: '其他模块', children: { detached: [caseNode] },
     } };
     const result = await importXMind(fixture([...content, second]));
-    expect(result.cases.map(item => item.source.sheetId)).toEqual(['sheet-1', 'sheet-2']);
-    expect(result.sheets[1].root.children.detached[0].raw).toEqual(caseNode);
+    expect(result.cases.map(item => item.modulePath)).toEqual([['商品管理'], ['其他模块']]);
+    expect(result.sheets[1].root.children.detached[0].raw).toEqual(caseAttributes);
   });
 
   it('无法识别的结构保留原文并提示，不把普通叶节点当作用例', async () => {
     const raw = topic('root', '待确认', [topic('leaf', '随意结构')]);
     const result = await importXMind(fixture([{ id: 'sheet', title: '', rootTopic: raw }]));
     expect(result.cases).toEqual([]);
-    expect(result.sheets[0].root.raw).toEqual(raw);
-    expect(result.warnings[0].source.nodeId).toBe('leaf');
+    expect(result.sheets[0].root.raw).toEqual({});
+    expect(result.warnings[0].path).toEqual(['待确认', '随意结构']);
   });
 
   it('不完整用例仍可导入并提示缺少的分组', async () => {
@@ -112,10 +112,10 @@ describe('XMind 无配置导入', () => {
     const listed = spawnSync(process.execPath, args, { cwd, encoding: 'utf8' });
     expect(listed.status).toBe(0);
     expect(listed.stdout).toContain('识别 1 条用例');
-    expect(listed.stdout).toContain('#case-1');
+    expect(listed.stdout).not.toContain('case-1');
     const json = spawnSync(process.execPath, [...args, '--json'], { cwd, encoding: 'utf8' });
     expect(json.status).toBe(0);
-    expect(JSON.parse(json.stdout).cases[0].node.raw).toEqual(caseNode);
+    expect(JSON.parse(json.stdout).cases[0].node.raw).toEqual(caseAttributes);
     expect(readdirSync(cwd)).toEqual(['中文 用例.xmind']);
   });
 

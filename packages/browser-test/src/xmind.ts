@@ -31,21 +31,23 @@ function section(node: XMindNode): Section | undefined {
 }
 
 /** 递归保留各类子主题、原始属性和路径；格式错误携带位置，避免静默丢弃内容。 */
-function parseNode(value: unknown, file: string, sheetId: string, path: string[], ids: Set<string>, depth = 0): XMindNode {
+function parseNode(value: unknown, sheetId: string, path: string[], ids: Set<string>, depth = 0): XMindNode {
   if (depth > 256) throw new Error('XMind 主题层级超过 256 层');
   const raw = object(value, `画布 ${sheetId} 的主题`);
   const id = string(raw.id, '主题 id');
   if (!id || ids.has(id)) throw new Error(`画布 ${sheetId} 的主题 ID 为空或重复：${id}`);
   ids.add(id);
   const title = string(raw.title, `主题 ${id} 的 title`);
+  // raw 只保留备注、标签、优先级等未结构化属性；id、title、children 已分别体现在校验、标题与子树中，不重复保存。
+  const { id: _id, title: _title, children: _children, ...attributes } = raw;
   const node: XMindNode = {
-    id, title, path: [...path, title], source: { file, sheetId, nodeId: id }, children: {}, raw,
+    title, path: [...path, title], children: {}, raw: attributes,
   };
   if (raw.children !== undefined) {
     for (const [kind, children] of Object.entries(object(raw.children, `主题 ${id} 的 children`))) {
       if (!Array.isArray(children)) throw new Error(`主题 ${id} 的 children.${kind} 必须是数组`);
       Object.defineProperty(node.children, kind, {
-        value: children.map(child => parseNode(child, file, sheetId, node.path, ids, depth + 1)),
+        value: children.map(child => parseNode(child, sheetId, node.path, ids, depth + 1)),
         enumerable: true,
       });
     }
@@ -69,14 +71,14 @@ function collectCases(node: XMindNode, result: XMindImport): void {
       sections.steps = steps;
       sections.expectedResults = steps.flatMap(step => step.children.attached ?? []);
       if (steps.some(step => !step.children.attached?.length)) {
-        result.warnings.push({ source: node.source, message: '嵌套用例中部分操作没有直属预期节点，原文已保留，需人工确认。' });
+        result.warnings.push({ path: node.path, message: '嵌套用例中部分操作没有直属预期节点，原文已保留，需人工确认。' });
       }
     }
   }
   if (sections.steps.length || sections.expectedResults.length) {
-    result.cases.push({ title: node.title, source: node.source, modulePath: node.path.slice(0, -1), node, structure, ...sections });
+    result.cases.push({ title: node.title, modulePath: node.path.slice(0, -1), node, structure, ...sections });
     if (!sections.steps.length || !sections.expectedResults.length) {
-      result.warnings.push({ source: node.source, message: '用例缺少操作或预期分组，原文已保留，需人工确认。' });
+      result.warnings.push({ path: node.path, message: '用例缺少操作或预期分组，原文已保留，需人工确认。' });
     }
     for (const [kind, children] of Object.entries(node.children)) {
       if (kind !== 'attached') for (const child of children) collectCases(child, result);
@@ -85,7 +87,7 @@ function collectCases(node: XMindNode, result: XMindImport): void {
   }
   const children = Object.values(node.children).flat();
   if (!children.length) {
-    result.warnings.push({ source: node.source, message: '无法明确识别用例结构，节点已保留在主题树中，需人工确认。' });
+    result.warnings.push({ path: node.path, message: '无法明确识别用例结构，节点已保留在主题树中，需人工确认。' });
   }
   for (const child of children) collectCases(child, result);
 }
@@ -115,8 +117,8 @@ export async function importXMind(filename: string): Promise<XMindImport> {
       if (!id || sheetIds.has(id)) throw new Error(`画布 ID 为空或重复：${id}`);
       sheetIds.add(id);
       const title = string(sheet.title, `画布 ${id} 的 title`);
-      const root = parseNode(sheet.rootTopic, file, id, [], new Set());
-      result.sheets.push({ id, title, root });
+      const root = parseNode(sheet.rootTopic, id, [], new Set());
+      result.sheets.push({ title, root });
       collectCases(root, result);
     }
     return result;

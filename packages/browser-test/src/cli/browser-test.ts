@@ -52,13 +52,13 @@ async function main(args: string[]): Promise<void> {
   } else if (json) {
     console.log(JSON.stringify(result, null, 2));
   } else {
-    console.log(`导入 ${result.sheets.length} 个画布，识别 ${result.cases.length} 条用例`);
+    console.log(`导入 ${result.sheets.length} 个画布，识别 ${result.cases.length} 条用例（来源：${result.file}）`);
     for (const item of result.cases) {
-      console.log(`\n${item.title}\n  模块：${item.modulePath.join(' / ')}\n  来源：${item.source.file}#${item.source.nodeId}（画布 ${item.source.sheetId}）`);
+      console.log(`\n${item.title}\n  模块：${item.modulePath.join(' / ')}`);
       if (item.structure === 'nested') console.log('  结构：按前置条件与操作子树识别为操作→预期嵌套布局，语义待确认');
     }
   }
-  for (const warning of result.warnings) console.error(`提示 [${warning.source.sheetId}/${warning.source.nodeId}]：${warning.message}`);
+  for (const warning of result.warnings) console.error(`提示 [${warning.path.join(' / ')}]：${warning.message}`);
 }
 
 main(process.argv.slice(2)).catch(error => {
