@@ -126,7 +126,7 @@ async function main(args: string[]): Promise<void> {
     console.log(`导入 ${result.sheets.length} 个画布，识别 ${result.cases.length} 条用例（来源：${result.file}）`);
     for (const item of result.cases) {
       console.log(`\n${item.title}\n  模块：${item.modulePath.join(' / ')}`);
-      if (item.structure === 'nested') console.log('  结构：按前置条件与操作子树识别为操作→预期嵌套布局，语义待确认');
+      if (item.structure === 'nested') console.log('  结构：按父操作→直属子预期识别为嵌套布局');
     }
   }
   for (const warning of result.warnings) console.error(`提示 [${warning.path.join(' / ')}]：${warning.message}`);

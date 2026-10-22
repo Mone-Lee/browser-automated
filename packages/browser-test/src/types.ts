@@ -16,7 +16,7 @@ export interface XMindNode {
 /** 按字段或嵌套布局识别出的用例；不定义业务用例编号，原文编号仅保留在主题内容中。 */
 export interface XMindCase {
   title: string;
-  /** 字段标记识别为 sections；依据前置条件及操作子树识别为 nested，语义仍需确认。 */
+  /** 字段标记识别为 sections；依据前置条件及操作子树识别为 nested。 */
   structure: 'sections' | 'nested';
   /** 从根主题到用例父主题的标题序列，不含用例自身标题。 */
   modulePath: string[];
@@ -26,7 +26,7 @@ export interface XMindCase {
   preconditions: XMindNode[];
   /** 操作字段或嵌套布局中的操作节点，保留原有顺序与完整子树。 */
   steps: XMindNode[];
-  /** 预期字段或操作的直属附属节点；嵌套布局可通过路径及操作子树追溯对应关系，尚非独立断言。 */
+  /** 预期字段或操作的直属附属节点；嵌套布局中父操作与直属子预期通过路径及操作子树保持对应。 */
   expectedResults: XMindNode[];
 }
 
