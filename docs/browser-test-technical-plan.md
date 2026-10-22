@@ -349,14 +349,46 @@ XMind 中的业务前置条件仍须保留并在执行时核对，例如“已�
 
 ## 7. 命令、产物与退出码
 
+当前已实现 XMind 导入、用例 JSON 输入和 Gherkin 引导生成；`run` 目前只检查待确认注释，解析、执行与报告仍属于后续步骤。常用命令如下：
+
 ```bash
-browser-test feature gen --xmind cases.xmind
-browser-test run .browser-test/service-type-list.feature
+browser-test xmind list --xmind cases.xmind --output cases.import.json
+browser-test feature gen --xmind cases.xmind --draft cases.draft.gateway.json
+browser-test feature gen --cases .browser-test/cases.import.json --steps .browser-test/cases.steps.agent.json --draft cases.draft.agent.json
+browser-test feature gen --review cases.draft.agent.json
+browser-test feature gen --review cases.draft.agent.json --yes
 ```
 
 本地开发从第 2 步开始同时提供 Skill 调用入口。安装或链接仓库内 Skill 后，可在支持 Skills 的 Agent 中使用 `/browser-test` 加自然语言请求；Skill 将请求转换为同一套 `browser-test` CLI 命令。CLI 是唯一功能实现入口，Skill 联调不维护另一套业务逻辑。
 
-执行输出示例：
+当前生成产物统一位于调用目录的 `.browser-test/`，目录不存在时自动创建。文件名由调用方指定，下面只展示约定后缀与各自职责：
+
+```text
+.browser-test/
+├── cases.import.json                 # 可选：xmind list --output 保存的结构化导入结果
+├── cases.steps.agent.json            # 可选：当前 Agent 按 feature rules 起草的步骤输入
+├── cases.draft.agent.json            # 机器读写的审阅草案；地址和语义确认写回此文件
+├── cases.draft.agent.preview.feature # 草案派生预览；草案变化时同步刷新，不作为执行入口
+└── <模块路径>.feature                # 用户审阅确认后的最终用例；按模块拆分
+```
+
+各阶段的写入规则如下：
+
+- `xmind list --json` 只输出到标准输出，不创建文件；`--output <文件名>` 才在 `.browser-test/` 中保存导入 JSON。
+- `feature gen --draft` 排他创建草案 JSON 及同名 `.preview.feature`，不会创建最终 feature。`feature addresses` 与 `feature resolve` 更新草案后会同步覆盖这份派生预览。
+- `feature gen --review` 只展示完整差异；追加 `--yes` 后才按模块创建最终 `.feature`。已有最终文件一律不覆盖，调用方需审阅差异后自行合并。
+- `feature gen --direct` 不创建草案，直接创建最终 `.feature`；不确定内容保留为 `# TODO(确认)`，清除前不能执行。
+- `.browser-test/` 中历史遗留的 `project.json`、`cases/`、`diagnostics/` 或 `runs/` 不是当前生成流程的输入，也不能据此认定执行与报告已经实现。
+
+当前命令成功返回 `0`；参数、输入、模型输出、确认取消、文件冲突，以及 `run` 的待确认项检查或“执行尚未实现”均返回 `2`。现阶段还不会产生测试 `PASS / FAIL / BLOCKED` 结论，也不会返回代表测试失败的退出码 `1`。
+
+完成第 5、6 步后，`run` 的目标接口为：
+
+```bash
+browser-test run .browser-test/service-type-list.feature
+```
+
+以下执行输出与运行产物均为目标设计，不是当前 CLI 已有行为：
 
 ```text
 [1/3] Given 已登录并打开…页面   页面导航并核对前置条件   ok   shots/01.png
@@ -365,13 +397,13 @@ browser-test run .browser-test/service-type-list.feature
       And   【新增】按钮         PASS  button "新增" (e12)
       And   每条记录【编辑】【删除】  FAIL  第 3 行缺少“删除”   shots/03.png
 
-Result: FAIL (2 passed, 1 failed)   report: runs/20261013-1612/report.md
+Result: FAIL (2 passed, 1 failed)   report: .browser-test/runs/20261013-1612/report.md
 ```
 
-运行目录只保留四类产物：
+目标运行目录仍只保留四类产物，避免为执行计划等内部状态预生成额外文件：
 
 ```text
-runs/20261013-1612/
+.browser-test/runs/20261013-1612/
 ├── result.json   # 每步：text / status / by(rule|ai|action) / evidence / 耗时
 ├── report.md     # 人读：失败步骤置顶，附截图、实际文本、复现命令
 ├── shots/        # 01.png 02.png …（失败步骤必有）
@@ -396,7 +428,7 @@ runs/20261013-1612/
 
 小程序结果使用相同结构，并在 `environment` 中记录项目路径摘要、当前页、Skill 版本关系、开发者工具版本、基础库版本和构建标识。无法取得的字段明确记为 unavailable，不推断或伪造；`runtime` 固定记录为 `devtools`，避免把模拟器结果误认为真机结果。
 
-排查路径：看 `report.md` 的失败步骤 → 看截图与 `actual` → 需要时查 `trace.log`。退出码：`0 = PASS`，`1 = FAIL`，`2 = BLOCKED 或工具错误`。
+目标排查路径：看 `report.md` 的失败步骤 → 看截图与 `actual` → 需要时查 `trace.log`。执行能力完成后的退出码约定为 `0 = PASS`，`1 = FAIL`，`2 = BLOCKED 或工具错误`。
 
 ## 8. 目标代码结构
 
