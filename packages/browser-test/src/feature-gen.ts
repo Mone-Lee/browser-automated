@@ -36,6 +36,12 @@ export interface FeatureReview {
   diff: string;
 }
 
+/** Gherkin 文件中的待确认注释及其行号，供执行入口在运行前阻断。 */
+export interface PendingConfirmation {
+  line: number;
+  text: string;
+}
+
 /** 当前 Agent 代跑时提供的逐条步骤，按模块路径与标题对应用例。 */
 export interface AgentSteps {
   cases: { modulePath: string[]; title: string; steps: DraftStep[]; visit?: PageVisit; platform?: DraftScenario['platform'] }[];
@@ -284,6 +290,15 @@ export function renderDraftPreview(draft: FeatureDraft): string {
   return header + [...groups].map(([module, scenarios]) => featureText(draft.source, module, scenarios, ids)).join('\n');
 }
 
+/** 识别生成器及手写文件支持的两种待确认注释，不把普通步骤中的相同文字误判为标记。 */
+export function findPendingConfirmations(content: string): PendingConfirmation[] {
+  return content.split(/\r?\n/u).flatMap((text, index) => (
+    /^\s*#\s*(?:TODO\s*\(确认(?:\s*#[^)]+)?\)|待确认)\s*[:：]?/u.test(text)
+      ? [{ line: index + 1, text: text.trim() }]
+      : []
+  ));
+}
+
 /** 展示单个待确认项所在场景的完整 Gherkin 及提问，用于逐项交互确认。 */
 export function describeTodo(draft: FeatureDraft, id: string): string {
   const item = listTodos(draft).find(entry => entry.id === id);
@@ -346,6 +361,15 @@ export async function saveFeatureDraft(draft: FeatureDraft, output: string): Pro
     throw new Error('仍有待确认内容，请解决或删除相关步骤后重新审阅');
   }
   if (draft.scenarios.some(s => s.platform !== 'miniprogram' && s.platform !== 'unsupported' && !s.visit?.url)) throw new Error('仍有页面地址待确认，请使用 feature addresses');
+  const review = await reviewFeatureDraft(draft, output);
+  const pending = review.files.filter(file => file.previous === null);
+  if (pending.length) await mkdir(resolve(output), { recursive: true });
+  for (const file of pending) await writeFile(file.path, file.content, { encoding: 'utf8', flag: 'wx' });
+  return pending.map(file => file.path);
+}
+
+/** 直接创建可整文件编辑的 Gherkin；允许保留待确认注释，但仍不覆盖任何已有文件。 */
+export async function saveDirectFeatureDraft(draft: FeatureDraft, output: string): Promise<string[]> {
   const review = await reviewFeatureDraft(draft, output);
   const pending = review.files.filter(file => file.previous === null);
   if (pending.length) await mkdir(resolve(output), { recursive: true });
