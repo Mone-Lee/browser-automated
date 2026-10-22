@@ -1,4 +1,10 @@
-/** 导出版本与无配置的 XMind 导入接口；后续生成和执行能力按技术设计逐步实现。 */
+/** 导出版本、XMind 导入和引导生成接口；执行能力按技术设计逐步实现。 */
 export const VERSION = '0.1.0';
 export { importXMind } from './xmind.js';
 export type { XMindNode, XMindCase, XMindImport } from './types.js';
+
+export { DRAFT_RULES, describeTodo, listTodos, renderDraftPreview, resolveTodo, draftFromAgentSteps, generateFeatureDraft, loadAgentSteps, loadCasesImport, validateFeatureDraft, reviewFeatureDraft, saveFeatureDraft } from './feature-gen.js';
+export type { AgentSteps, FeatureDraft, DraftScenario, DraftStep, FeatureReview } from './feature-gen.js';
+
+export { prepareAddresses, confirmAddress, validAddress } from './feature-address.js';
+export type { PageVisit, AddressRequest } from './feature-address.js';
