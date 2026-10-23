@@ -1,6 +1,6 @@
 ---
 name: browser-test
-description: 导入 XMind 测试用例，或解释从思维导图截取的局部用例图片。适用于列出或解释用例，以及通过 browser-test 生成、执行用例的请求；支持引导生成 Gherkin，执行尚未实现。
+description: 导入 XMind 测试用例，或解释从思维导图截取的局部用例图片。适用于列出或解释用例，以及通过 browser-test 生成、解析、执行用例的请求；支持引导生成与解析 Gherkin，页面执行尚未实现。
 ---
 
 # browser-test
@@ -35,6 +35,7 @@ node "<Skill目录>/scripts/browser-test.mjs" --help
 | 处理单个待确认项 | `feature resolve "<草案 JSON>" <编号> keep\|delete\|"<完整步骤>"` |
 | 展示修改后的草案差异 | `feature gen --review "<草案 JSON 文件名>"` |
 | 用户确认后创建 feature | `feature gen --review "<草案 JSON 文件名>" --yes` |
+| 解析并校验 Gherkin | `run "<feature 文件>"`（解析成功后仍会提示页面执行尚未实现） |
 | 查询用法或版本 | `--help` 或 `--version` |
 
 用户未提供 XMind 文件时询问文件路径；导入不要求业务仓库、配置、URL 或登录；生成 Web 用例时按下文确认访问地址。`--json` 与 `--output` 互斥，仅在用户要求保存时使用 `--output`；该参数仅接收 `.browser-test/` 下的文件名。Agent 自行写入的图片还原 JSON 和步骤 JSON 也必须保存在 `.browser-test/`。
@@ -81,6 +82,6 @@ node "<Skill目录>/scripts/browser-test.mjs" --help
 
 ## 能力边界
 
-请求 Gherkin 解析、Web／小程序执行或报告时，明确说明当前实现 XMind 导入、引导生成、图片用例解释、`run` 的待确认项前置检查和 Skill 本地入口，实际执行能力尚未实现。可以在用户请求范围内先导入已提供的 XMind、解释已提供的图片或检查待确认项，但不得用临时提示词、手写 feature、其他浏览器工具或模拟报告冒充该 CLI 能力。
+请求 Gherkin 解析、Web／小程序执行或报告时，明确说明当前实现 XMind 导入、引导生成、图片用例解释、Gherkin 解析、`run` 的待确认项前置检查和 Skill 本地入口，页面执行与报告能力尚未实现。可以在用户请求范围内先导入已提供的 XMind、解释已提供的图片或解析 feature，但不得用临时提示词、手写 feature、其他浏览器工具或模拟报告冒充该 CLI 的执行能力。
 
 本阶段仅网关起草方式调用 AI 服务（Agent 代跑不调用），不启动浏览器或微信开发者工具，不读取业务源码及项目预设，不修改 browser-opt 的 Workflow。

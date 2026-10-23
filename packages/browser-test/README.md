@@ -2,7 +2,7 @@
 
 面向 Web 与微信小程序的用例驱动测试工具。当前设计从“用户只有一个包含测试用例的 XMind 文件，或者从其中截取的局部用例图片”出发：导入或解释原文、确认 Gherkin、执行步骤并输出证据报告。
 
-已实现第 1–3 步：XMind 导入、Skill 入口与引导生成 Gherkin。尚不能解析或执行 Gherkin。
+已实现第 1–4 步：XMind 导入、Skill 入口、引导生成 Gherkin，以及 Gherkin 解析与待确认项拒绝。尚不能执行 Gherkin。
 
 Skill 入口也支持解释从大型 XMind 中截取的局部用例图片：Agent 只还原图中可见的层级、操作和预期，并将裁切或模糊内容标记为待确认。图片不经 CLI 导入；如需继续生成 Gherkin，由 Agent 将还原结果保存为与 `xmind list --json` 同构的 JSON，再用 `feature gen --cases`。XMind 文件仍使用下方 CLI。
 
@@ -22,7 +22,7 @@ node packages/browser-test/dist/cli/browser-test.js xmind list --xmind /path/to/
 - 用例的数据前提仍须核对；当前不建设 mock 场景或要求业务代码接入。
 - 先打通单应用 Web 只读闭环，再接入用户已打开的微信小程序；跨应用与业务写操作暂不执行。
 
-生成已实现，执行仍为后续目标：
+生成与解析已实现，执行仍为后续目标：
 
 ```bash
 browser-test feature gen --xmind cases.xmind

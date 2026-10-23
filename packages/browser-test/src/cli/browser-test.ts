@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-/** 提供 XMind 导入与引导生成入口；执行能力尚未开放。 */
+/** 提供 XMind 导入、引导生成与 Gherkin 解析入口；页面执行能力尚未开放。 */
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { VERSION, importXMind } from '../index.js';
 import { createInterface } from 'node:readline/promises';
-import { DRAFT_RULES, describeTodo, findPendingConfirmations, listTodos, renderDraftPreview, resolveTodo, draftFromAgentSteps, generateFeatureDraft, loadAgentSteps, loadCasesImport, validateFeatureDraft, reviewFeatureDraft, saveDirectFeatureDraft, saveFeatureDraft } from '../feature-gen.js';
+import { DRAFT_RULES, describeTodo, listTodos, renderDraftPreview, resolveTodo, draftFromAgentSteps, generateFeatureDraft, loadAgentSteps, loadCasesImport, validateFeatureDraft, reviewFeatureDraft, saveDirectFeatureDraft, saveFeatureDraft } from '../feature-gen.js';
 import { prepareAddresses, confirmAddress } from '../feature-address.js';
+import { findPendingConfirmations, parseFeatureFile } from '../feature.js';
 import type { FeatureDraft, DraftStep } from '../feature-gen.js';
 
 const help = `browser-test ${VERSION}
@@ -31,7 +32,7 @@ feature gen 默认支持逐项交互确认；--draft 保存结构化草案供分
 --draft 同时写出 <草案>.preview.feature（Gherkin 预览，待确认项带编号）；todos 以 Gherkin 上下文逐项展示待确认项，resolve 每次处理一项并刷新预览。
 --direct 跳过逐项确认并保留 # TODO(确认)；调用方须直接修改生成文件，清除待确认项后才能执行。所有生成模式均不覆盖已有 feature。
 生成阶段按应用、页面和环境复用 .browser-test/ 中的已确认地址；缺失或冲突用 feature addresses 集中确认，确认一次应用于同页用例。
-Gherkin 解析、run 和报告尚未实现。
+Gherkin 解析与待确认项拒绝已实现；run 的页面执行和报告尚未实现。
 `;
 
 /** 返回本次 CLI 调用专用的产物目录；所有可写入内容均受此目录约束。 */
@@ -95,7 +96,7 @@ async function main(args: string[]): Promise<void> {
     return;
   }
   if (args[0] === 'feature') {
-    throw new Error('该能力尚未实现：当前支持 XMind 导入和 feature gen；解析、执行和报告将在后续阶段开放');
+    throw new Error('不支持的 feature 子命令，请使用 --help 查看用法');
   }
   if (args[0] !== 'xmind' || args[1] !== 'list') throw new Error('不支持的命令，请使用 --help 查看用法');
   let filename: string | undefined;
@@ -205,16 +206,11 @@ async function generate(args: string[]): Promise<void> {
   }
 }
 
-/** 执行能力实现前先落实待确认项阻断，避免含歧义的 Gherkin 被后续运行器误执行。 */
+/** 先完成正式解析与待确认项阻断；页面执行开放前仍明确返回能力边界。 */
 async function guardRun(args: string[]): Promise<void> {
   if (args.length !== 1 || args[0].startsWith('--')) throw new Error('用法：browser-test run <feature 文件>');
-  const file = resolve(args[0]);
-  const pending = findPendingConfirmations(await readFile(file, 'utf8'));
-  if (pending.length) {
-    const locations = pending.map(item => `  ${file}:${item.line} ${item.text}`).join('\n');
-    throw new Error(`feature 仍有 ${pending.length} 项待确认，已停止执行。请先直接修改文件并清除待确认注释：\n${locations}`);
-  }
-  throw new Error('run 尚未实现：该 feature 已通过待确认项检查，但执行与报告将在后续阶段开放');
+  const feature = await parseFeatureFile(args[0]);
+  throw new Error(`run 尚未实现：已解析 Feature「${feature.title}」的 ${feature.scenarios.length} 个场景，但页面执行与报告将在后续阶段开放`);
 }
 
 /** 地址按页面集中确认；每次读取最新历史记录并刷新草案，供 Agent 分阶段交互使用。 */
