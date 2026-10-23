@@ -7,7 +7,7 @@ import { createInterface } from 'node:readline/promises';
 import { DRAFT_RULES, describeTodo, listTodos, renderDraftPreview, resolveTodo, draftFromAgentSteps, generateFeatureDraft, loadAgentSteps, loadCasesImport, validateFeatureDraft, reviewFeatureDraft, saveDirectFeatureDraft, saveFeatureDraft } from '../feature-gen.js';
 import { prepareAddresses, confirmAddress } from '../feature-address.js';
 import { findPendingConfirmations, parseFeatureFile } from '../feature.js';
-import type { FeatureDraft, DraftStep } from '../feature-gen.js';
+import type { ExistingFeatureStrategy, FeatureDraft, DraftStep } from '../feature-gen.js';
 
 const help = `browser-test ${VERSION}
 用法：
@@ -16,7 +16,7 @@ const help = `browser-test ${VERSION}
   browser-test feature gen --cases <用例 JSON> [--draft <草案 JSON 文件名>]
   browser-test feature gen --xmind <文件>|--cases <用例 JSON> --steps <步骤 JSON> --draft <草案 JSON 文件名>
   browser-test feature gen --xmind <文件>|--cases <用例 JSON> [--steps <步骤 JSON>] --direct
-  browser-test feature gen --review <草案 JSON 文件名> [--yes]
+  browser-test feature gen --review <草案 JSON 文件名> [--merge | --overwrite] [--yes]
   browser-test feature addresses <草案 JSON 文件名> [--id <编号> --url <完整地址> --application <应用> --page <页面> --environment <环境>]
   browser-test feature rules
   browser-test feature todos <草案 JSON> [--id <编号>]
@@ -30,7 +30,9 @@ feature gen 默认支持逐项交互确认；--draft 保存结构化草案供分
 起草有两种方式：默认经 AI Gateway，需要 AI_GATEWAY_API_KEY、BROWSER_TEST_MODEL；或由当前 Agent 按 feature rules 输出的规则起草步骤 JSON，
 再用 --steps 传入（无需网关配置，补全与原文核对同网关路径）。审阅无需 AI。
 --draft 同时写出 <草案>.preview.feature（Gherkin 预览，待确认项带编号）；todos 以 Gherkin 上下文逐项展示待确认项，resolve 每次处理一项并刷新预览。
---direct 跳过逐项确认并保留 # TODO(确认)；调用方须直接修改生成文件，清除待确认项后才能执行。所有生成模式均不覆盖已有 feature。
+--direct 跳过逐项确认并保留 # TODO(确认)；调用方须直接修改生成文件，清除待确认项后才能执行。
+审阅时会同步生成 <草案>.review.diff；默认不覆盖已有 feature，--merge 保留已有同名场景并追加缺失场景，--overwrite 整体覆盖。
+通过 --cases 生成的 feature 文件名追加来源后缀，避免图片还原用例与同模块的 XMind 用例冲突。
 生成阶段按应用、页面和环境复用 .browser-test/ 中的已确认地址；缺失或冲突用 feature addresses 集中确认，确认一次应用于同页用例。
 Gherkin 解析与待确认项拒绝已实现；run 的页面执行和报告尚未实现。
 `;
@@ -138,17 +140,20 @@ async function generate(args: string[]): Promise<void> {
   const options: Record<string, string> = {};
   for (let i = 0; i < args.length; i++) {
     const key = args[i];
-    const isFlag = key === '--yes' || key === '--direct';
-    if (!['--xmind', '--cases', '--steps', '--out', '--draft', '--review', '--yes', '--direct'].includes(key) || key in options
+    const isFlag = ['--yes', '--direct', '--merge', '--overwrite'].includes(key);
+    if (!['--xmind', '--cases', '--steps', '--out', '--draft', '--review', '--yes', '--direct', '--merge', '--overwrite'].includes(key) || key in options
       || (!isFlag && (!args[i + 1] || args[i + 1].startsWith('--')))) throw new Error(`无效或重复参数：${key}`);
     options[key] = isFlag ? 'true' : args[++i];
   }
   if ([options['--xmind'], options['--cases'], options['--review']].filter(Boolean).length !== 1) throw new Error('--xmind、--cases 与 --review 三选一');
   if ([options['--draft'], options['--review'], options['--direct']].filter(Boolean).length > 1 || (options['--yes'] && !options['--review'])) throw new Error('--draft、--review 与 --direct 互斥，--yes 仅用于审阅');
+  if (options['--merge'] && options['--overwrite']) throw new Error('--merge 与 --overwrite 互斥');
+  if ((options['--merge'] || options['--overwrite']) && !options['--review']) throw new Error('--merge 与 --overwrite 仅用于 --review');
   if (options['--steps'] && options['--review']) throw new Error('--steps 仅用于生成');
   const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
   if (!options['--review'] && !options['--draft'] && !options['--direct'] && !interactive) throw new Error('非交互生成请提供 --draft <草案 JSON> 或 --direct');
   const out = outputDirectory(options['--out']);
+  const strategy: ExistingFeatureStrategy = options['--merge'] ? 'merge' : options['--overwrite'] ? 'overwrite' : 'create';
   const draft: FeatureDraft = options['--review']
     ? JSON.parse(await readFile(artifactFile(options['--review'], '--review'), 'utf8'))
     : await buildDraft(options);
@@ -190,8 +195,9 @@ async function generate(args: string[]): Promise<void> {
       await resolveTodos(draft, rl);
     }
     if (addressRequests.length) console.log(`尚有 ${addressRequests.length} 组地址待确认，请使用 feature addresses <草案 JSON>`);
-    const review = await reviewFeatureDraft(draft, out);
-    console.log(review.diff);
+    const review = await reviewFeatureDraft(draft, out, strategy);
+    const reviewFile = await writeReviewDiff(options['--review'], review.diff);
+    console.log(`${review.diff}\n\n审阅差异已保存：${reviewFile}`);
     if (rl) {
       if ((await rl.question('\n确认以上全部内容并创建新文件？输入 yes：')).trim() !== 'yes') throw new Error('已取消，未写入 feature');
     } else if (!options['--yes']) {
@@ -199,11 +205,22 @@ async function generate(args: string[]): Promise<void> {
       return;
     }
     await ensureArtifactDirectory();
-    const written = await saveFeatureDraft(draft, out);
-    console.log(`已写入 ${written.length} 个新文件；已有文件未覆盖。${written.length ? '\n' + written.join('\n') : ''}`);
+    const written = await saveFeatureDraft(draft, out, strategy);
+    const action = strategy === 'merge' ? '合并' : strategy === 'overwrite' ? '覆盖' : '新建';
+    console.log(`已${action} ${written.length} 个文件。${written.length ? '\n' + written.join('\n') : ''}`);
   } finally {
     rl?.close();
   }
+}
+
+/** 将终端审阅内容保存为可直接打开的文件，避免差异只存在于一次性标准输出中。 */
+async function writeReviewDiff(draftName: string | undefined, diff: string): Promise<string> {
+  if (!draftName) throw new Error('保存审阅差异需要草案文件名');
+  const filename = draftName.replace(/\.json$/iu, '') + '.review.diff';
+  const file = artifactFile(filename, '审阅差异');
+  await ensureArtifactDirectory();
+  await writeFile(file, `${diff}\n`, 'utf8');
+  return file;
 }
 
 /** 先完成正式解析与待确认项阻断；页面执行开放前仍明确返回能力边界。 */

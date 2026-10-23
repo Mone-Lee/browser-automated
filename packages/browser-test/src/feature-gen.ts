@@ -1,6 +1,6 @@
-/** 根据导入原文起草用例，并集中处理草案校验、语义确认与不覆盖已有文件的落盘流程。 */
+/** 根据导入原文起草用例，并集中处理草案校验、语义确认与已有文件的落盘策略。 */
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { resolve, join } from 'node:path';
+import { basename, extname, resolve, join } from 'node:path';
 import { validAddress } from './feature-address.js';
 import type { PageVisit } from './feature-address.js';
 import { importXMind } from './xmind.js';
@@ -27,8 +27,13 @@ export interface DraftScenario {
 /** 可供终端或 Agent 审阅的显式草案，不属于运行产物。 */
 export interface FeatureDraft {
   source: string;
+  /** 区分 XMind 与图片还原等结构化用例来源；旧草案缺失时按来源扩展名兼容推断。 */
+  sourceType?: 'xmind' | 'cases';
   scenarios: DraftScenario[];
 }
+
+/** 已有目标文件的处理策略；默认 create 继续保持安全的排他创建。 */
+export type ExistingFeatureStrategy = 'create' | 'merge' | 'overwrite';
 
 /** 待写入文件及其与已有内容的对比，供人工审阅。 */
 export interface FeatureReview {
@@ -50,8 +55,9 @@ function singleLine(value: unknown): value is string {
 export function validateFeatureDraft(value: unknown): asserts value is FeatureDraft {
   if (!value || typeof value !== 'object') throw new Error('草案必须为 JSON 对象');
   const draft = value as FeatureDraft;
-  if (Object.keys(draft).some(key => !['source', 'scenarios'].includes(key))) throw new Error('草案包含尚不支持的字段');
+  if (Object.keys(draft).some(key => !['source', 'sourceType', 'scenarios'].includes(key))) throw new Error('草案包含尚不支持的字段');
   if (!singleLine(draft.source) || !Array.isArray(draft.scenarios) || !draft.scenarios.length) throw new Error('草案缺少来源或场景');
+  if (draft.sourceType !== undefined && !['xmind', 'cases'].includes(draft.sourceType)) throw new Error('草案来源类型不合法');
   const locations = new Set<string>();
   for (const scenario of draft.scenarios) {
     if (!scenario || !singleLine(scenario.title) || !Array.isArray(scenario.modulePath) || !scenario.modulePath.every(singleLine)
@@ -202,7 +208,7 @@ export async function generateFeatureDraft(input: string | XMindImport): Promise
   const key = process.env.AI_GATEWAY_API_KEY;
   const model = process.env.BROWSER_TEST_MODEL;
   if (!key || !model) throw new Error('生成需要设置 AI_GATEWAY_API_KEY 和 BROWSER_TEST_MODEL（网关模型标识）；或由当前 Agent 起草后用 --steps 传入');
-  const draft: FeatureDraft = { source: imported.file, scenarios: [] };
+  const draft: FeatureDraft = { source: imported.file, sourceType: typeof input === 'string' ? 'xmind' : 'cases', scenarios: [] };
   for (const item of imported.cases) {
     const response = await fetch(`${process.env.AI_GATEWAY_BASE_URL ?? 'https://ai-gateway.vercel.sh/v1'}/chat/completions`, {
       method: 'POST',
@@ -230,7 +236,7 @@ export async function draftFromAgentSteps(input: string | XMindImport, agent: Ag
   const imported = await prepareImport(input);
   const byLocation = new Map(agent.cases.map(item => [JSON.stringify([item.modulePath, item.title]), item]));
   if (byLocation.size !== agent.cases.length) throw new Error('步骤 JSON 存在重复用例');
-  const draft: FeatureDraft = { source: imported.file, scenarios: [] };
+  const draft: FeatureDraft = { source: imported.file, sourceType: typeof input === 'string' ? 'xmind' : 'cases', scenarios: [] };
   for (const item of imported.cases) {
     const location = JSON.stringify([item.modulePath, item.title]);
     const context = byLocation.get(location);
@@ -308,8 +314,38 @@ export function resolveTodo(draft: FeatureDraft, id: string, action: 'keep' | 'd
   validateFeatureDraft(draft);
 }
 
-/** 同一模块路径的场景合并为一个 Feature；已有文件只对比不覆盖。 */
-export async function reviewFeatureDraft(draft: FeatureDraft, output: string): Promise<FeatureReview> {
+/** 将来源或模块文本转换为稳定的文件名片段。 */
+function filenamePart(value: string): string {
+  return value.replace(/[^\p{L}\p{N}_-]/gu, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'cases';
+}
+
+/** 图片还原等 cases 来源追加来源后缀，避免与同模块的 XMind 产物互相覆盖。 */
+function featureFilename(draft: FeatureDraft, scenarios: DraftScenario[]): string {
+  const moduleName = scenarios[0].modulePath.map(filenamePart).join('__') || 'cases';
+  const sourceType = draft.sourceType ?? (/\.xmind$/iu.test(draft.source) ? 'xmind' : 'cases');
+  if (sourceType === 'xmind') return moduleName;
+  const sourceName = basename(draft.source, extname(draft.source));
+  return `${moduleName}__${filenamePart(sourceName)}`;
+}
+
+/** 从生成内容中提取场景块，合并时保留已有同名场景及其人工修改。 */
+function mergeFeatureContent(previous: string, generated: string): string {
+  const existingTitles = new Set([...previous.matchAll(/^\s*Scenario\s*:\s*(.+)$/gmu)].map(match => match[1].trim()));
+  const lines = generated.trimEnd().split('\n');
+  const starts = lines.flatMap((line, index) => /^\s*Scenario\s*:/u.test(line) ? [index] : []);
+  const additions: string[] = [];
+  for (let index = 0; index < starts.length; index++) {
+    let start = starts[index];
+    while (start > 0 && (/^\s*@p\d+\s*$/iu.test(lines[start - 1]) || lines[start - 1].trim() === '')) start--;
+    const end = starts[index + 1] ?? lines.length;
+    const title = /^\s*Scenario\s*:\s*(.+)$/u.exec(lines[starts[index]])?.[1].trim();
+    if (title && !existingTitles.has(title)) additions.push(lines.slice(start, end).join('\n').trim());
+  }
+  return additions.length ? `${previous.trimEnd()}\n\n${additions.join('\n\n')}\n` : previous;
+}
+
+/** 同一模块路径的场景合并为一个 Feature，并按策略预览已有目标的最终内容。 */
+export async function reviewFeatureDraft(draft: FeatureDraft, output: string, strategy: ExistingFeatureStrategy = 'create'): Promise<FeatureReview> {
   validateFeatureDraft(draft);
   const groups = new Map<string, DraftScenario[]>();
   for (const scenario of draft.scenarios) {
@@ -318,13 +354,14 @@ export async function reviewFeatureDraft(draft: FeatureDraft, output: string): P
   }
   const files: FeatureReview['files'] = [];
   for (const [module, scenarios] of groups) {
-    const name = module ? scenarios[0].modulePath.map(part => part.replace(/[^\p{L}\p{N}_-]/gu, '-')).join('__') : 'cases';
-    const content = featureText(draft.source, module, scenarios);
+    const name = featureFilename(draft, scenarios);
+    const generated = featureText(draft.source, module, scenarios);
     const path = join(resolve(output), `${name}.feature`);
     let previous: string | null = null;
     try { previous = await readFile(path, 'utf8'); } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
+    const content = previous !== null && strategy === 'merge' ? mergeFeatureContent(previous, generated) : generated;
     files.push({ path, content, previous });
   }
   const diff = files.map(file => {
@@ -334,22 +371,27 @@ export async function reviewFeatureDraft(draft: FeatureDraft, output: string): P
     const next = new Set(file.content.split('\n'));
     const changes = [...old].filter(line => !next.has(line)).map(line => `-${line}`)
       .concat([...next].filter(line => !old.has(line)).map(line => `+${line}`));
-    return `已存在，不覆盖：${file.path}\n${changes.join('\n')}`;
+    const action = strategy === 'merge' ? '将合并' : strategy === 'overwrite' ? '将覆盖' : '已存在，默认不覆盖';
+    return `${action}：${file.path}\n${changes.join('\n')}`;
   }).join('\n\n');
   return { files, diff };
 }
 
-/** 使用排他创建避免覆盖；仍有待确认项时拒绝落盘。 */
-export async function saveFeatureDraft(draft: FeatureDraft, output: string): Promise<string[]> {
-  if (draft.scenarios.some(scenario => scenario.steps.some(step => step.todo || !step.text || /TODO\s*\(确认\)|待确认/u.test(step.text)))) {
+/** 按明确策略写入已审阅内容；默认使用排他创建，覆盖与合并必须由调用方显式指定。 */
+export async function saveFeatureDraft(draft: FeatureDraft, output: string, strategy: ExistingFeatureStrategy = 'create'): Promise<string[]> {
+  if (draft.scenarios.some(scenario => scenario.steps.some(step => step.todo || !step.text || /TODO\s*\(确认\)/u.test(step.text)))) {
     throw new Error('仍有待确认内容，请解决或删除相关步骤后重新审阅');
   }
   if (draft.scenarios.some(s => s.platform !== 'miniprogram' && s.platform !== 'unsupported' && !s.visit?.url)) throw new Error('仍有页面地址待确认，请使用 feature addresses');
-  const review = await reviewFeatureDraft(draft, output);
-  const pending = review.files.filter(file => file.previous === null);
-  if (pending.length) await mkdir(resolve(output), { recursive: true });
-  for (const file of pending) await writeFile(file.path, file.content, { encoding: 'utf8', flag: 'wx' });
-  return pending.map(file => file.path);
+  const review = await reviewFeatureDraft(draft, output, strategy);
+  const changed = review.files.filter(file => file.previous !== file.content && (file.previous === null || strategy !== 'create'));
+  if (changed.length) await mkdir(resolve(output), { recursive: true });
+  for (const file of changed) {
+    await writeFile(file.path, file.content, file.previous === null
+      ? { encoding: 'utf8', flag: 'wx' }
+      : { encoding: 'utf8' });
+  }
+  return changed.map(file => file.path);
 }
 
 /** 直接创建可整文件编辑的 Gherkin；允许保留待确认注释，但仍不覆盖任何已有文件。 */

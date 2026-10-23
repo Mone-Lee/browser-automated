@@ -91,11 +91,15 @@ browser-test feature gen --xmind cases.xmind --draft draft.json
 browser-test feature gen --review draft.json
 # 用户确认完整差异后追加 --yes 落盘
 browser-test feature gen --review draft.json --yes
+browser-test feature gen --review draft.json --merge --yes
+browser-test feature gen --review draft.json --overwrite --yes
 ```
 
 `--draft` 在 `.browser-test/` 下排他创建 JSON，并同时创建预览，不会写 feature。`--review` 不带 `--yes` 时仅展示差异。草案或已有文件变化后须重新审阅。所有待确认项必须处理完毕，才能落盘。
 
-同一模块路径的用例合并为一个 feature，模块路径作为 Feature 名，文件头为 `# source: <文件> / <模块路径>`；文件名由模块路径组成。步骤文字若未在原文中找到会标为待确认。仅输出来源注释、Feature、Scenario、原文已有优先级和 Given/When/Then/And，不新增业务字段。已有文件只展示差异且从不覆盖，包括人工修改过的文件。首次创建用排他写入避免并发覆盖；如写入中断，已经创建的文件保留，再次审阅后可补齐剩余文件。
+同一模块路径的用例合并为一个 feature，模块路径作为 Feature 名，文件头为 `# source: <文件> / <模块路径>`；XMind 产物的文件名由模块路径组成，`--cases` 的图片还原等来源会追加来源后缀，避免与同模块的 XMind 产物冲突。步骤文字若未在原文中找到会标为待确认。仅输出来源注释、Feature、Scenario、原文已有优先级和 Given/When/Then/And，不新增业务字段。
+
+`--review` 会在终端展示差异，并同步写入 `<草案>.review.diff` 供编辑器打开。已有文件默认只展示差异且不覆盖；显式传入 `--merge` 时保留已有同名场景并追加缺失场景，传入 `--overwrite` 时以本次审阅内容整体覆盖。两种策略都必须配合 `--review`，并在确认后加 `--yes` 才会写入。首次创建仍使用排他写入避免并发覆盖。
 
 `--cases <用例 JSON>` 可替代 `--xmind`（三者 `--xmind`/`--cases`/`--review` 恰选其一），用法与 `--draft`、`--review` 相同；JSON 中标注“需确认”的内容会生成待确认项，`file` 作为来源。
 
