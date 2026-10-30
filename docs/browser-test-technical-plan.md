@@ -293,7 +293,7 @@ XMind 用例不定义独立的 `caseId`。原文已有编号时，它仍作为�
 3. 同批复用：将相同应用、页面及环境的地址问题合并提问一次，用户提供或选定后应用于本批所有对应场景。当前用例已写明不同地址时保留原文并展示差异，不静默覆盖。
 4. 历史复用与冲突：历史记录只有一个符合条件的地址时直接复用，在生成结果中展示来源文件、场景及受影响用例；存在多个不同地址时列出候选和来源，让用户选择一次或输入新地址。选择仅作用于本批对应场景，不回写历史用例；未解决的冲突保留地址 TODO。
 5. 落盘与追溯：复用地址仍作为 Given 前置条件写入每个场景，用 `# 访问页面: …` 注释保存应用、页面、环境、地址和来源，供下次生成核对实际地址步骤；这些是注释中的复用信息，不是执行标签。随整体 diff 确认，不为每个场景重复询问。地址仍缺失时遵循 4.1 的草案与 TODO 规则。
-6. CLI 入口：`feature addresses <草案 JSON 文件名>` 复用并列出剩余地址分组；加 `--id <编号> --url <完整地址>` 确认整组，身份不明确时同时提供 `--application`、`--page` 和可选的 `--environment`。草案与最终 feature 均位于本次执行目录的 `.browser-test/`；终端交互生成使用相同逻辑；小程序通过草案的 `platform: "miniprogram"` 跳过 Web 地址确认。
+6. CLI 入口：`feature addresses <草案名>` 复用并列出剩余地址分组；加 `--id <编号> --url <完整地址>` 确认整组，身份不明确时同时提供 `--application`、`--page` 和可选的 `--environment`。草案机器状态位于系统临时目录，可读预览与最终 feature 位于本次执行目录的 `.browser-test/`；终端交互生成使用相同逻辑；小程序通过草案的 `platform: "miniprogram"` 跳过 Web 地址确认。
 
 例如，同一应用中的两个用例都进入“供应链商品库管理列表”，分别切换“售卖中”和“待平台售卖”页签：只确认一次列表入口地址，各自的页签操作继续保留。后续生成同一应用、页面及环境的用例时，可直接复用该已确认地址。若现有场景只有页面名称、尚未写入 URL，则首次仍需补充一次。
 
@@ -519,31 +519,28 @@ MSW 只能证明“给定模拟响应时前端如何展示”，不能证明真�
 当前已实现 XMind 导入、用例 JSON 输入、Gherkin 引导生成、解析与待确认项拒绝；`run` 会先完成解析，页面执行与报告仍属于后续步骤。常用命令如下：
 
 ```bash
-browser-test xmind list --xmind cases.xmind --output cases.import.json
-browser-test feature gen --xmind cases.xmind --draft cases.draft.gateway.json
-browser-test feature gen --cases .browser-test/cases.import.json --steps .browser-test/cases.steps.agent.json --draft cases.draft.agent.json
-browser-test feature gen --review cases.draft.agent.json
-browser-test feature gen --review cases.draft.agent.json --yes
+browser-test xmind list --xmind cases.xmind --json
+browser-test feature gen --xmind cases.xmind --draft cases.gateway
+browser-test feature gen --cases /tmp/cases.import.json --steps /tmp/cases.steps.agent.json --draft cases.agent
+browser-test feature gen --review cases.agent
+browser-test feature gen --review cases.agent --yes
 ```
 
 本地开发从第 2 步开始同时提供 Skill 调用入口。安装或链接仓库内 Skill 后，可在支持 Skills 的 Agent 中使用 `/browser-test` 加自然语言请求；Skill 将请求转换为同一套 `browser-test` CLI 命令。CLI 是唯一功能实现入口，Skill 联调不维护另一套业务逻辑。
 
-当前生成产物统一位于调用目录的 `.browser-test/`，目录不存在时自动创建。文件名由调用方指定，下面只展示约定后缀与各自职责：
+持久产物统一位于调用目录的 `.browser-test/`，目录不存在时自动创建；这里只保留可供人审阅的 Gherkin。结构化输入由标准输出或系统临时文件传递，草案机器状态由 CLI 放在按工作目录隔离的系统临时目录：
 
 ```text
 .browser-test/
-├── cases.import.json                 # 可选：xmind list --output 保存的结构化导入结果
-├── cases.steps.agent.json            # 可选：当前 Agent 按 feature rules 起草的步骤输入
-├── cases.draft.agent.json            # 机器读写的审阅草案；地址和语义确认写回此文件
-├── cases.draft.agent.preview.feature # 草案派生预览；草案变化时同步刷新，不作为执行入口
+├── cases.agent.preview.feature       # 确认中的草案预览；最终写入成功后自动删除
 └── <模块路径>.feature                # 用户审阅确认后的最终用例；按模块拆分
 ```
 
 各阶段的写入规则如下：
 
-- `xmind list --json` 只输出到标准输出，不创建文件；`--output <文件名>` 才在 `.browser-test/` 中保存导入 JSON。
-- `feature gen --draft` 排他创建草案 JSON 及同名 `.preview.feature`，不会创建最终 feature。`feature addresses` 与 `feature resolve` 更新草案后会同步覆盖这份派生预览。
-- `feature gen --review` 只展示完整差异；追加 `--yes` 后才按模块创建最终 `.feature`。已有最终文件一律不覆盖，调用方需审阅差异后自行合并。
+- `xmind list --json` 只输出到标准输出，不创建文件；图片用例和 Agent 步骤 JSON 使用系统临时文件，CLI 调用结束后清理。
+- `feature gen --draft` 在系统临时目录排他创建机器状态，并在 `.browser-test/` 创建同名 `.preview.feature`，不会创建最终 feature。`feature addresses` 与 `feature resolve` 更新状态后会同步覆盖这份可读预览。
+- `feature gen --review` 只在终端展示完整差异，不保存 diff 文件；追加 `--yes` 后才按模块创建最终 `.feature`，成功后自动删除草案预览和临时状态。已有最终文件默认不覆盖，调用方可在审阅后显式选择合并或覆盖。
 - `feature gen --direct` 不创建草案，直接创建最终 `.feature`；不确定内容保留为 `# TODO(确认)`，清除前不能执行。
 - `.browser-test/` 中历史遗留的 `project.json`、`cases/`、`diagnostics/` 或 `runs/` 不是当前生成流程的输入，也不能据此认定执行与报告已经实现。
 

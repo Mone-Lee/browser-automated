@@ -10,7 +10,6 @@ Skill 入口也支持解释从大型 XMind 中截取的局部用例图片：Agen
 npm run build -w browser-test
 node packages/browser-test/dist/cli/browser-test.js xmind list --xmind /path/to/cases.xmind
 node packages/browser-test/dist/cli/browser-test.js xmind list --xmind /path/to/cases.xmind --json
-node packages/browser-test/dist/cli/browser-test.js xmind list --xmind /path/to/cases.xmind --output cases.json
 ```
 
 ## 当前阶段的使用边界
@@ -37,7 +36,7 @@ browser-test run .browser-test/service-type-list.feature
 
 没有操作、预期字段时，若直属节点包含前置条件，且其他直属节点至少有一个含附属子节点，则按“操作→预期”嵌套布局提取：前置条件以外的直属母节点作为操作，其直属子节点作为该操作的预期。生成时按原文顺序输出每组 When→Then/And，不因嵌套布局本身要求语义确认。用例编号不参与导入识别，也不作为结构化字段；原文中的编号仅随主题内容保留，缺失时不自动补造。操作的完整子树和路径保留对应关系；部分操作没有直属预期时按用例提示一次。其他未识别的叶节点保留在主题树并提示人工确认。
 
-`--json` 向标准输出写入 JSON，`--output <文件名>` 将相同内容写入当前执行目录的 `.browser-test/`，两者不能同时使用。所有 browser-test 生成产物都固定写入该目录，目录不存在时自动创建；输入文件仍可位于任意位置。结果包含 `sheets`（完整主题树）、`cases`（用例及前置、步骤、预期节点）和 `warnings`。用例的 `structure` 为 `sections`（字段标记）或 `nested`（嵌套布局）。节点保留标题及整个子树，不将嵌套文本拼接或改写。节点包含原始属性 `raw`（备注、标签、优先级等，不含 id、title、children）和原文路径 `path`。来源文件记录在顶层 `file`，用例通过模块路径和标题定位。支持多画布及自由主题；主题深度最多 256 层，`content.json` 最多 32 MiB。默认文本模式输出用例标题和模块路径，并在汇总行标注来源文件，提示写入 stderr。
+`--json` 向标准输出写入 JSON，不创建文件。`.browser-test/` 只保存可供人审阅的 Gherkin，目录不存在时自动创建；输入文件仍可位于任意位置。结果包含 `sheets`（完整主题树）、`cases`（用例及前置、步骤、预期节点）和 `warnings`。用例的 `structure` 为 `sections`（字段标记）或 `nested`（嵌套布局）。节点保留标题及整个子树，不将嵌套文本拼接或改写。节点包含原始属性 `raw`（备注、标签、优先级等，不含 id、title、children）和原文路径 `path`。来源文件记录在顶层 `file`，用例通过模块路径和标题定位。支持多画布及自由主题；主题深度最多 256 层，`content.json` 最多 32 MiB。默认文本模式输出用例标题和模块路径，并在汇总行标注来源文件，提示写入 stderr。
 
 程序接口：
 
@@ -66,14 +65,14 @@ const { cases, sheets, warnings } = await importXMind('/path/to/cases.xmind');
 - **当前 Agent 代跑**：`browser-test feature rules` 输出与网关共用的起草规则；Agent 按规则写出步骤 JSON `{"cases":[{"modulePath":[],"title":"","steps":[{"keyword":"Given","text":"..."}]}]}`，再传入 `--steps`。无需网关配置，且同样经过缺失操作/预期补全和原文核对。
 
 ```bash
-browser-test feature gen --cases cases.json --steps .browser-test/steps.agent.json --draft cases.draft.agent.json
+browser-test feature gen --cases /tmp/cases.json --steps /tmp/steps.agent.json --draft cases.agent
 ```
 
 ### 逐项确认
 
-`--draft` 保存草案 JSON 的同时写出 `<草案>.preview.feature`（Gherkin 预览，待确认项带 `# TODO(确认 #编号)`）。用 `feature todos <草案>` 查看每项待确认内容及所在场景的完整步骤，用 `feature resolve <草案> <编号> keep|delete|"<完整步骤>"` 每次处理一项并刷新预览；处理后编号可能变化，须重新列出。
+`--draft` 将草案机器状态保存到系统临时目录，并在 `.browser-test/` 写出 `<草案>.preview.feature`（Gherkin 预览，待确认项带 `# TODO(确认 #编号)`）。用 `feature todos <草案>` 查看每项待确认内容及所在场景的完整步骤，用 `feature resolve <草案> <编号> keep|delete|"<完整步骤>"` 每次处理一项并刷新预览；处理后编号可能变化，须重新列出。
 
-两种方式对同一份用例各自保存草案（如 `*.draft.agent.json` 与 `*.draft.gateway.json`），可直接 diff 对比效果。
+两种方式对同一份用例使用不同草案名（如 `cases.agent` 与 `cases.gateway`），可通过各自的 Gherkin 预览对比效果。
 
 终端交互：
 
@@ -86,20 +85,20 @@ browser-test feature gen --xmind cases.xmind
 Agent 或非交互环境分阶段操作：
 
 ```bash
-browser-test feature gen --xmind cases.xmind --draft draft.json
+browser-test feature gen --xmind cases.xmind --draft cases
 # 向用户展示原文和草案；按回答修改步骤，清除已解决的 todo 或删除获准删除的步骤
-browser-test feature gen --review draft.json
+browser-test feature gen --review cases
 # 用户确认完整差异后追加 --yes 落盘
-browser-test feature gen --review draft.json --yes
-browser-test feature gen --review draft.json --merge --yes
-browser-test feature gen --review draft.json --overwrite --yes
+browser-test feature gen --review cases --yes
+browser-test feature gen --review cases --merge --yes
+browser-test feature gen --review cases --overwrite --yes
 ```
 
-`--draft` 在 `.browser-test/` 下排他创建 JSON，并同时创建预览，不会写 feature。`--review` 不带 `--yes` 时仅展示差异。草案或已有文件变化后须重新审阅。所有待确认项必须处理完毕，才能落盘。
+`--draft` 在系统临时目录排他创建机器状态，并在 `.browser-test/` 创建可读预览，不会写最终 feature。`--review` 不带 `--yes` 时仅在终端展示差异。草案或已有文件变化后须重新审阅。所有待确认项必须处理完毕，才能落盘；成功写入后自动删除草案预览和临时机器状态。
 
 同一模块路径的用例合并为一个 feature，模块路径作为 Feature 名，文件头为 `# source: <文件> / <模块路径>`；XMind 产物的文件名由模块路径组成，`--cases` 的图片还原等来源会追加来源后缀，避免与同模块的 XMind 产物冲突。步骤文字若未在原文中找到会标为待确认。仅输出来源注释、Feature、Scenario、原文已有优先级和 Given/When/Then/And，不新增业务字段。
 
-`--review` 会在终端展示差异，并同步写入 `<草案>.review.diff` 供编辑器打开。已有文件默认只展示差异且不覆盖；显式传入 `--merge` 时保留已有同名场景并追加缺失场景，传入 `--overwrite` 时以本次审阅内容整体覆盖。两种策略都必须配合 `--review`，并在确认后加 `--yes` 才会写入。首次创建仍使用排他写入避免并发覆盖。
+`--review` 会在终端展示差异，不额外写入 diff 文件。已有文件默认只展示差异且不覆盖；显式传入 `--merge` 时保留已有同名场景并追加缺失场景，传入 `--overwrite` 时以本次审阅内容整体覆盖。两种策略都必须配合 `--review`，并在确认后加 `--yes` 才会写入。首次创建仍使用排他写入避免并发覆盖。
 
 `--cases <用例 JSON>` 可替代 `--xmind`（三者 `--xmind`/`--cases`/`--review` 恰选其一），用法与 `--draft`、`--review` 相同；JSON 中标注“需确认”的内容会生成待确认项，`file` 作为来源。
 
@@ -110,7 +109,7 @@ browser-test feature gen --review draft.json --overwrite --yes
 不希望逐项交互时，使用 `--direct` 一次性创建按模块拆分的 `.feature` 文件：
 
 ```bash
-browser-test feature gen --cases cases.json --steps .browser-test/steps.agent.json --direct
+browser-test feature gen --cases /tmp/cases.json --steps /tmp/steps.agent.json --direct
 ```
 
 该模式跳过地址和语义的逐项确认，所有不确定内容以 `# TODO(确认)` 留在 Gherkin 中，调用方直接编辑整个文件。它与最终落盘模式一样不会覆盖已有 `.feature`。只要文件仍含 `# TODO(确认)` 或 `# 待确认`，后续 `run` 就会列出文件与行号并停止；全部清除后才进入执行阶段。当前执行能力尚未实现，因此无待确认项时 `run` 仍会说明该能力尚未开放。
@@ -120,10 +119,10 @@ browser-test feature gen --cases cases.json --steps .browser-test/steps.agent.js
 Web 草案生成时自动按应用、页面和环境合并地址问题，优先使用同批已确认地址，再读取 `.browser-test/` 中的最终 `.feature`。唯一匹配直接复用；缺失或冲突留待确认。不会读取预览草案、含待确认项的场景或符号链接，也不会猜测域名、拼接路由。
 
 ```bash
-browser-test feature addresses draft.json
-browser-test feature addresses draft.json --id 1 --url 'https://example.com/products'
+browser-test feature addresses cases
+browser-test feature addresses cases --id 1 --url 'https://example.com/products'
 # 原文身份不明确时，在确认地址时补齐；环境不同须明确指定
-browser-test feature addresses draft.json --id 1 --url 'https://example.com/products' --application '中台管理系统' --page '供应链商品库管理列表' --environment '测试'
+browser-test feature addresses cases --id 1 --url 'https://example.com/products' --application '中台管理系统' --page '供应链商品库管理列表' --environment '测试'
 ```
 
 命令更新草案及预览，返回剩余地址分组和已确认地址来源。一次确认应用到该组所有场景；每个最终场景保存独立的地址 Given 和页面来源注释。仍缺地址时拒绝落盘，整体审阅与 `--review --yes` 流程不变。已有文件不覆盖。
