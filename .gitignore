@@ -4,6 +4,8 @@ packages/**/dist/
 *.tsbuildinfo
 .agent-browser/
 .browser-automated/
+# browser-opt 与 browser-test 共用的登录态目录，含明文凭证。
+.browser-opt/
 .browser-test/
 packages/browser-test/generated/
 # 未在 README 中引用的内部实现文档不随仓库发布。
