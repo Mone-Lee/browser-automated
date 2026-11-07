@@ -5,6 +5,7 @@ import { spawnSync, SpawnSyncReturns } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { resolveSystemChromeExecutable } from './browser-executable.js';
 import { createAgentBrowserEnvironment } from './proxy-env.js';
+import { removeStartupTabs } from './startup-tabs.js';
 import { AgentOptions } from './types.js';
 
 const DEFAULT_TIMEOUT = 30_000;
@@ -14,7 +15,6 @@ const DEFAULT_CLEAN_BROWSER_ARGS = [
   '--disable-session-crashed-bubble',
   '--no-first-run',
   '--no-default-browser-check',
-  '--no-startup-window',
 ];
 const AGENT_BROWSER_INSTALL_HINT = '请先安装 agent-browser，例如：npm install -g agent-browser。';
 
@@ -108,11 +108,15 @@ export class BrowserAgent {
     this.executablePath = options.executablePath ?? resolveSystemChromeExecutable() ?? null;
     this.statePath = options.statePath ?? null;
     this.reuseRunningBrowser = options.reuseRunningBrowser ?? false;
-    // 托管会话禁止 Chrome 额外创建启动页，目标标签页交给自动化命令打开。
+    // 可见窗口使用空白启动页，避免禁止启动窗口干扰原生退出；该策略不依赖操作系统。
+    // 入口地址仍交给自动化命令打开，Chrome 自建的新标签页在首次启动完成后清理。
+    const startupArgument = this.headed && !this.forceHeadless
+      ? 'about:blank'
+      : '--no-startup-window';
     this.browserArgs = options.browserArgs ?? (
       this.profile
-        ? ['--no-startup-window']
-        : !this.reuseRunningBrowser || this.statePath ? DEFAULT_CLEAN_BROWSER_ARGS : []
+        ? [startupArgument]
+        : !this.reuseRunningBrowser || this.statePath ? [...DEFAULT_CLEAN_BROWSER_ARGS, startupArgument] : []
     );
     this.liveViewportReady = false;
     this.browserOpened = false;
@@ -300,8 +304,16 @@ export class BrowserAgent {
     };
   }
 
-  /** 打开指定 URL。 */
+  /** 打开指定地址；托管可见会话首次启动后清理 Chrome 自建的新标签页，再在准备页导航到入口。 */
   open(url: string): string {
+    if (this.headed && !this.forceHeadless && this.browserArgs.includes('about:blank')
+      && (!this.reuseRunningBrowser || this.profile || this.statePath)) {
+      if (!this.browserOpened) {
+        this.run(['open']);
+        removeStartupTabs(this.run(['get', 'cdp-url']).trim(), this.timeout);
+      }
+      return this.run(['navigate', url]);
+    }
     return this.run(['open', url]);
   }
 

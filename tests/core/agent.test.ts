@@ -3,12 +3,14 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { BrowserAgent } from '../../packages/browser-core/dist/agent.js';
+import { removeStartupTabs } from '../../packages/browser-core/dist/startup-tabs.js';
 
 // 监听 spawnSync，确保测试过程不会真的启动浏览器。
 vi.mock('node:child_process', () => ({
   execFileSync: vi.fn(),
   spawnSync: vi.fn(),
 }));
+vi.mock('../../packages/browser-core/dist/startup-tabs.js', () => ({ removeStartupTabs: vi.fn() }));
 
 import { execFileSync, spawnSync } from 'node:child_process';
 
@@ -30,6 +32,7 @@ beforeEach(() => {
   mockExecFileSync.mockReset();
   mockExecFileSync.mockReturnValue('');
   mockSpawnSync.mockReset();
+  vi.mocked(removeStartupTabs).mockReset();
 });
 
 describe('BrowserAgent', () => {
@@ -197,8 +200,10 @@ describe('BrowserAgent', () => {
       expect(() => agent.open('https://bad-url')).toThrow('navigation error');
     });
 
-    it('adds --headed when live viewport is enabled', () => {
-      mockSpawnSync.mockReturnValue(makeOkResult(''));
+    it('cleans startup tabs before navigating when live viewport is enabled', () => {
+      mockSpawnSync.mockImplementation((_command, args) => makeOkResult(
+        (args as string[]).slice(-2).join(' ') === 'get cdp-url' ? 'ws://127.0.0.1:9222/browser/test' : '',
+      ));
 
       const agent = new BrowserAgent({ sessionId: 'test-session', liveViewport: true });
       agent.open('https://example.com');
@@ -210,12 +215,15 @@ describe('BrowserAgent', () => {
           'test-session',
           '--headed',
           '--args',
-          '--disable-session-crashed-bubble,--no-first-run,--no-default-browser-check,--no-startup-window',
-          'open',
+          '--disable-session-crashed-bubble,--no-first-run,--no-default-browser-check,about:blank',
+          'navigate',
           'https://example.com',
         ],
         expect.objectContaining({ encoding: 'utf-8' }),
       );
+      expect(removeStartupTabs).toHaveBeenCalledExactlyOnceWith('ws://127.0.0.1:9222/browser/test', 30_000);
+      const navigationIndex = mockSpawnSync.mock.calls.findIndex(call => (call[1] as string[]).includes('navigate'));
+      expect(vi.mocked(removeStartupTabs).mock.invocationCallOrder[0]).toBeLessThan(mockSpawnSync.mock.invocationCallOrder[navigationIndex]);
     });
 
     it('passes --profile when configured', () => {
@@ -261,7 +269,7 @@ describe('BrowserAgent', () => {
 
       expect(mockSpawnSync).toHaveBeenCalledWith(
         'agent-browser',
-        ['--profile', 'Default', '--session', 'test-session', '--headed', '--args', '--no-startup-window', 'open', 'https://example.com'],
+        ['--profile', 'Default', '--session', 'test-session', '--headed', '--args', 'about:blank', 'navigate', 'https://example.com'],
         expect.objectContaining({ encoding: 'utf-8' }),
       );
     });
@@ -336,7 +344,7 @@ describe('BrowserAgent', () => {
 
       expect(mockSpawnSync).toHaveBeenCalledWith(
         'agent-browser',
-        ['--profile', 'Default', '--session', 'test-session', '--headed', '--args', '--no-startup-window', 'open', 'https://example.com'],
+        ['--profile', 'Default', '--session', 'test-session', '--headed', '--args', 'about:blank', 'navigate', 'https://example.com'],
         expect.objectContaining({ encoding: 'utf-8' }),
       );
       expect(mockSpawnSync).not.toHaveBeenCalledWith(
@@ -511,8 +519,8 @@ describe('BrowserAgent', () => {
           'test-session',
           '--headed',
           '--args',
-          '--disable-session-crashed-bubble,--no-first-run,--no-default-browser-check,--no-startup-window',
-          'open',
+          '--disable-session-crashed-bubble,--no-first-run,--no-default-browser-check,about:blank',
+          'navigate',
           'https://example.com',
         ],
         expect.objectContaining({ encoding: 'utf-8' }),
@@ -634,14 +642,14 @@ describe('BrowserAgent', () => {
       agent.snapshotJson();
 
       expect(mockSpawnSync).toHaveBeenNthCalledWith(
-        2,
+        4,
         'agent-browser',
         [
           '--session',
           'test-session',
           '--headed',
           '--args',
-          '--disable-session-crashed-bubble,--no-first-run,--no-default-browser-check,--no-startup-window',
+          '--disable-session-crashed-bubble,--no-first-run,--no-default-browser-check,about:blank',
           'snapshot',
           '-i',
           '--json',
@@ -757,12 +765,12 @@ describe('BrowserAgent', () => {
       agent.resume();
 
       expect(mockSpawnSync).toHaveBeenNthCalledWith(
-        1,
+        3,
         'agent-browser',
-        ['--profile', 'Default', '--session', expect.stringMatching(/^browser-agent-/), '--headed', '--args', '--no-startup-window', 'open', 'https://example.com/login'],
+        ['--profile', 'Default', '--session', expect.stringMatching(/^browser-agent-/), '--headed', '--args', 'about:blank', 'navigate', 'https://example.com/login'],
         expect.objectContaining({ encoding: 'utf-8' }),
       );
-      expect(mockSpawnSync).toHaveBeenCalledTimes(1);
+      expect(mockSpawnSync).toHaveBeenCalledTimes(3);
       expect(mockSpawnSync.mock.calls.filter((call) => (call[1] as string[]).includes('open'))).toHaveLength(1);
     });
   });
@@ -776,8 +784,8 @@ describe('BrowserAgent', () => {
 
   describe('close()', () => {
     it.each([
-      { profile: undefined, headless: false, browserArgs: '--disable-session-crashed-bubble,--no-first-run,--no-default-browser-check,--no-startup-window' },
-      { profile: 'Default', headless: false, browserArgs: '--no-startup-window' },
+      { profile: undefined, headless: false, browserArgs: '--disable-session-crashed-bubble,--no-first-run,--no-default-browser-check,about:blank' },
+      { profile: 'Default', headless: false, browserArgs: 'about:blank' },
       { profile: 'Default', headless: true, browserArgs: '--no-startup-window' },
     ])('preserves launch options when closing $profile with headless=$headless', ({ profile, headless, browserArgs }) => {
       mockSpawnSync.mockReturnValue(makeOkResult('ok'));

@@ -4,6 +4,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import { createServer } from 'node:http';
+import { createRequire } from 'node:module';
 import type { AddressInfo } from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -64,6 +65,33 @@ function runCli(args: string[], env: Record<string, string> = {}, input?: string
 function makeTempAgentBrowserBin(): string {
   const dir = makeTempDir();
   const binPath = path.join(dir, 'agent-browser');
+  const cdpServerPath = path.join(dir, 'browser-connection.cjs');
+  // 同步 CLI 不能使用测试进程内的服务器；独立桩进程模拟未纳入标签页清单的启动页。
+  fs.writeFileSync(cdpServerPath, `
+const fs = require('node:fs');
+const { wsServer: WebSocketServer } = require(${JSON.stringify(createRequire(import.meta.url).resolve('playwright-core/lib/utilsBundle'))});
+const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+let targets = [
+  { targetId: 'startup-tab', type: 'page', url: 'chrome://newtab/' },
+  { targetId: 'managed-tab', type: 'page', url: 'about:blank' },
+];
+server.on('listening', () => console.log('ws://127.0.0.1:' + server.address().port));
+server.on('connection', socket => {
+  socket.on('message', data => {
+    const message = JSON.parse(data.toString());
+    if (process.env.AGENT_BROWSER_LOG) fs.appendFileSync(process.env.AGENT_BROWSER_LOG, 'cdp ' + message.method + ' ' + (message.params?.targetId || '') + '\\n');
+    let result;
+    if (message.method === 'Target.getTargets') result = { targetInfos: targets };
+    else if (message.method === 'Target.closeTarget') {
+      result = { success: targets.some(target => target.targetId === message.params.targetId) };
+      targets = targets.filter(target => target.targetId !== message.params.targetId);
+    }
+    socket.send(JSON.stringify({ id: message.id, result }));
+  });
+  socket.on('close', () => server.close());
+});
+setTimeout(() => server.close(), 5_000).unref();
+`);
   fs.writeFileSync(
     binPath,
     `#!/usr/bin/env node
@@ -89,7 +117,7 @@ for (let i = 0; i < args.length; i++) {
 }
 
 const command = args[commandIndex];
-if (command === 'open') {
+if (command === 'open' || command === 'navigate') {
   if (process.env.AGENT_BROWSER_STATE_OPEN_MARKER) {
     if (args.includes('--state')) {
       fs.writeFileSync(process.env.AGENT_BROWSER_STATE_OPEN_MARKER, 'state');
@@ -133,6 +161,18 @@ if (command === 'open') {
   process.stdout.write('resumed');
 } else if (command === 'chat') {
   process.stdout.write(JSON.stringify({ success: true, text: 'Done' }));
+} else if (command === 'get' && args[commandIndex + 1] === 'cdp-url') {
+  const child = require('node:child_process').spawn(process.execPath, [${JSON.stringify(cdpServerPath)}], {
+    detached: true, stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  child.stdout.once('data', data => {
+    process.stdout.write(data);
+    child.stdout.destroy();
+    child.unref();
+  });
+} else if (command === 'state' && args[commandIndex + 1] === 'load') {
+  if (process.env.AGENT_BROWSER_STATE_OPEN_MARKER) fs.writeFileSync(process.env.AGENT_BROWSER_STATE_OPEN_MARKER, 'state');
+  process.stdout.write('state loaded');
 } else if (command === 'state' && args[commandIndex + 1] === 'save') {
   const target = args[commandIndex + 2];
   if (target) fs.writeFileSync(target, JSON.stringify({ cookies: [], origins: [] }));
@@ -517,7 +557,7 @@ describe('browser-opt CLI', () => {
     const commands = fs.readFileSync(commandLog, 'utf-8');
     const sessions = extractLoggedSessions(commands);
     expect(new Set(sessions).size).toBe(1);
-    expect(commands.split('\n').filter((command) => /\bopen https:\/\/example\.com\b/.test(command))).toHaveLength(1);
+    expect(commands.split('\n').filter((command) => /\bnavigate https:\/\/example\.com\b/.test(command))).toHaveLength(1);
   }, 20_000);
 
   it('stops a detached Workflow that is waiting for handoff', async () => {
@@ -1113,7 +1153,9 @@ describe('browser-opt CLI', () => {
 
     expect(result.status).toBe(0);
     const commands = fs.readFileSync(commandLog, 'utf-8');
-    expect(commands).toContain('open about:blank');
+    expect(commands).toContain('navigate about:blank');
+    expect(commands).toContain('cdp Target.closeTarget startup-tab');
+    expect(commands).not.toContain('cdp Target.closeTarget managed-tab');
     expect(commands).toContain(`state load ${statePath}`);
     expect(commands).not.toContain(`--state ${statePath}`);
     expect(commands).not.toContain('--profile Default');
@@ -1147,7 +1189,7 @@ describe('browser-opt CLI', () => {
 
     expect(result.status).toBe(0);
     const commands = fs.readFileSync(commandLog, 'utf-8');
-    expect(commands).toContain('open about:blank');
+    expect(commands).toContain('navigate about:blank');
     expect(commands).toContain(`state load ${statePath}`);
     expect(commands).not.toContain(`--state ${statePath}`);
     expect(commands).toContain('--profile Default');
@@ -1159,7 +1201,7 @@ describe('browser-opt CLI', () => {
     expect(commands).toContain('close');
     expect(commands).not.toContain('handoff');
     expect(commands).not.toContain('resume');
-    expect(commands.split('\n').filter((command) => /\bopen https:\/\/example\.com\b/.test(command))).toHaveLength(2);
+    expect(commands.split('\n').filter((command) => /\bnavigate https:\/\/example\.com\b/.test(command))).toHaveLength(2);
     expect(commands).toContain(`state save ${statePath}`);
   });
 
@@ -1179,7 +1221,7 @@ describe('browser-opt CLI', () => {
 
     expect(result.status).toBe(0);
     const commands = fs.readFileSync(commandLog, 'utf-8');
-    expect(commands).toContain('open about:blank');
+    expect(commands).toContain('navigate about:blank');
     expect(commands).toContain(`state load ${statePath}`);
     expect(commands).not.toContain(`--state ${statePath}`);
     expect(commands).not.toContain('--profile Default');
@@ -1269,7 +1311,7 @@ describe('browser-opt CLI', () => {
     const commands = fs.readFileSync(commandLog, 'utf-8');
     expect(commands).not.toContain('handoff');
     expect(commands).not.toContain('resume');
-    expect(commands.split('\n').filter((command) => /\bopen https:\/\/example\.com\/live\/create\b/.test(command))).toHaveLength(1);
+    expect(commands.split('\n').filter((command) => /\bnavigate https:\/\/example\.com\/live\/create\b/.test(command))).toHaveLength(1);
     expect(commands).toContain('fill @e2 安选公开直播自动化');
     expect(commands).not.toContain('state load');
     expect(commands).toContain('state save');
