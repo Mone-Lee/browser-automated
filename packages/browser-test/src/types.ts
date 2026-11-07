@@ -52,13 +52,15 @@ export type ConditionRule =
   | { type: 'url-contains'; value: string }
   | { type: 'target-present'; role?: string; name: string }
   | { type: 'target-absent'; role?: string; name: string }
-  | { type: 'rows-all-contain'; text: string };
+  /** 至少有一条非空数据行；指定列名时，只匹配该列中的文本。 */
+  | { type: 'rows-exist'; column?: string; text?: string }
+  | { type: 'rows-all-contain'; text: string; column?: string };
 
 /** 条件只是原文的拆分，不是页面反推的预期。 */
 export interface StepCondition {
   id: string;
   expected: string;
-  /** data 与 visual 目前没有可用证据来源，判定一律 BLOCKED，不能附带 rule。 */
+  /** 页面可见的业务数据归 page；明确要求接口、数据库等直接证据才归 data。data 与 visual 暂无可用证据来源，不能附带 rule。 */
   evidenceKind: 'page' | 'data' | 'visual';
   rule?: ConditionRule;
 }

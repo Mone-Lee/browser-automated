@@ -1,5 +1,8 @@
 /**
+ * 根据页面证据得到 PASS、FAIL 或 BLOCKED 等结果
+ *
  * 条件判定：确定性规则优先，其次 TypeSafe；服务不可用时由发起任务的 Agent 兜底并标记 by: ai。
+ *
  * 确定性 FAIL 不会被 AI 覆盖；证据不足一律 BLOCKED，不用空集或模型“认为完成”冒充 PASS。
  */
 import type { JudgeClient } from './typesafe-judge.js';
@@ -46,16 +49,38 @@ function evaluateRule(rule: ConditionRule, observation: Observation): RuleOutcom
       if (found.length) return verdict(false, `仍存在 ${rule.role ?? '元素'}“${rule.name}”`, [targetsId]);
       return targetsProblem ? blocked(targetsProblem, [targetsId]) : verdict(true, '未发现', [targetsId]);
     }
+    case 'rows-exist':
     case 'rows-all-contain': {
+      const headers = rows.filter(row => row.header);
       const dataRows = rows.filter(row => !row.header && row.cells.some(cell => cell));
       const evidenceIds = [`${observation.id}-rows`];
+      if (capture.probeFailed) return blocked('表格采集失败，无法判定', evidenceIds);
       // 没有数据行时不能以空集通过。
-      if (!dataRows.length) return blocked(capture.probeFailed ? '表格采集失败，无法判定' : '没有可判定的数据行', evidenceIds);
-      const missing = dataRows.map((row, index) => ({ row: index + 1, cells: row.cells })).filter((_, index) => !dataRows[index].cells.join(' ').includes(rule.text));
+      if (!dataRows.length) return blocked('没有可判定的数据行', evidenceIds);
+      // 空列表占位行通常用一个跨列单元格；列结构不对应时，不把它当成业务记录或静默跳过。
+      if (headers.length && dataRows.some(row => !headers.some(header => header.cells.length === row.cells.length))) return blocked('数据行与表头列结构不一致，无法确认业务记录', evidenceIds);
+      let columnIndex: number | undefined;
+      if (rule.column !== undefined) {
+        const indexes = headers.flatMap(row => row.cells.flatMap((cell, index) => cell.trim() === rule.column!.trim() ? [index] : []));
+        if (!indexes.length || new Set(indexes).size !== 1 || rows.some(row => row.header && row.cells.filter(cell => cell.trim() === rule.column!.trim()).length > 1)) return blocked(`无法唯一定位表格列“${rule.column}”`, evidenceIds);
+        columnIndex = indexes[0];
+        if (dataRows.some(row => row.cells.length <= columnIndex!)) return blocked('数据行与表头列无法对应', evidenceIds);
+      }
+      const matches = dataRows.map(row => {
+        const content = columnIndex === undefined ? row.cells.join(' ') : row.cells[columnIndex];
+        return rule.text === undefined || (columnIndex === undefined ? content.includes(rule.text) : content.trim() === rule.text.trim());
+      });
+      if (rule.type === 'rows-exist') {
+        const found = matches.findIndex(Boolean);
+        if (found >= 0) return verdict(true, { 数据行: found + 1, 内容: dataRows[found].cells }, evidenceIds);
+        if (capture.rowsTruncated) return blocked('表格行数已截断，无法判定是否存在匹配记录', evidenceIds);
+        return verdict(false, '当前表格没有匹配的数据行', evidenceIds);
+      }
+      const missing = dataRows.map((row, index) => ({ row: index + 1, cells: row.cells })).filter((_, index) => !matches[index]);
       if (missing.length) return verdict(false, { 缺少: rule.text, 数据行: missing }, evidenceIds);
       // 行数被截断时，已采集的行全部满足不代表整张表满足。
       if (capture.rowsTruncated) return blocked('表格行数已截断，未覆盖全部数据行，无法判定', evidenceIds);
-      return verdict(true, `${dataRows.length} 行均包含“${rule.text}”`, evidenceIds);
+      return verdict(true, `${dataRows.length} 行${rule.column ? `的“${rule.column}”列均为` : '均包含'}“${rule.text}”`, evidenceIds);
     }
   }
 }
