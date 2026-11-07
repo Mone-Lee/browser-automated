@@ -246,7 +246,7 @@ export async function executeStep(step: SemanticStep, ctx: ExecutionContext): Pr
       if (isLoginObservation(latest)) {
         ctx.trace('auth-state-review: 入口疑似需要登录，进入 HANDOFF');
         const paused = Date.now();
-        const resumed = await ctx.port.handoff('请在浏览器中完成登录，完成后继续核验已确认入口。');
+        const resumed = await ctx.port.handoff('请在已打开的 Chrome 窗口中完成登录。');
         deadline += Date.now() - paused;
         ctx.trace(`handoff ${resumed ? 'resumed' : 'unavailable'}: 入口登录核验`);
         if (!resumed) return finish('BLOCKED', '入口需要登录但无法人工接管');
@@ -283,7 +283,7 @@ export async function executeStep(step: SemanticStep, ctx: ExecutionContext): Pr
           if (fallback) { latest = fallback; continue; }
           loginDecision = {
             observationId: latest.id, reason: '登录前提不成立，需要人工完成登录',
-            kind: 'handoff', message: '请在浏览器中完成登录，完成后通知调用方继续。',
+            kind: 'handoff', message: '请在已打开的 Chrome 窗口中完成登录。',
           };
         }
       }

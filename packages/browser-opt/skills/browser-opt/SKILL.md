@@ -109,7 +109,7 @@ Every execution must follow these rules:
 - After every step, reason about the current page state and the next action.
 - If a reference becomes invalid, take a fresh snapshot before retrying.
 - Prefer deterministic commands and element refs over natural-language `chat`.
-- Final report must include `PASS` or `FAIL`, evidence screenshot paths, and detailed logs.
+- When the user requests a detailed report, include `PASS` or `FAIL`, evidence screenshot paths, and detailed logs; otherwise follow the concise Output rules below.
 
 ## Interactive handoff execution
 
@@ -348,9 +348,11 @@ Expected artifacts:
 
 The assistant response must be concise:
 
-- If the run succeeds and no cleanup advice is printed, reply only with `执行成功`.
+- 面向用户统一使用“流程”“步骤”“执行成功”“执行失败”“执行受阻”；人工操作统一提示完成后回复 `done`，不另设“已完成登录”等口令，不使用“登录接管环节”“Feature”“调用方”等内部术语。
+- 暂停时只说明原因、需要完成的操作和恢复方式：`流程已暂停：<原因>。请在已打开的 Chrome 窗口中<操作>，完成后回复“done”，我将继续执行。` 原因和操作以实际通知为准；首次未登录使用“需要登录”，确认登录态失效时使用“检测到登录态失效”。仅当通知明确要求时，补充返回指定页面等必要操作。
+- If the run succeeds and no cleanup advice is printed, reply only with `执行成功` unless the user requests a report or details.
 - If the CLI prints cleanup advice because the current project's `.browser-opt/artifacts/`
   has more than 10 run directories or temporary artifacts exceed 500 MB, include that
   advice after the result. It lists the oldest safe deletion candidates first and does not
   mean any files were deleted. Never delete them unless the user explicitly asks.
-- If the run fails, summarize the failure status, report paths, screenshot paths, and failing step.
+- 执行失败（FAIL）或执行受阻时，简述原因和对应步骤，附报告及相关截图路径，不展开内部协议或重复执行过程。仅在 CLI 明确返回 HANDOFF 时提示人工操作。
