@@ -2,6 +2,7 @@
  * 承载 browser-opt 即时执行、Workflow 管理子命令的参数解析与执行编排。
  * 文件只协调 CLI 交互，存储、匹配和浏览器执行分别交由对应领域模块处理。
  */
+import { authStateDirectory, resolveBrowserAuthState, type BrowserAuthState } from '#browser-core/auth-state';
 import {
   browserOptTemplate,
   extractBrowserOptUrl,
@@ -65,7 +66,6 @@ const BROWSER_OPT_EXIT_CODE_HANDOFF = 2;
 const BROWSER_OPT_EXIT_CODE_AMBIGUOUS = 3;
 const BROWSER_OPT_EXIT_CODE_NOT_FOUND = 4;
 const DEFAULT_BROWSER_PROFILE = 'Default';
-const DEFAULT_AUTH_STATE_DIR = '.browser-opt/states';
 const MANAGED_SESSION_STATE_FILE = 'browser-opt-sessions.json';
 const DEFAULT_HANDOFF_RUN_DIR = '.browser-opt/handoffs';
 const HANDOFF_SIGNAL_POLL_INTERVAL_MS = 250;
@@ -579,13 +579,6 @@ function formatWorkflowDisplayPath(filePath: string): string {
   return filePath;
 }
 
-interface BrowserOptAuthState {
-  profile?: string;
-  statePath?: string;
-  authStateSavePath?: string;
-  fallbackProfile?: string;
-}
-
 /**
  * browser-opt 托管 Chrome 时只复用登录态，不复用上一次运行遗留的页面：
  * 1. 优先加载已有 state；没有 state 时用 profile 打开并保存 cookies/storage。
@@ -596,24 +589,12 @@ function resolveBrowserOptAuthState(
   flags: Record<string, string | boolean>,
   profile: string,
   reuseRunningBrowser: boolean,
-): BrowserOptAuthState {
+): BrowserAuthState {
   const configuredStatePath = resolveStatePath(flags);
-  const authStateSavePath = configuredStatePath ?? defaultBrowserOptStatePath(profile);
   if (reuseRunningBrowser) {
     return {};
   }
-  if (fs.existsSync(authStateSavePath)) {
-    return {
-      statePath: authStateSavePath,
-      authStateSavePath,
-      fallbackProfile: configuredStatePath ? undefined : profile,
-    };
-  }
-
-  return {
-    profile,
-    authStateSavePath,
-  };
+  return resolveBrowserAuthState(configuredStatePath, defaultBrowserOptStatePath(profile), profile);
 }
 
 /** 识别流程开头或说明文本里的新开浏览器要求，不把普通页面“新窗口”操作误判成运行模式。 */
@@ -663,7 +644,7 @@ function applyNaturalLanguageBrowserMode(
 
 /** 默认 state 文件按 profile 分开保存，避免 Work/Default 等登录态互相覆盖。 */
 function defaultBrowserOptStatePath(profile: string): string {
-  const stateDir = process.env.BROWSER_OPT_AUTH_STATE_DIR || path.resolve(process.cwd(), DEFAULT_AUTH_STATE_DIR);
+  const stateDir = authStateDirectory('browser-opt');
   const stateName = profile.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'default';
   return path.join(stateDir, `browser-opt-${stateName}.json`);
 }
@@ -753,7 +734,7 @@ function legacyManagedSessionId(): string {
 
 /** session 记录与登录 state 放在同一项目数据目录，测试和自定义目录也能保持隔离。 */
 function managedSessionStatePath(): string {
-  const stateDir = process.env.BROWSER_OPT_AUTH_STATE_DIR || path.resolve(process.cwd(), DEFAULT_AUTH_STATE_DIR);
+  const stateDir = authStateDirectory('browser-opt');
   return path.join(stateDir, MANAGED_SESSION_STATE_FILE);
 }
 

@@ -3,6 +3,7 @@
  * 具体步骤执行、确定性动作、证据采集和接管恢复逻辑分别放在同级分类文件中。
  */
 import * as fs from 'node:fs';
+import { loadAuthState } from '#browser-core/auth-state';
 import * as path from 'node:path';
 import { BrowserAgent, createBrowserAgent, type BrowserAgentFactory } from '#browser-core/agent';
 import type { AgentOptions } from '#browser-core';
@@ -89,18 +90,7 @@ export class BrowserOptRunner {
     try {
       // 先在空白页显式恢复 state，确保业务页首批鉴权请求发出前 cookies 与 storage 已经就位。
       if (options.statePath) {
-        logs.push('auth-state-stage-open: about:blank');
-        agent.open('about:blank');
-        try {
-          const loadOutput = agent.stateLoad(options.statePath);
-          logs.push(`auth-state-load: ${options.statePath}`);
-          if (loadOutput.trim()) {
-            logs.push(`auth-state-load-output: ${loadOutput.trim()}`);
-          }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          logs.push(`auth-state-load-failed: ${message}`);
-        }
+        loadAuthState(agent, options.statePath, line => logs.push(line));
       }
 
       logs.push(`open: ${url}`);

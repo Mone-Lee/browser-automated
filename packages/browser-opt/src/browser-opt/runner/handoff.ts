@@ -2,8 +2,9 @@
  * browser-opt 人工接管工具，负责登录态失效识别、handoff 上下文、恢复控制和登录态保存。
  * 执行层只消费这里的统一结果，不直接拼接接管日志和提示文案。
  */
-import * as fs from 'node:fs';
-import * as path from 'node:path';
+import { saveAuthenticatedHandoffState as saveHandoffState } from '#browser-core/auth-state';
+export { saveAuthState, isLoginLikeSnapshot } from '#browser-core/auth-state';
+import { isLoginLikeSnapshot } from '#browser-core/auth-state';
 import type { BrowserAgent } from '#browser-core/agent';
 import type { BrowserOptHandoffContext, BrowserOptHandoffOptions, SnapshotEvidence } from '../type.js';
 import { captureTransientSnapshot, normalizeUrlForCompare } from './evidence.js';
@@ -124,41 +125,5 @@ export function saveAuthenticatedHandoffState(
   logs: string[],
   snapshot: SnapshotEvidence,
 ): void {
-  if (!authStateSavePath) {
-    return;
-  }
-
-  let currentSnapshot = snapshot;
-  for (let attempt = 1; attempt <= 5 && isLoginLikeSnapshot(currentSnapshot); attempt += 1) {
-    logs.push(`auth-state-save-wait ${attempt}: 人工接管恢复后仍停留在登录页，等待跳转完成后重试。`);
-    agent.waitMs(500);
-    currentSnapshot = captureTransientSnapshot(agent);
-  }
-
-  if (isLoginLikeSnapshot(currentSnapshot)) {
-    logs.push('auth-state-save-skipped: 人工接管恢复后仍停留在登录页。');
-    return;
-  }
-  saveAuthState(agent, authStateSavePath, logs);
-}
-
-/** 保存 cookies 与 storage，失败只记录日志，并返回是否成功供 profile 导入流程判断。 */
-export function saveAuthState(agent: BrowserAgent, authStateSavePath: string, logs: string[]): boolean {
-  try {
-    fs.mkdirSync(path.dirname(authStateSavePath), { recursive: true });
-    const saveOutput = agent.stateSave(authStateSavePath);
-    logs.push(`auth-state-save: ${authStateSavePath}`);
-    if (saveOutput.trim()) {
-      logs.push(`auth-state-save-output: ${saveOutput.trim()}`);
-    }
-    return true;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    logs.push(`auth-state-save-failed: ${message}`);
-    return false;
-  }
-}
-
-export function isLoginLikeSnapshot(snapshot: SnapshotEvidence): boolean {
-  return /登录|登\s*录|login|请输入手机号|请输入密码/i.test(snapshot.text);
+  saveHandoffState(agent, authStateSavePath, logs, snapshot, () => captureTransientSnapshot(agent));
 }
