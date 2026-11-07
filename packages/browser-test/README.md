@@ -156,13 +156,18 @@ Agent 步骤 JSON 可提供 `platform: "web" | "miniprogram" | "unsupported"`，
 
 ### Web 登录态复用
 
+每次 `run` 启动前会清理当前项目上一轮记录的托管浏览器，再创建独立会话；只复用登录态，不保留旧标签页或表单内容。会话记录保存在登录态目录的 `browser-test-sessions.json`，配置回退及站点切换创建的会话也会登记，便于异常退出后在下次运行时清理。browser-test 使用独立的浏览器命名空间，不清理 browser-opt 或外部 Chrome。默认模式下，请勿在同一项目并发执行托管流程，后一次运行会清理前一次的浏览器。
+
 `run` 默认从 `BROWSER_TEST_AUTH_STATE_DIR` 或调用目录下的 `.browser-test/states/` 加载按入口 origin 命名的 `browser-test-<主机>-<端口>-<hash>.json`。两个工具默认互不查找对方目录，`BROWSER_OPT_AUTH_STATE_DIR` 不影响 browser-test；需要复用其他目录的已有文件时使用 `--state`。没有自动文件时导入 Chrome `Default` profile；自动文件加载失败或登录态失效时，只尝试一次 profile 回退。回退会关闭旧实例，重新打开已确认入口并重新采集页面证据，仍需登录时人工接管。
+
+可用 `--keep-previous-browser` 跳过启动前的旧窗口清理；旧会话仍会记录，之后默认运行时统一清理。该参数不改变本次运行结束时的关闭行为，也不表示允许并发执行流程。通过 Skill 调用时，在 prompt 中说明“保留之前的浏览器窗口，不清理”即可由 Agent 追加该参数。
 
 ```bash
 browser-test run .browser-test/features/example.feature
 browser-test run .browser-test/features/example.feature --profile Work
 browser-test run .browser-test/features/example.feature --state .browser-opt/states/browser-opt-default.json
 browser-test run .browser-test/features/example.feature --no-state
+browser-test run .browser-test/features/example.feature --keep-previous-browser
 ```
 
 `--profile` 接受 Chrome 配置名称或路径，默认 `Default`。指定其他配置时，自动文件的摘要同时区分 origin 与 profile，避免复用默认账号的缓存。profile 导入失败会改用干净窗口，并按需人工登录；无头模式无法接管时 BLOCKED。

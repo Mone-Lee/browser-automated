@@ -1,5 +1,5 @@
 /**
- * browser-test 的浏览器适配层：管理登录态与浏览器配置回退，采集页面观测并执行已校验的原子动作。
+ * browser-test 的浏览器适配层：管理托管会话、登录态与浏览器配置回退，采集页面观测并执行已校验的原子动作。
  * 执行器通过 BrowserPort 重新观测切换后的页面；业务门禁与用例判定仍由执行器负责。
  */
 import { createHash } from 'node:crypto';
@@ -11,6 +11,7 @@ import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createInterface } from 'node:readline/promises';
 import { createBrowserAgent, type BrowserAgent, type BrowserAgentFactory } from '#browser-core/agent';
+import { createManagedBrowserSessions } from '#browser-core/managed-session';
 import type { AtomicAction, Observation, ObservationTarget } from './types.js';
 
 export interface BrowserPort {
@@ -32,6 +33,8 @@ export interface BrowserPortOptions {
   headless: boolean;
   /** 单条命令的超时（毫秒）。 */
   timeoutMs: number;
+  /** 保留之前登记的托管窗口；后续默认运行仍会统一清理。 */
+  keepPreviousBrowser?: boolean;
   /** 显式指定的已有登录态；与禁用登录态选项互斥。 */
   statePath?: string;
   /** 导入及回退使用的浏览器配置名称或路径，默认使用 Default。 */
@@ -90,7 +93,7 @@ export function isLoginObservation(observation: Observation): boolean {
   return isLoginLikeSnapshot({ url: observation.url, text: observation.targets.map(target => target.name).join('\n') });
 }
 
-/** 创建浏览器端口；保留初始实例注入，并用工厂为站点切换及配置回退创建独立会话。 */
+/** 创建浏览器端口；清理上一轮托管会话，并记录站点切换及配置回退会话，注入实例不参与跨运行清理。 */
 export function createBrowserPort(
   options: BrowserPortOptions,
   initialAgent?: BrowserAgent,
@@ -100,8 +103,14 @@ export function createBrowserPort(
   if (options.profile !== undefined && !options.profile.trim()) throw new Error('--profile 不能为空');
   if (options.profile && options.noState) throw new Error('--profile 与 --no-state 不能同时使用');
   if (options.statePath && (!existsSync(options.statePath) || !statSync(options.statePath).isFile())) throw new Error('--state 必须指定已存在的登录态文件');
+  const sessions = !initialAgent && agentFactory === createBrowserAgent
+    ? createManagedBrowserSessions({
+      namespace: 'browser-test', stateDirectory: authStateDirectory('browser-test'), keepPrevious: options.keepPreviousBrowser,
+    })
+    : undefined;
   const createAgent = (profile?: string) => agentFactory({
     headed: !options.headless, headless: options.headless, openLiveDashboard: false, timeout: options.timeoutMs, profile,
+    namespace: 'browser-test', sessionId: sessions?.createSessionId(),
   });
   let agent = initialAgent ?? createAgent();
   let origin: string | undefined;

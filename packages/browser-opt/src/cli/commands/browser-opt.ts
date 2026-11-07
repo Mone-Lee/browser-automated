@@ -2,14 +2,15 @@
  * 承载 browser-opt 即时执行、Workflow 管理子命令的参数解析与执行编排。
  * 文件只协调 CLI 交互，存储、匹配和浏览器执行分别交由对应领域模块处理。
  */
+import { createBrowserSessionId, createManagedBrowserSessions } from '#browser-core/managed-session';
 import { authStateDirectory, resolveBrowserAuthState, type BrowserAuthState } from '#browser-core/auth-state';
 import {
   browserOptTemplate,
   extractBrowserOptUrl,
   splitBrowserOptSteps,
 } from '../../browser-opt/utils.js';
-import { createHash, randomUUID } from 'node:crypto';
-import { execFileSync, spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import {
   findBrowserOptWorkflowById,
   loadBrowserOptWorkflows,
@@ -19,7 +20,6 @@ import {
   saveBrowserOptWorkflow,
 } from '../../browser-opt/workflow/index.js';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
 import type { BrowserOptHandoffContext, BrowserOptRunnerOptions } from '../../browser-opt/type.js';
@@ -50,10 +50,6 @@ interface BrowserOptDetachedRun {
   startedAt: string;
 }
 
-interface BrowserOptManagedSessionState {
-  sessionIds: string[];
-}
-
 interface BrowserOptSessionPlan {
   sessionId: string;
   authStateFallbackSessionId?: string;
@@ -66,7 +62,6 @@ const BROWSER_OPT_EXIT_CODE_HANDOFF = 2;
 const BROWSER_OPT_EXIT_CODE_AMBIGUOUS = 3;
 const BROWSER_OPT_EXIT_CODE_NOT_FOUND = 4;
 const DEFAULT_BROWSER_PROFILE = 'Default';
-const MANAGED_SESSION_STATE_FILE = 'browser-opt-sessions.json';
 const DEFAULT_HANDOFF_RUN_DIR = '.browser-opt/handoffs';
 const HANDOFF_SIGNAL_POLL_INTERVAL_MS = 250;
 const NEW_BROWSER_WINDOW_PATTERN = '(?:(?:新开|全新|新的|独立)(?:一个|的)?\\s*(?:Chrome|谷歌浏览器)(?:\\s*(?:窗口|实例))?|(?:Chrome|谷歌浏览器)(?:\\s*(?:窗口|实例))?\\s*(?:新开|全新|新的|独立))';
@@ -660,100 +655,19 @@ async function prepareBrowserOptSession(
 ): Promise<BrowserOptSessionPlan> {
   const configuredSession = getStringFlag(flags, 'session')?.trim();
   if (reuseRunningBrowser) {
-    return { sessionId: configuredSession ?? createBrowserOptSessionId() };
+    return { sessionId: configuredSession ?? createBrowserSessionId('browser-opt') };
   }
 
-  const keepPreviousBrowser = getBooleanFlag(flags, 'keep-previous-browser');
-  const statePath = managedSessionStatePath();
-  const previousSessionIds = loadManagedSessionIds(statePath);
-  if (previousSessionIds.length === 0 && !keepPreviousBrowser) {
-    previousSessionIds.push(legacyManagedSessionId());
-  }
-
-  if (!keepPreviousBrowser) {
-    for (const sessionId of previousSessionIds) {
-      terminateManagedSession(sessionId);
-    }
-  }
-
-  const sessionId = configuredSession ?? createBrowserOptSessionId();
-  const authStateFallbackSessionId = createBrowserOptSessionId();
-  saveManagedSessionIds(
-    statePath,
-    keepPreviousBrowser
-      ? [...new Set([...previousSessionIds, sessionId, authStateFallbackSessionId])]
-      : [sessionId, authStateFallbackSessionId],
-  );
-  return { sessionId, authStateFallbackSessionId };
-}
-
-/**
- * 直接终止 browser-opt 托管的 agent-browser daemon。
- * `agent-browser close` 在 Chrome 已退出但 daemon 尚存时会短暂重启 Chrome，因此清理旧会话时绕过该命令。
- */
-function terminateManagedSession(sessionId: string): void {
-  if (path.basename(sessionId) !== sessionId) {
-    return;
-  }
-
-  try {
-    const pidPath = path.join(
-      os.homedir(),
-      '.agent-browser',
-      'namespaces',
-      'browser-opt',
-      'run',
-      `${sessionId}.pid`,
-    );
-    const pid = Number.parseInt(fs.readFileSync(pidPath, 'utf-8').trim(), 10);
-    if (!Number.isSafeInteger(pid) || pid <= 0) {
-      return;
-    }
-
-    const command = execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf-8' }).trim();
-    const executableName = path.basename(command.split(/\s+/, 1)[0] ?? '');
-    if (!executableName.startsWith('agent-browser')) {
-      return;
-    }
-    process.kill(pid, 'SIGTERM');
-  } catch {
-    // 进程已退出或运行目录已清理时无需继续关闭，避免 close 命令重新拉起 Chrome。
-  }
-}
-
-/** 生成不会复用 daemon/socket 生命周期的 browser-opt session ID。 */
-function createBrowserOptSessionId(): string {
-  return `browser-opt-${randomUUID().replaceAll('-', '').slice(0, 16)}`;
-}
-
-/** 首次升级时兼容清理旧版按项目路径生成的稳定 session。 */
-function legacyManagedSessionId(): string {
-  const projectHash = createHash('sha256').update(process.cwd()).digest('hex').slice(0, 16);
-  return `browser-opt-${projectHash}`;
-}
-
-/** session 记录与登录 state 放在同一项目数据目录，测试和自定义目录也能保持隔离。 */
-function managedSessionStatePath(): string {
-  const stateDir = authStateDirectory('browser-opt');
-  return path.join(stateDir, MANAGED_SESSION_STATE_FILE);
-}
-
-/** 读取上一轮可能存活的 session；损坏记录按无记录处理，由旧版稳定 ID 兜底。 */
-function loadManagedSessionIds(statePath: string): string[] {
-  try {
-    const state = JSON.parse(fs.readFileSync(statePath, 'utf-8')) as BrowserOptManagedSessionState;
-    return Array.isArray(state.sessionIds)
-      ? state.sessionIds.filter((sessionId): sessionId is string => typeof sessionId === 'string' && sessionId.length > 0)
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-/** 在浏览器启动前记录本轮 session，确保异常退出后下一次调用仍能完成清理。 */
-function saveManagedSessionIds(statePath: string, sessionIds: string[]): void {
-  fs.mkdirSync(path.dirname(statePath), { recursive: true });
-  fs.writeFileSync(statePath, JSON.stringify({ sessionIds }, null, 2));
+  const sessions = createManagedBrowserSessions({
+    namespace: 'browser-opt',
+    stateDirectory: authStateDirectory('browser-opt'),
+    keepPrevious: getBooleanFlag(flags, 'keep-previous-browser'),
+    cleanLegacySession: true,
+  });
+  return {
+    sessionId: sessions.createSessionId(configuredSession),
+    authStateFallbackSessionId: sessions.createSessionId(),
+  };
 }
 
 /** 读取终端输入，供 handoff 暂停点等待用户确认继续。 */

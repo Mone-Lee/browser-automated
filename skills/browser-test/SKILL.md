@@ -35,7 +35,7 @@ node "<Skill目录>/scripts/browser-test.mjs" --help
 | 展示修改后的草案差异 | `feature gen --review "<草案名>"`（差异仅输出到终端） |
 | 用户确认后创建 feature | `feature gen --review "<草案名>" --yes` |
 | 合并或覆盖已有 feature | 审阅及确认命令分别追加 `--merge` 或 `--overwrite`；两者互斥 |
-| 执行 Gherkin（Web） | `run "<feature 文件>"`，可追加 `--headless`、`--profile <名称或路径>`、`--state <已有登录态文件>` 或 `--no-state`；先解析并拒绝待确认项，再在真实环境执行，步骤解释与动作生成由当前 Agent 通过下文文件通道回复，规则之外的判定优先使用 TypeSafe jev，可选配置 `TYPESAFE_API_KEY`、`TYPESAFE_DEFAULT_MODEL`；未配置或服务调用失败时，由当前 Agent 通过同一文件通道兜底判定；退出码 0=PASS、1=FAIL、2=BLOCKED 或工具错误 |
+| 执行 Gherkin（Web） | `run "<feature 文件>"`，可追加 `--headless`、`--profile <名称或路径>`、`--state <已有登录态文件>`、`--no-state` 或 `--keep-previous-browser`；先解析并拒绝待确认项，再在真实环境执行，步骤解释与动作生成由当前 Agent 通过下文文件通道回复，规则之外的判定优先使用 TypeSafe jev，可选配置 `TYPESAFE_API_KEY`、`TYPESAFE_DEFAULT_MODEL`；未配置或服务调用失败时，由当前 Agent 通过同一文件通道兜底判定；退出码 0=PASS、1=FAIL、2=BLOCKED 或工具错误 |
 | 查询用法或版本 | `--help` 或 `--version` |
 
 用户未提供 XMind 文件时询问文件路径；导入不要求业务仓库、配置、URL 或登录；生成 Web 用例时按下文确认访问地址。`--json` 只向标准输出返回结构化结果，不在 `.browser-test/` 保存 JSON。Agent 自行写入的图片还原 JSON 和步骤 JSON 必须放在系统临时目录，调用完成后清理；可供人审阅的 `.feature` 只写入 `.browser-test/features/`。
@@ -78,6 +78,12 @@ node "<Skill目录>/scripts/browser-test.mjs" --help
 ### 图片用例生成
 
 用户要求由图片生成 Gherkin 时，先按“图片用例解释”还原用例，再写成与 `xmind list --json` 同构的 JSON（`file` 为图片文件名或“对话图片”，`cases` 含 `title`、`structure`、`modulePath`、`node`、`preconditions`、`steps`、`expectedResults`，节点为 `{title, path, children, raw}`），保存到系统临时目录，再用 `--cases` 走上述同一流程，并在调用完成后删除。图片还原来源的最终 feature 文件名会追加 `file` 来源后缀，因此即使模块路径相同也不会与 XMind 产物冲突。图中无法确定的内容在节点文字中保留“需确认”，会成为待确认项；不得猜测补写。不得绕过 `--cases` 手写草案或 feature。
+
+## 浏览器窗口管理
+
+`run` 默认关闭当前项目之前登记的托管窗口，再创建新会话，仅复用登录态。用户在 prompt 中明确要求“不清理之前窗口”“保留之前的浏览器窗口”或“新开窗口并保留旧窗口”时，追加 `--keep-previous-browser`；不要把运行模式写进 Gherkin 业务步骤。用户要求默认清理时不传该参数。
+
+`--keep-previous-browser` 仅跳过启动前的旧会话清理，不复用旧页面，也不改变本次运行结束时的关闭行为。保留的旧会话继续登记，之后未传该参数的运行会统一清理。此参数不表示允许并发运行流程。
 
 ## 当前 Agent 文件协作
 
