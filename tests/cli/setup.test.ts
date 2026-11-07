@@ -76,7 +76,8 @@ describe('browser-opt install', () => {
 
     expect(result.status).toBe(0);
     const npmCommands = readLoggedCommands(npmLog);
-    expect(npmCommands.slice(0, 2)).toEqual([
+    expect(npmCommands.slice(0, 3)).toEqual([
+      'prefix -g --registry=https://registry.npmjs.org/',
       'install -g browser-opt@latest --registry=https://registry.npmjs.org/',
       'install -g agent-browser@latest --registry=https://registry.npmjs.org/',
     ]);
@@ -87,6 +88,36 @@ describe('browser-opt install', () => {
     expect(fs.readFileSync(installedSkillPath, 'utf-8')).toContain('browser-opt check-update --json');
     expect(result.stdout).toContain('已安装 Agent Skill');
     expect(result.stdout).toContain('browser-opt 已就绪');
+
+    // 即使通过其他来源的安装器启动，也必须识别全局包中的本地链接并阻止覆盖。
+    const linkedPackage = path.join(binDirectory, 'lib/node_modules/browser-opt');
+    fs.mkdirSync(path.dirname(linkedPackage), { recursive: true });
+    fs.symlinkSync(path.join(projectRoot, 'packages/browser-opt'), linkedPackage, 'dir');
+    for (const command of ['install', 'setup', 'update']) {
+      fs.writeFileSync(npmLog, '');
+      const blocked = spawnSync('node', [path.join(projectRoot, 'packages/browser-opt/dist/cli/browser-opt.js'), command], {
+        cwd: home,
+        encoding: 'utf-8',
+        env: { ...process.env, npm_execpath: '', PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ''}` },
+      });
+      expect(blocked.status).toBe(1);
+      expect(blocked.stderr).toContain('本地源码模式');
+      expect(readLoggedCommands(npmLog)).toEqual(['prefix -g --registry=https://registry.npmjs.org/']);
+      expect(fs.realpathSync(linkedPackage)).toBe(fs.realpathSync(path.join(projectRoot, 'packages/browser-opt')));
+    }
+    fs.unlinkSync(linkedPackage);
+    const shellCommand = path.join(binDirectory, 'browser-opt');
+    fs.unlinkSync(shellCommand);
+    fs.symlinkSync(path.join(projectRoot, 'packages/browser-opt/dist/cli/browser-opt.js'), shellCommand);
+    fs.writeFileSync(npmLog, '');
+    const blockedShellLink = spawnSync('node', [shellCommand, 'update'], {
+      cwd: home,
+      encoding: 'utf-8',
+      env: { ...process.env, npm_execpath: '', PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ''}` },
+    });
+    expect(blockedShellLink.status).toBe(1);
+    expect(blockedShellLink.stderr).toContain('本地源码模式');
+    expect(readLoggedCommands(npmLog)).toEqual(['prefix -g --registry=https://registry.npmjs.org/']);
   });
 
   it('keeps setup as an alias, supports Claude Code and downloads a browser only when explicitly requested', () => {
@@ -119,7 +150,8 @@ describe('browser-opt install', () => {
 
     expect(result.status).toBe(0);
     const npmCommands = readLoggedCommands(npmLog);
-    expect(npmCommands.slice(0, 2)).toEqual([
+    expect(npmCommands.slice(0, 3)).toEqual([
+      'prefix -g --registry=https://registry.npmjs.org/',
       'install -g browser-opt@latest --registry=https://registry.npmjs.org/',
       'install -g agent-browser@latest --registry=https://registry.npmjs.org/',
     ]);
@@ -157,7 +189,8 @@ describe('browser-opt install', () => {
 
     expect(result.status).toBe(0);
     const npmCommands = readLoggedCommands(npmLog);
-    expect(npmCommands.slice(0, 2)).toEqual([
+    expect(npmCommands.slice(0, 3)).toEqual([
+      'prefix -g --registry=https://registry.npmjs.org/',
       'install -g browser-opt@latest --registry=https://registry.npmjs.org/',
       'install -g agent-browser@latest --registry=https://registry.npmjs.org/',
     ]);

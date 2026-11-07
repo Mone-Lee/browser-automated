@@ -14,8 +14,10 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageDir = resolve(repositoryRoot, 'packages/browser-opt');
 
 if (mode === 'local') {
+  console.log('正在构建 browser-opt 本地源码…');
   runNpm(['run', 'build', '--workspace', 'browser-opt'], repositoryRoot);
-  runNpm(['link'], packageDir);
+  console.log('正在切换本地链接（跳过联网审计）…');
+  runNpm(['link', '--no-audit', '--no-fund'], packageDir);
   printStatus();
 } else if (mode === 'npm') {
   runNpm(['install', '--global', `browser-opt@${npmVersion}`], repositoryRoot);

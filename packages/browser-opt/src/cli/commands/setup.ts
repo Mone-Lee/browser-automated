@@ -42,6 +42,7 @@ export function setupBrowserOpt(options: BrowserOptSetupOptions): void {
     throw new Error('--download-browser 需要同时安装运行时，请移除 --skip-runtime。');
   }
   if (options.installRuntime) {
+    assertNoLocalBrowserOptLink(options.registry, installPrefix);
     installBrowserOptRuntime(options.registry, installPrefix);
     installAgentBrowserRuntime(options.registry, installPrefix);
     verifyAgentBrowserRuntime();
@@ -77,6 +78,37 @@ export function setupBrowserOpt(options: BrowserOptSetupOptions): void {
     console.log(`update 后版本：${installedVersion}`);
   }
   console.log('browser-opt 已就绪。');
+}
+
+/** 安装前检查全局包链接及命令真实来源，防止 npx 或 update 覆盖本地调试模式。 */
+function assertNoLocalBrowserOptLink(registry?: string, installPrefix?: string): void {
+  const prefix = captureNpmOutput(['prefix', '-g'], registry, installPrefix) ?? installPrefix;
+  if (!prefix) throw new Error('无法确认 npm 全局安装位置，已停止安装以保留现有 browser-opt 链接。');
+  const packagePath = process.platform === 'win32'
+    ? path.join(prefix, 'node_modules/browser-opt')
+    : path.join(prefix, 'lib/node_modules/browser-opt');
+  let localPath: string | undefined;
+  if (fs.existsSync(packagePath) && fs.lstatSync(packagePath).isSymbolicLink()) {
+    localPath = fs.realpathSync(packagePath);
+  }
+  const shellPath = resolveShellBrowserOptPath();
+  if (!localPath && shellPath && fs.existsSync(shellPath)) {
+    let directory = path.dirname(fs.realpathSync(shellPath));
+    while (directory !== path.dirname(directory)) {
+      const manifestPath = path.join(directory, 'package.json');
+      if (fs.existsSync(manifestPath)) {
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { name?: string };
+        if (manifest.name === 'browser-opt') {
+          if (path.basename(path.dirname(directory)) !== 'node_modules') localPath = directory;
+          break;
+        }
+      }
+      directory = path.dirname(directory);
+    }
+  }
+  if (localPath) {
+    throw new Error(`browser-opt 当前为本地源码模式：${localPath}。已拒绝安装或更新，保留本地链接；只有明确决定切换到 npm 版时，才在源码仓库执行 npm run browser-opt:use-npm。`);
+  }
 }
 
 /** 卸载 install 写入的全局运行时、Skill，以及按需删除当前项目的运行数据。 */

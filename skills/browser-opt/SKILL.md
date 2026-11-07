@@ -93,10 +93,14 @@ For production environments, describe upload steps as manual handoff so the oper
 
 Every execution must follow these rules:
 
-- Before each `/browser-opt` execution, run `browser-opt check-update --json` once. If it returns
-  `outdated`, tell the user the current and latest versions and recommend
-  `browser-opt update`; if the shell still points to a stale binary or `update` 不可用，再回退到 `npx browser-opt@latest install`；然后继续
-  requested workflow unless the user asks to update first. If it returns `unknown`, continue without blocking.
+- 每次执行工作流前，先解析 `browser-opt` 命令的真实目标，再运行 `browser-opt check-update --json`。
+  若真实目标位于本地源码仓库，必须保留本地模式：禁止执行 `browser-opt install/setup/update`、
+  `npx browser-opt@latest install`、`npm install -g browser-opt` 或其他覆盖链接的安装命令。
+  版本落后、命令报错或权限异常均不能作为覆盖本地链接的理由；在源码仓库运行
+  `npm run browser-opt:use-local` 修复构建或链接。只有用户明确要求退出本地模式，才执行
+  `npm run browser-opt:use-npm`；普通工作流请求和“更新到最新版”均不代表同意切换来源。
+- 若更新检查返回 `outdated`，仅告知版本差异并继续工作流，禁止自动安装或更新。
+  非本地模式下，只有用户明确要求更新才运行 `browser-opt update`；检查返回 `unknown` 时继续执行。
 - 如果 `browser-opt` 因执行权限失败，先检查命令软链的真实目标。真实目标位于本地开发仓库时，禁止运行
   `npx browser-opt@latest install` 覆盖本地链接；应在该仓库重新运行 `npm run browser-opt:use-local`，再确认
   `browser-opt:status` 显示“本地源码”。

@@ -410,6 +410,8 @@ npm run browser-opt:status
 
 `browser-opt:status` 会同时检查软链目标和执行权限；若显示“不可执行”，重新运行 `npm run browser-opt:use-local` 即可修复本地构建入口权限，不要用 `npx browser-opt@latest install` 覆盖本地调试链接。
 
+本地模式下，`install`、`setup` 和 `update` 会在安装前检查全局包链接及命令来源，检测到本地源码时拒绝覆盖。只有明确退出本地模式时才使用 `browser-opt:use-npm`。版本检查不会授权自动更新；直接调用外部 `npm install -g` 或尚未包含此检查的旧版 `npx` 安装器仍可能覆盖链接，调用方必须遵守相同规则。
+
 需要恢复指定 npm 版本时，可把版本号透传给切换脚本：
 
 ```bash
