@@ -113,9 +113,13 @@ export type AtomicAction =
 
 /** 模型只能选择受支持的决定；动作还必须经过宿主门禁。 */
 export type ActionDecision = { observationId: string; reason: string } & (
+  /** 执行动作 */
   | { kind: 'act'; action: AtomicAction; /** 业务写入必须引用当前操作步骤的原文，并说明可观测的完成结果；不是额外授权。 */ write?: { sourceText: string; expected: string } }
+  /** 开始检查条件 */
   | { kind: 'check'; conditionIds: string[] }
+  /** 请求人工接管 */
   | { kind: 'handoff'; message: string }
+  /** 明确无法继续 */
   | { kind: 'blocked'; reasonCode: string }
 );
 
@@ -167,6 +171,8 @@ export interface FeatureResult {
   feature: string;
   featureDigest: string;
   environment: { declaredUrl?: string; actualUrl?: string; source: 'feature' };
+  /** 仅记录登录态来源、加载及接管保存结果，不包含凭证或命令原始输出。 */
+  authState?: string[];
   platform: 'web';
   runtime: 'browser';
   dataMode: 'real';

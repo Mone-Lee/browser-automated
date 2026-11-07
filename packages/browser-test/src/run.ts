@@ -63,7 +63,11 @@ function overall(statuses: Verdict[]): Verdict {
 export async function runFeature(feature: ParsedFeature, options: RunOptions): Promise<{ result: FeatureResult; directory: string }> {
   const directory = await createRunDirectory(options.runsDirectory);
   const tracePath = join(directory, 'trace.log');
-  const trace = (line: string) => appendFileSync(tracePath, `${new Date().toISOString()} ${line}\n`);
+  const authState: string[] = [];
+  const trace = (line: string) => {
+    if (line.startsWith('auth-state-')) authState.push(line);
+    appendFileSync(tracePath, `${new Date().toISOString()} ${line}\n`);
+  };
   const log = options.log ?? (() => undefined);
   const observations = new Map<string, Observation>();
   const counters = { observation: 0 };
@@ -122,6 +126,7 @@ export async function runFeature(feature: ParsedFeature, options: RunOptions): P
     feature: feature.file,
     featureDigest: options.digest,
     environment: { declaredUrl, actualUrl: firstObservation?.url, source: 'feature' },
+    authState,
     platform: 'web',
     runtime: 'browser',
     dataMode: 'real',

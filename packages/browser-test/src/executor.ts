@@ -4,7 +4,7 @@
  * 且任何一步“证据不足”都落到 BLOCKED，而不是被当作通过。
  */
 import { join } from 'node:path';
-import type { BrowserPort } from './browser.js';
+import { isLoginObservation, type BrowserPort } from './browser.js';
 import type { FeatureStep } from './feature.js';
 import { describeObservation, type ModelClient } from './model.js';
 import type { ActionDecision, ActionRecord, AtomicAction, CheckResult, ConditionRule, Observation, StepCondition, StepIntent, StepResult, Verdict } from './types.js';
@@ -187,6 +187,12 @@ export async function executeStep(step: SemanticStep, ctx: ExecutionContext): Pr
     ctx.trace(`observe ${id} url=${observation.url} targets=${observation.targets.length} shot=${shot}`);
     return observation;
   };
+  // 切换浏览器后必须重新采集带新编号的证据，不能沿用旧会话的目标引用。
+  const retryAuthStateFallback = async (): Promise<Observation | undefined> => {
+    if (!ctx.entryUrl || !ctx.port.retryAuthStateFallback?.(ctx.entryUrl)) return undefined;
+    await new Promise(resolve => setTimeout(resolve, SETTLE_MS * 2));
+    return observe();
+  };
   const remaining = () => deadline - Date.now();
   const timeoutReason = () => `超过 ${ctx.limits.stepMs / 1000} 秒自动执行时间`;
 
@@ -199,27 +205,60 @@ export async function executeStep(step: SemanticStep, ctx: ExecutionContext): Pr
       if (ctx.entryUrl && originOf(ctx.entryUrl) !== entryOrigin) return finish('BLOCKED', `同一场景出现不同应用入口（${originOf(ctx.entryUrl)} 与 ${entryOrigin}），首期不支持跨应用场景`);
       if (ctx.limits.maxActions < 1) return finish('BLOCKED', `超过 ${ctx.limits.maxActions} 次原子动作预算`);
     }
-    if (!ctx.model) return finish('BLOCKED', '缺少调用方提供的当前 AI 能力，无法解释步骤');
-    const raw = await ctx.model.json(INTERPRET_PROMPT, { step: source.original, semantic: step.semantic, scenario: ctx.scenario, entryOpened: Boolean(entry) }, remaining());
-    const invalid = validateIntent(raw, step, Boolean(entry));
+    // 只识别生成器的标准纯入口句式；混合登录或数据前提仍交给当前 Agent 解释。
+    const pureEntry = Boolean(entry && /^本次访问地址为\s*["“]https?:\/\/[^"”]+["”]\s*$/u.test(step.text));
+    if (!ctx.model && !pureEntry) return finish('BLOCKED', '缺少调用方提供的当前 AI 能力，无法解释步骤');
+    let raw = pureEntry
+      ? { kind: 'precondition', scope: { description: '访问已确认入口' }, conditions: [] }
+      : await ctx.model!.json(INTERPRET_PROMPT, { step: source.original, semantic: step.semantic, scenario: ctx.scenario, entryOpened: Boolean(entry) }, remaining());
+    let invalid = validateIntent(raw, step, Boolean(entry));
+    // 只按原文复核一次，不提供页面观测，避免为迎合实际结果而降低断言要求。
+    const needsEvidenceReview = !invalid && (raw as StepIntent).conditions.some(item => item.evidenceKind === 'data');
+    if (!pureEntry && remaining() > 0 && (invalid || needsEvidenceReview)) {
+      const feedback = invalid ?? '复核证据类型：页面可见数据应归 page；原文明确要求外部直接证据时保留 data，不得删除、弱化或增加预期';
+      ctx.trace(`step ${step.line} intent-review: ${feedback}`);
+      raw = await ctx.model!.json(INTERPRET_PROMPT, {
+        step: source.original, semantic: step.semantic, scenario: ctx.scenario, entryOpened: Boolean(entry),
+        previous: raw, feedback,
+      }, remaining());
+      invalid = validateIntent(raw, step, Boolean(entry));
+      ctx.trace(`step ${step.line} intent-review ${invalid ? `invalid: ${invalid}` : 'accepted'}`);
+    }
     if (invalid) return finish('BLOCKED', `无法明确解释步骤：${invalid}`);
     const parsed = raw as Pick<StepIntent, 'kind' | 'scope' | 'conditions'>;
     const entryCondition: StepCondition[] = entry ? [{ id: ENTRY_CONDITION_ID, expected: `页面位于 ${entryOrigin}`, evidenceKind: 'page', rule: { type: 'url-contains', value: entryOrigin! } }] : [];
     const intent: StepIntent = { source, semantic: step.semantic, kind: parsed.kind, scope: parsed.scope, conditions: [...entryCondition, ...parsed.conditions] };
-    ctx.trace(`step ${step.line} intent kind=${intent.kind} conditions=${intent.conditions.map(item => item.id).join(',')}`);
+    ctx.trace(`step ${step.line} intent kind=${intent.kind} conditions=${intent.conditions.map(item => `${item.id}:${item.evidenceKind}:${item.rule?.type ?? 'no-rule'}`).join(',')}`);
 
     let latest: Observation;
     if (entry) {
       ctx.entryUrl = entry;
       ctx.trace(`step ${step.line} entry ${entry}`);
+      ctx.port.prepareEntry?.(entry, ctx.trace);
       const outcome = ctx.port.act({ type: 'open', url: entry }, EMPTY_OBSERVATION);
       await new Promise(resolve => setTimeout(resolve, SETTLE_MS * 2));
       latest = observe();
       actions.push({ decision: { observationId: EMPTY_OBSERVATION.id, reason: '打开入口', kind: 'act', action: { type: 'open', url: entry } }, afterObservationId: latest.id, outcome });
+      // 自动登录态失效时先尝试一次浏览器配置；回退与接管后都重新核验页面。
+      if (isLoginObservation(latest) || latest.url === 'about:blank') {
+        latest = await retryAuthStateFallback() ?? latest;
+      }
+      if (isLoginObservation(latest)) {
+        ctx.trace('auth-state-review: 入口疑似需要登录，进入 HANDOFF');
+        const paused = Date.now();
+        const resumed = await ctx.port.handoff('请在浏览器中完成登录，完成后继续核验已确认入口。');
+        deadline += Date.now() - paused;
+        ctx.trace(`handoff ${resumed ? 'resumed' : 'unavailable'}: 入口登录核验`);
+        if (!resumed) return finish('BLOCKED', '入口需要登录但无法人工接管');
+        latest = observe();
+        if (isLoginObservation(latest)) return finish('BLOCKED', '人工接管后仍停留在登录页');
+      }
+      ctx.trace('auth-state-review: 继续使用本次页面证据核验入口及登录前提');
       if (!parsed.conditions.length) {
         checks = await judgeConditions(intent, intent.conditions, latest, ctx.judge, remaining(), ctx.model);
         if (remaining() <= 0) return finish('BLOCKED', timeoutReason());
         const status = aggregate(checks);
+        ctx.trace(`auth-state-review: 入口复核 ${status}`);
         return finish(status === 'PASS' ? 'PASS' : 'BLOCKED', status === 'PASS' ? undefined : '入口地址未能打开到预期站点，可能被重定向');
       }
     } else {
@@ -231,9 +270,26 @@ export async function executeStep(step: SemanticStep, ctx: ExecutionContext): Pr
     let lastFeedback: unknown;
     for (let round = 0; round < ctx.limits.maxRounds; round += 1) {
       if (remaining() <= 0) return finish('BLOCKED', timeoutReason());
-      const decision = await ctx.model.json(DECIDE_PROMPT, {
+      // 登录前提先直接判定，已登录立即继续，明确未登录才请求人工接管。
+      let loginDecision: ActionDecision | undefined;
+      if (intent.kind === 'login' && step.semantic === 'Given') {
+        checks = await judgeConditions(intent, intent.conditions, latest, ctx.judge, remaining(), ctx.model);
+        if (remaining() <= 0) return finish('BLOCKED', timeoutReason());
+        const status = aggregate(checks);
+        ctx.trace(`auth-state-review: 登录前提 ${status}`);
+        if (status === 'PASS') return finish('PASS');
+        if (status === 'FAIL') {
+          const fallback = await retryAuthStateFallback();
+          if (fallback) { latest = fallback; continue; }
+          loginDecision = {
+            observationId: latest.id, reason: '登录前提不成立，需要人工完成登录',
+            kind: 'handoff', message: '请在浏览器中完成登录，完成后通知调用方继续。',
+          };
+        }
+      }
+      const decision = loginDecision ?? await ctx.model!.json(DECIDE_PROMPT, {
         step: source.original,
-        intent: { kind: intent.kind, scope: intent.scope, conditions: intent.conditions.map(({ id, expected }) => ({ id, expected })) },
+        intent: { kind: intent.kind, scope: intent.scope, conditions: intent.conditions },
         observation: describeObservation(latest),
         history: actions.map(item => ({ decision: item.decision, target: item.target, afterObservationId: item.afterObservationId, outcome: item.outcome.slice(0, 200) })),
         feedback: lastFeedback,
@@ -252,6 +308,10 @@ export async function executeStep(step: SemanticStep, ctx: ExecutionContext): Pr
 
       if (decision.kind === 'blocked') return finish('BLOCKED', decision.reasonCode);
       if (decision.kind === 'handoff') {
+        if (intent.kind === 'login' || isLoginObservation(latest)) {
+          const fallback = await retryAuthStateFallback();
+          if (fallback) { latest = fallback; continue; }
+        }
         const paused = Date.now();
         const resumed = await ctx.port.handoff(decision.message);
         // 人工接管期间暂停自动执行计时。

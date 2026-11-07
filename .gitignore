@@ -4,7 +4,7 @@ packages/**/dist/
 *.tsbuildinfo
 .agent-browser/
 .browser-automated/
-# browser-opt 与 browser-test 共用的登录态目录，含明文凭证。
+# browser-opt 与 browser-test 的产物目录，各自的登录态文件含明文凭证。
 .browser-opt/
 .browser-test/
 packages/browser-test/generated/

@@ -17,11 +17,11 @@ node packages/browser-test/dist/cli/browser-test.js xmind list --xmind /path/to/
 - 生成只依赖 XMind 原文及用户对用例语义的确认，不读取业务路由源码，不要求业务仓库、应用映射或 `project.json`。
 - 用例中的页面名称与导航操作保留为自然语言，不强制补齐路由；原文已有 URL 时保留。
 - 生成时复用已确认地址，缺失或冲突时按页面集中请求用户确认；通过实际页面菜单、链接和按钮导航，无法唯一定位时请求确认或 BLOCKED。
-- 登录与验证码按需人工接管，不要求预先制作登录态文件。非交互执行缺必要信息则 BLOCKED。
+- 登录与验证码按需人工接管，不要求预先制作登录态文件。非交互可见浏览器需要接管时输出 `handoff-required` 和独立的 `signalFile`，人工完成后向该文件写入 `done` 恢复，写入 `q` 取消。恢复后重新核验登录前提；无头模式无法人工接管。信号文件仅恢复本轮会话；恢复后确认离开登录页才保存登录态。
 - 用例的数据前提仍须核对；当前不建设 mock 场景或要求业务代码接入。
 - 先打通单应用 Web 用例闭环，支持用例明确要求的创建、编辑、删除及确认步骤，再接入用户已打开的微信小程序；跨应用暂不执行。
 
-生成、解析与 Web 用例执行（首版）已实现，小程序、登录态复用与 MSW 仍为后续目标：
+生成、解析与 Web 用例执行（首版）已实现，小程序与 MSW 仍为后续目标：
 
 ```bash
 browser-test feature gen --xmind cases.xmind
@@ -62,6 +62,10 @@ const { cases, sheets, warnings } = await importXMind('/path/to/cases.xmind');
 ### TypeSafe 判定配置
 
 确定性规则优先；规则无法覆盖的页面断言与写操作结果使用 [TypeSafe JavaScript SDK](https://docs.typesafe.ai/sdk/javascript) 的 jev 模型判定。TypeSafe 是可选的外部 AI 服务；未配置或调用失败时，由发起任务的当前 Agent 兜底判定。
+
+页面可见的商品、订单等业务数据使用页面证据；“存在售卖中商品”不因包含“存在”而要求数据库来源。仅原文明示接口、数据库或持久化直接证据时才归为数据条件。无效解析（包括缺少完成条件）或数据条件分类会在采集页面前按原文复核一次，保留原始预期，复核过程写入 trace；复核后仍无效则阻塞。When 必须说明动作完成后的可观测条件，例如目标页签已选中。
+
+列表存在性使用 `rows-exist`，支持以 `column` 和 `text` 指定列名及取值；全部行状态使用带 `column` 的 `rows-all-contain`。指定列时精确匹配单元格，避免页签、商品名称中的状态词造成误判。没有数据行、列名无法唯一定位或采集失败时阻塞；截断内容可以证明存在匹配行，不能证明不存在或全部符合。Feature 建议先切换页签，再分别断言“当前列表至少展示一条商品记录”和“当前列表中展示的商品供应链状态均为指定状态”。
 
 ```bash
 export TYPESAFE_API_KEY="你的 TypeSafe API Key"
@@ -149,3 +153,22 @@ browser-test feature addresses cases --id 1 --url 'https://example.com/products'
 命令更新草案及预览，返回剩余地址分组和已确认地址来源。一次确认应用到该组所有场景；每个最终场景保存独立的地址 Given 和页面来源注释。仍缺地址时拒绝落盘，整体审阅与 `--review --yes` 流程不变。已有文件不覆盖。
 
 Agent 步骤 JSON 可提供 `platform: "web" | "miniprogram" | "unsupported"`，以及 `visit: {application, page, environment?}`（仅提取原文身份）。旧草案默认 Web，常见“已登录应用”“进入页面”句式可自动提取；无法明确识别时通过上述参数确认。小程序明确标为 `miniprogram`，不要求 URL。
+
+### Web 登录态复用
+
+`run` 默认从 `BROWSER_TEST_AUTH_STATE_DIR` 或调用目录下的 `.browser-test/states/` 加载按入口 origin 命名的 `browser-test-<主机>-<端口>-<hash>.json`。两个工具默认互不查找对方目录，`BROWSER_OPT_AUTH_STATE_DIR` 不影响 browser-test；需要复用其他目录的已有文件时使用 `--state`。没有自动文件时导入 Chrome `Default` profile；自动文件加载失败或登录态失效时，只尝试一次 profile 回退。回退会关闭旧实例，重新打开已确认入口并重新采集页面证据，仍需登录时人工接管。
+
+```bash
+browser-test run .browser-test/features/example.feature
+browser-test run .browser-test/features/example.feature --profile Work
+browser-test run .browser-test/features/example.feature --state .browser-opt/states/browser-opt-default.json
+browser-test run .browser-test/features/example.feature --no-state
+```
+
+`--profile` 接受 Chrome 配置名称或路径，默认 `Default`。指定其他配置时，自动文件的摘要同时区分 origin 与 profile，避免复用默认账号的缓存。profile 导入失败会改用干净窗口，并按需人工登录；无头模式无法接管时 BLOCKED。
+
+`--state` 必须指向已有文件，其优先级高于 `--profile`，失效时也不自动切换 profile。`--no-state` 禁用加载、保存和 profile 导入，与 `--state`、`--profile` 互斥。不会自动发现 browser-opt 按 profile 命名的 state 文件，但两者可通过显式路径互用。state 先在 `about:blank` 加载，再打开用例入口。
+
+profile 导入后首次确认已进入入口站点的非登录页面时保存；人工接管恢复后确认离开登录页时也保存。直接复用 state 成功不覆盖原文件。配置导入成功不代表用例登录前提通过，账号、角色等要求仍按步骤原文核验。切换实例不重放之前的业务写操作。
+
+文件包含明文凭证，保存权限为 `0600`，请保持 `.browser-test/` 被 Git 忽略；自定义目录也应忽略。报告和日志只记录来源与加载、回退、复核、保存结果，不记录 state 内容。保存失败不会改变用例结果。

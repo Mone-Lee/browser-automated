@@ -33,6 +33,7 @@ function stepLine(step: StepResult): string {
 /** 渲染 report.md：失败与阻塞步骤置顶并附实际值，其后按场景列出每一步（含未执行步骤）。 */
 function renderReport(result: FeatureResult): string {
   const lines = [`# ${result.feature}`, '', `结果：**${result.status}**　平台：${result.platform}　数据模式：${result.dataMode}（真实环境验证）`, ''];
+  if (result.authState?.length) lines.push('## 登录态', '', ...result.authState.map(line => `- ${line}`), '');
   const problems = result.scenarios.flatMap(scenario => scenario.steps.filter((step): step is Extract<StepResult, { execution: 'executed' }> => step.execution === 'executed' && step.status !== 'PASS').map(step => ({ scenario: scenario.title, step })));
   if (problems.length) {
     lines.push('## 需要关注', '');
