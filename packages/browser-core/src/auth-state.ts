@@ -72,9 +72,10 @@ export function saveAuthState(agent: BrowserAgent, statePath: string, logs: stri
   }
 }
 
-/** 通过登录表单相关文本和可选的中转地址，识别尚未完成的登录页面。 */
+/** 通过登录表单的明确标记和可选中转地址识别登录页，避免“退出登录”“登录记录”等业务文案误判。 */
 export function isLoginLikeSnapshot(snapshot: AuthSnapshot): boolean {
-  return /登录|登\s*录|login|请输入手机号|请输入密码/i.test(snapshot.text)
+  return /请输入(?:手机号|密码|账号|用户名)|忘记密码|验证码登录|密码登录/i.test(snapshot.text)
+    || /(?:^|\n)\s*(?:登录(?!记录|日志|历史|时间)|登\s*录(?!记录|日志|历史|时间)|login\b|sign\s*in\b|请(?:先)?登录|please\s+(?:login|sign\s*in))/im.test(snapshot.text)
     || /(?:login|signin|sign-in|oauth|sso)(?:[/?#]|$)/i.test(snapshot.url ?? '');
 }
 
