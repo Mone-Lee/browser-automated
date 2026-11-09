@@ -38,7 +38,7 @@ browser-test run .browser-test/features/service-type-list.feature
 
 没有操作、预期字段时，若直属节点包含前置条件，且其他直属节点至少有一个含附属子节点，则按“操作→预期”嵌套布局提取：前置条件以外的直属母节点作为操作，其直属子节点作为该操作的预期。生成时按原文顺序输出每组 When→Then/And，不因嵌套布局本身要求语义确认。用例编号不参与导入识别，也不作为结构化字段；原文中的编号仅随主题内容保留，缺失时不自动补造。操作的完整子树和路径保留对应关系；部分操作没有直属预期时按用例提示一次。其他未识别的叶节点保留在主题树并提示人工确认。
 
-`--json` 向标准输出写入 JSON，不创建文件。`.browser-test/features/` 保存可供人审阅的 Gherkin，`.browser-test/runs/` 保存运行产物，目录不存在时自动创建；输入文件仍可位于任意位置。结果包含 `sheets`（完整主题树）、`cases`（用例及前置、步骤、预期节点）和 `warnings`。用例的 `structure` 为 `sections`（字段标记）或 `nested`（嵌套布局）。节点保留标题及整个子树，不将嵌套文本拼接或改写。节点包含原始属性 `raw`（备注、标签、优先级等，不含 id、title、children）和原文路径 `path`。来源文件记录在顶层 `file`，用例通过模块路径和标题定位。支持多画布及自由主题；主题深度最多 256 层，`content.json` 最多 32 MiB。默认文本模式输出用例标题和模块路径，并在汇总行标注来源文件，提示写入 stderr。
+`--json` 向标准输出写入 JSON，不创建文件。`.browser-test/features/` 保存可供人审阅的 Gherkin，`.browser-test/artifacts/` 保存运行产物，目录不存在时自动创建；输入文件仍可位于任意位置。结果包含 `sheets`（完整主题树）、`cases`（用例及前置、步骤、预期节点）和 `warnings`。用例的 `structure` 为 `sections`（字段标记）或 `nested`（嵌套布局）。节点保留标题及整个子树，不将嵌套文本拼接或改写。节点包含原始属性 `raw`（备注、标签、优先级等，不含 id、title、children）和原文路径 `path`。来源文件记录在顶层 `file`，用例通过模块路径和标题定位。支持多画布及自由主题；主题深度最多 256 层，`content.json` 最多 32 MiB。默认文本模式输出用例标题和模块路径，并在汇总行标注来源文件，提示写入 stderr。
 
 程序接口：
 
@@ -49,7 +49,7 @@ const { cases, sheets, warnings } = await importXMind('/path/to/cases.xmind');
 
 导入只读取指定文件，不写中间资产，不读取 `project.json` 或业务源码，不需要 AI、浏览器、登录态或业务仓库。
 
-`.browser-test/` 是本工具的固定产物根目录；Gherkin 位于 `features/`，运行产物位于 `runs/`。其中历史遗留的 `project.json` 不是本工具输入，使用者无需准备此文件。
+`.browser-test/` 是本工具的固定产物根目录；Gherkin 位于 `features/`，运行产物位于 `artifacts/`。其中历史遗留的 `project.json` 不是本工具输入，使用者无需准备此文件。运行产物超过 10 份时，CLI 会提示从最旧目录开始手动清理，但不会自动删除。
 
 项目预设、源码辅助和可复现数据配置，等实际使用证明能够提高效率后再评估，不预先规定配置协议。
 
@@ -57,23 +57,29 @@ const { cases, sheets, warnings } = await importXMind('/path/to/cases.xmind');
 
 ## 引导生成与确认
 
-草案生成、步骤解释和动作决策都使用调用方当前 Agent 的 AI 能力，CLI 不配置或连接其他生成模型服务。调用方通过本地文件通道回复请求，或在生成阶段用 `--steps` 提交已起草步骤。
+草案生成、步骤解释和复杂动作决策使用调用方当前 Agent 的 AI 能力，CLI 不连接其他生成模型服务。执行前合并相同原文，批量解释步骤，无效项仍逐步复核。配置 TypeSafe 后，普通页面元素选择优先由 jev 完成，经宿主门禁交给 agent-browser 执行，再重新观测和核验；复杂输入、写操作依据和服务不可用时回到当前 Agent。解释仅在本次运行内复用，不复用页面或判定结论。
 
 ### TypeSafe 判定配置
 
 确定性规则优先；规则无法覆盖的页面断言与写操作结果使用 [TypeSafe JavaScript SDK](https://docs.typesafe.ai/sdk/javascript) 的 jev 模型判定。TypeSafe 是可选的外部 AI 服务；未配置或调用失败时，由发起任务的当前 Agent 兜底判定。
+
+jev 还会在当前完整观测中选择普通点击、等待、滚动或检查，复杂输入及业务写入交给当前 Agent。结论与证据使用同一个有限选项绑定，避免独立问题之间互相依赖；视觉条件在内存中将真实截图等比缩放并补白到每边 280～1568 像素，保留原始截图，使用 SDK 的实验性图片请求头。视觉服务不可用时明确 BLOCKED，不用文字冒充截图。trace 记录解释、元素选择和判定耗时；相同观测不重复核验，连续三次非等待动作无页面内容或滚动位置变化时停止。
 
 页面可见的商品、订单等业务数据使用页面证据；“存在售卖中商品”不因包含“存在”而要求数据库来源。仅原文明示接口、数据库或持久化直接证据时才归为数据条件。无效解析（包括缺少完成条件）或数据条件分类会在采集页面前按原文复核一次，保留原始预期，复核过程写入 trace；复核后仍无效则阻塞。When 必须说明动作完成后的可观测条件，例如目标页签已选中。
 
 列表存在性使用 `rows-exist`，支持以 `column` 和 `text` 指定列名及取值；全部行状态使用带 `column` 的 `rows-all-contain`。指定列时精确匹配单元格，避免页签、商品名称中的状态词造成误判。没有数据行、列名无法唯一定位或采集失败时阻塞；截断内容可以证明存在匹配行，不能证明不存在或全部符合。Feature 建议先切换页签，再分别断言“当前列表至少展示一条商品记录”和“当前列表中展示的商品供应链状态均为指定状态”。
 
 ```bash
-export TYPESAFE_API_KEY="你的 TypeSafe API Key"
+cat > .env.local <<'EOF'
+TYPESAFE_API_KEY=你的 TypeSafe API Key
 # 可选：覆盖 SDK 默认模型 jev-latest
-export TYPESAFE_DEFAULT_MODEL="jev-latest"
+TYPESAFE_DEFAULT_MODEL=jev-latest
+EOF
 ```
 
-SDK 自动读取密钥，默认入口为 `https://api.typesafe.ai`，可选 `TYPESAFE_BASE_URL`。缺少密钥或服务调用失败时，CLI 通过相同的 `agent-request` 文件通道向当前 Agent 请求判定。TypeSafe 已返回的有效结论（包括 `BLOCKED`）不再交给 Agent 重判；两条路径都校验状态与证据引用，证据不足、回复无效或总预算耗尽时记为 `BLOCKED`。有 Agent 兜底时，单次 TypeSafe 调用最多使用 10 秒且不超过剩余预算的一半，其余时间留给 Agent；同一组条件共用剩余预算。截图与数据条件暂未提供对应证据来源，仍为 `BLOCKED`。
+CLI 启动时自动读取当前工作目录的 `.env.local`，文件已被 Git 忽略；终端中已设置的同名环境变量优先。SDK 默认入口为 `https://api.typesafe.ai`，可选在该文件设置 `TYPESAFE_BASE_URL`。缺少密钥或服务调用失败时，普通页面判定通过 `agent-request` 文件通道交给当前 Agent，并输出切换原因；本轮后续调用不重复等待已确认不可用的服务。trace 记录 TypeSafe 耗时、结论、证据编号及 Agent 回退，`result.json` 的 `by` 明确实际来源。TypeSafe 已返回的有效结论不交给 Agent 重判；两条路径都校验状态与证据引用。有 Agent 兜底时，单次 TypeSafe 判定最多使用 10 秒且不超过剩余预算的一半。截图条件需要视觉服务，外部数据条件需要直接数据证据，缺少时明确 `BLOCKED`。
+
+TypeSafe 返回 HTTP 451 和 `not available in your region` 时，表示服务端拒绝当前网络出口，并非 API Key、模型名或余额错误。CLI 会立即改用当前 Agent；要恢复 jev，须让启动 browser-test 的 Node.js 进程使用 TypeSafe 支持的网络出口，或联系 TypeSafe 支持确认账号可用地区。Skill 启动脚本检测到 `HTTP_PROXY` 或 `HTTPS_PROXY` 时会自动追加 Node 24 的 `--use-env-proxy`；直接运行 `browser-test` bin 时可设置 `NODE_USE_ENV_PROXY=1`。代理变量必须在启动 Node 前存在，写入运行中才读取的 `.env.local` 不会启用 Node 代理。仅把 `TYPESAFE_BASE_URL` 改成 `api.us.*` 不能绕过入口的地域校验，也不应把 API Key 交给非官方中转服务。
 
 ### 当前 Agent 协作
 

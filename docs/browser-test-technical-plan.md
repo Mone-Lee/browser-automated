@@ -85,7 +85,7 @@ flowchart TB
         MOCK[可选应用侧 MSW<br/>场景就绪 / 请求命中 / 重置]
     end
 
-    OUT[(runs/时间戳/<br/>result.json report.md shots trace.log)]
+    OUT[(artifacts/时间戳/<br/>result.json report.md shots trace.log)]
 
     XM --> XI --> FG --> FE
     IM --> VI --> U
@@ -116,7 +116,7 @@ flowchart TB
 
 `browser-test` 的 Skill 负责把 XMind 意图映射到当前阶段已经实现的 CLI 能力，不在 Skill 内复制 XMind 解析或执行逻辑。局部用例截图例外地由 Agent 直接解释，因为它们是对话中的用例选择介质，不是 CLI 可导入的 XMind 结构化文件；解释只保留可见层级和原文，裁切或模糊信息显式标记待确认。开发阶段即可把仓库内 Skill 安装或链接到本机 Agent Skills 目录，通过 `/browser-test` 做本地联调；尚未实现的能力必须明确提示当前边界，不能用临时提示词模拟成功。
 
-技术栈：Node.js 24+、TypeScript、ESM、agent-browser、微信开发者工具 `wechatide`；按需引入 Zod（输入与结果校验）和 fflate（读取 XMind ZIP 中的 `content.json`），在对应步骤实现时再加入依赖。草案、步骤解释与动作决策使用调用方 Agent 的 AI 能力；只有规则之外的页面判定和写操作结果核验接入 TypeSafe jev。`wechatide` 按[微信开发者工具 Skills 官方文档](https://developers.weixin.qq.com/miniprogram/dev/devtools/Skills.html)接入，运行时读取当前安装版本随附的 Skill 和工具参数，不在包内复制固定工具清单。
+技术栈：Node.js 24+、TypeScript、ESM、agent-browser、微信开发者工具 `wechatide`；按需引入 Zod（输入与结果校验）和 fflate（读取 XMind ZIP 中的 `content.json`），在对应步骤实现时再加入依赖。草案、批量步骤解释和复杂动作使用调用方 Agent 的 AI 能力；普通元素选择、规则外页面与截图判定接入 TypeSafe jev。`wechatide` 按[微信开发者工具 Skills 官方文档](https://developers.weixin.qq.com/miniprogram/dev/devtools/Skills.html)接入，运行时读取当前安装版本随附的 Skill 和工具参数，不在包内复制固定工具清单。
 
 “调用方 Agent”是启动 `browser-test` 并持续处理其请求的 AI 宿主，例如在 ChatGPT／Codex 中调用 Skill 的当前 Agent；所选模型是该 Agent 的推理能力，不是 CLI 内部创建的客户端。CLI 不读取 ChatGPT 或 OpenAI API Key，也不能自行访问聊天会话，而是通过 `model.ts` 的文件协议把结构化问题交回宿主。宿主使用当前会话已有的模型能力生成回复，因此只有脱离 Agent 宿主直接集成 OpenAI API 时，外部调用方才需要自行实现 `ModelClient` 并管理相应凭据。TypeSafe jev 是独立的可选判定服务，仅由 `typesafe-judge.ts` 使用 `TYPESAFE_API_KEY` 访问，不向调用方 Agent 提供草案或动作能力。
 
@@ -366,7 +366,7 @@ XMind 用例不定义独立的 `caseId`。原文已有编号时，它仍作为�
 
 `And` 使用解析器给出的 `semantic`，不重新猜测所属阶段。Given 可以是检查，When 的“查看”可以只观测；Then 可以有多个检查项。复杂导航允许一个步骤对应多次原子动作，但不能提前执行后续步骤或改写原文要求。解释出的目标与完成条件只细化原文；歧义不能由当前页面的实际内容反向补成预期。
 
-草案、步骤解释与动作决策通过本地请求／响应文件交给调用方 Agent，库调用方也可注入自身已有的 `ModelClient`；规则无法覆盖的页面断言及写操作结果核验使用 TypeSafe SDK，通过 `TYPESAFE_API_KEY` 配置，可选 `TYPESAFE_DEFAULT_MODEL`。缺少 TypeSafe 判定配置或服务调用失败时，通过相同文件通道交回调用方 Agent 兜底；已有有效判定不重判，证据不足、无效回复或调用方 Agent 未在预算内回复时明确 BLOCKED。Skill 负责调用 CLI 并用当前 AI 回复解释／决策请求，CLI 负责门禁、执行与判定。`browser-test` 复用 `browser-core` 的会话、命令、截图和人工接管能力；不直接复用 `browser-opt` 的步骤重试和布尔结果协议，也不扩展旧的 `browser-e2e` 运行器。
+草案、批量步骤解释与复杂动作通过本地请求／响应文件交给调用方 Agent，库调用方也可注入自身已有的 `ModelClient`；规则无法覆盖的页面断言及写操作结果核验使用 TypeSafe SDK，通过 `TYPESAFE_API_KEY` 配置，可选 `TYPESAFE_DEFAULT_MODEL`。缺少 TypeSafe 判定配置或服务调用失败时，通过相同文件通道交回调用方 Agent 兜底；已有有效判定不重判，证据不足、无效回复或调用方 Agent 未在预算内回复时明确 BLOCKED。Skill 负责调用 CLI 并用当前 AI 回复解释／决策请求，CLI 负责门禁、执行与判定。`browser-test` 复用 `browser-core` 的会话、命令、截图和人工接管能力；不直接复用 `browser-opt` 的步骤重试和布尔结果协议，也不扩展旧的 `browser-e2e` 运行器。
 
 #### 5.1.1 调用方 Agent 的协作流程与能力边界
 
@@ -377,8 +377,8 @@ CLI 通过 `createAgentModel()` 把调用方 Agent 适配成统一的 `ModelClie
 调用方 Agent 负责以下 AI 工作：
 
 - 根据导入用例起草结构化 Gherkin 步骤；
-- 把当前步骤解释为 `StepIntent`，拆出原文要求的条件；
-- 根据最新 `Observation` 选择一个 `ActionDecision`，包括取证、页面动作、人工接管或阻塞；
+- 执行前按原文批量解释 `StepIntent`，无效项逐步复核，拆出原文要求的条件；
+- 处理 jev 无法完成的复杂 `ActionDecision`，包括输入、写入依据、人工接管或阻塞；
 - TypeSafe jev 未配置或调用失败时，依据同一份压缩观测完成规则外页面条件的兜底判定。
 
 调用方 Agent 不能绕过 CLI 的目标唯一性、写操作原文依据、动作预算、证据引用和结果格式校验，也不能覆盖确定性规则或 TypeSafe 已返回的有效结论。页面与用例内容均作为不可信数据处理。普通终端中单独启动 CLI 而没有 Agent 消费通知时，请求会等待至超时；CLI 不会因此改为读取 ChatGPT 凭据或另启生成模型服务。直接使用库时，宿主可实现自己的 `ModelClient`，此时不经过文件通知，但职责和返回协议相同。
@@ -389,13 +389,13 @@ CLI 通过 `createAgentModel()` 把调用方 Agent 适配成统一的 `ModelClie
 
 判定遵循以下顺序：
 
-1. `data` 与 `visual` 条件在当前没有直接证据来源，立即返回 BLOCKED；带确定性规则的页面条件由 `verdict.ts` 本地判定。
-2. 仅无规则的页面条件进入 jev。输入包括原始步骤、单个条件、经 `describeObservation()` 压缩的 URL、采集状态、目标、正文、表格行，以及可选证据的编号和来源；截图当前不传给 jev。
-3. jev 通过 `systemOne` 的有限选项分别选择 `PASS | FAIL | BLOCKED` 和一条主要证据，不生成步骤、动作、定位器或任意文本指令。SDK 重试关闭，并使用剩余预算设置超时和取消信号。
+1. `data` 条件缺少直接外部证据时返回 BLOCKED；带确定性规则的页面条件由 `verdict.ts` 本地判定。`visual` 条件需要真实截图及可用的视觉判定服务。
+2. 无规则的页面条件与截图条件进入 jev。输入包括原始步骤、单个条件、观测摘要和已有证据；视觉条件通过 SDK 图片资产上传截图，并启用实验性图片请求头。
+3. jev 通过 `systemOne` 的一个有限选项同时选择结论与证据，避免独立问题之间依赖另一问题的回答。SDK 重试关闭，并使用剩余预算设置超时和取消信号。
 4. 同时存在调用方 Agent 时，单次 jev 调用最多使用 10 秒且不超过当前剩余预算的一半，为兜底回复保留时间。jev 缺失、抛错或超时才进入 Agent 文件通道；jev 返回的有效 PASS、FAIL 或 BLOCKED 都是最终 AI 判定，不因结果不理想而重判。
-5. 两条 AI 路径共用宿主校验：状态必须合法，证据编号必须存在，PASS／FAIL 必须至少引用一条有效证据；否则结果降为 BLOCKED。当前 `CheckResult.by` 只区分 `rule` 与 `ai`，因此 TypeSafe jev 和调用方 Agent 的判定在报告中都记为 `by: ai`，尚不细分具体 AI 来源。
+5. 两条 AI 路径共用宿主校验：状态必须合法，证据编号必须存在，PASS／FAIL 必须至少引用一条有效证据；否则结果降为 BLOCKED。`CheckResult.by` 使用 `rule`、`typesafe` 或 `agent` 明确记录实际判定来源；trace 同时记录 jev 调用开始、成功、失败和 Agent 回退。
 
-TypeSafe jev 的能力只覆盖规则外页面条件和以页面条件表示的写操作结果核验。它可核验“已登录”的页面条件，但不参与 feature 起草、步骤解释、浏览器动作选择、人工接管的等待与恢复、确定性规则判定，也不会直接操作页面。调用方 Agent 的判定兜底与 jev 使用相同的观测摘要和证据约束，不能把模型确信度当作页面证据。
+TypeSafe jev 同时承担普通元素选择、规则外页面判定及截图判定。元素选择使用当前完整观测中的目标编号，输出有限的点击、滚动、等待或检查决定，经执行器门禁后交给 agent-browser；复杂输入、业务写入依据和多义目标交回当前 Agent。它不生成 feature、解释步骤或绕过门禁直接操作浏览器。相同原文的步骤解释在本次运行内复用，页面和判定结论不缓存。同一观测不重复检查，证据尚未就绪时等待后采集新观测；连续三次非等待动作没有页面内容或滚动位置变化时停止。trace 记录步骤解释、jev 决策及判定耗时和证据编号。
 
 ### 5.2 最小运行时协议与执行循环
 
@@ -450,7 +450,7 @@ type StepResult = { source: StepIntent['source'] } & (
       actions: Array<{ decision: ActionDecision; afterObservationId: string; outcome: string }>;
       checks: Array<{
         conditionId: string; status: 'PASS' | 'FAIL' | 'BLOCKED';
-        by: 'rule' | 'ai'; actual: unknown; evidenceIds: string[];
+        by: 'rule' | 'typesafe' | 'agent'; actual: unknown; evidenceIds: string[];
       }>;
     }
 );
@@ -463,13 +463,13 @@ type StepResult = { source: StepIntent['source'] } & (
 5. **收敛**：动作后重新观测并核验完成条件，未完成则继续循环。默认每步最多 10 次原子动作，CLI 提供 5 分钟预算以容纳当前 Agent 的回复时间，库默认 60 秒；预算包含 Agent、观测和命令等待；单次命令超时不得超过剩余预算。人工接管期间暂停自动执行计时，取消接管或无头模式需要接管时 BLOCKED；非交互可见浏览器通过独立信号文件等待明确完成或取消通知，恢复后重新观测。
 6. **记录**：每个动作和检查关联原文行号、观测编号与证据引用。超过预算、观测失效且无法恢复、目标不唯一或证据不足均 BLOCKED，不将模型“认为完成”作为 PASS。
 
-**首版实现与上述设计的差异**：`press` 与 `scroll` 作用于当前页面，不带 `targetId`，按键限 Enter、Escape、Tab、ArrowDown、ArrowUp；`open` 只允许回到场景已确认的入口地址；`wait` 单次不超过 5 秒；疑似写入按控件角色和名称补充识别，要求决定携带当前 When 步骤的原文依据；其他写入由模型声明，详细边界见 5.3；模型连续 3 次给出未通过门禁的决定即 BLOCKED，每步另有 20 轮决策上限；`check` 始终对步骤的全部条件判定；`Then` 的 FAIL 在等待页面稳定后复核一次才成立；`fill` 的值在 `result.json` 与 `trace.log` 中记为 `<redacted>`。规则判定支持 `text-present`、`text-absent`、`url-contains`、`target-present`、`target-absent`、`rows-all-contain`，其余页面条件由 AI 兜底并标记 `by: ai`；`data`（数据来源）与 `visual`（视觉）条件目前没有证据来源，不论是否附带规则一律 BLOCKED。`Enter` 仅允许紧跟在搜索框／输入框填写之后，写操作需改用明确目标的点击或填写。带 URL 的 Given 由宿主先打开并核验 origin，原步骤中的其余前提（登录、数据）仍交给模型解释，登录跳转到其他域时走 HANDOFF；同一场景出现不同 origin 的入口整体 BLOCKED。入口步骤同样受动作与时间预算约束，超预算不会以 PASS 收尾。观测记录采集失败与截断状态：正文、目标或表格行不完整时，“不存在／全部包含”类结论 BLOCKED。动作记录保留所引用目标的名称与 ref，并保留动作后观测的 URL 证据。
+**首版实现与上述设计的差异**：`press` 与 `scroll` 作用于当前页面，不带 `targetId`，按键限 Enter、Escape、Tab、ArrowDown、ArrowUp；`open` 只允许回到场景已确认的入口地址；`wait` 单次不超过 5 秒；疑似写入按控件角色和名称补充识别，要求决定携带当前 When 步骤的原文依据；其他写入由模型声明，详细边界见 5.3；模型连续 3 次给出未通过门禁的决定即 BLOCKED，每步另有 20 轮决策上限；`check` 始终对步骤的全部条件判定；`Then` 的 FAIL 在等待页面稳定后复核一次才成立；`fill` 的值在 `result.json` 与 `trace.log` 中记为 `<redacted>`。规则判定支持 `text-present`、`text-absent`、`url-contains`、`target-present`、`target-absent`、`tab-selected`、`rows-exist`、`rows-all-contain`；明确的“切换到某页签”步骤优先确定性点击同名页签并按 `aria-selected` 核验，其余页面条件由 TypeSafe 或当前 Agent 兜底；`data` 缺少直接外部证据时 BLOCKED；`visual` 使用实际截图，经内存缩放和补白适配每边 280～1568 像素后发送 jev。`Enter` 仅允许紧跟在搜索框／输入框填写之后，写操作需改用明确目标的点击或填写。带 URL 的 Given 由宿主先打开并核验 origin，原步骤中的其余前提（登录、数据）仍交给模型解释，登录跳转到其他域时走 HANDOFF；同一场景出现不同 origin 的入口整体 BLOCKED。入口步骤同样受动作与时间预算约束，超预算不会以 PASS 收尾。观测记录采集失败与截断状态：正文、目标或表格行不完整时，“不存在／全部包含”类结论 BLOCKED。动作记录保留所引用目标的名称与 ref，并保留动作后观测的 URL 证据。
 
 #### 5.2.1 完成条件与断言
 
 - 点击页签成功之后，必须观测选中状态和列表就绪；单纯命令退出码为 0 不代表步骤完成。
 - 文本、数量、URL、可见性、结构化状态优先采用规则判定。一个 Then 拆出的所有检查都满足才 PASS；有明确不符则 FAIL，只有证据不足则 BLOCKED。
-- Then 可滚动取证，不得点击改变业务状态的控件以“制造”预期。视觉上的并存、不遮挡需要布局或截图证据；首版尚未向判定提供这类证据，此类条件明确 BLOCKED，待采集布局或把截图交给多模态模型后再启用 `by: ai` 判定。确定性 FAIL 不能被 AI 覆盖。
+- Then 可滚动取证，不得点击改变业务状态的控件以“制造”预期。视觉上的并存、不遮挡使用实际截图，上传前在内存中等比缩放并补白，保留原始证据；视觉服务不可用时 BLOCKED，且不关闭普通页面判定。确定性 FAIL 不能被 AI 覆盖。
 - Given 不满足或无法核验均 BLOCKED；When 无法可靠完成为 BLOCKED；Then 在前提已满足、范围和加载状态已明确时发现缺陷才 FAIL。空列表违反“存在商品”的前提时 BLOCKED，不能以“所有行均符合”空集通过。
 - 数据前提只能用直接支持它的来源核验。必要的只读导航作为该 Given 的取证动作记录，不能借此跳过前提、执行依赖它的后续步骤。内部状态可辅助排查，不能替代界面断言证据。
 
@@ -623,14 +623,14 @@ browser-test feature gen --review cases.agent --yes
 
 本地开发从第 2 步开始同时提供 Skill 调用入口。安装或链接仓库内 Skill 后，可在支持 Skills 的 Agent 中使用 `/browser-test` 加自然语言请求；Skill 将请求转换为同一套 `browser-test` CLI 命令。CLI 是唯一功能实现入口，Skill 联调不维护另一套业务逻辑。
 
-调用目录的 `.browser-test/` 下，`features/` 存放可供人审阅的 Gherkin（包括确认中的预览草案），`runs/` 存放执行产物；所需目录不存在时自动创建。结构化输入由标准输出或系统临时文件传递，草案机器状态由 CLI 放在按工作目录隔离的系统临时目录：
+调用目录的 `.browser-test/` 下，`features/` 存放可供人审阅的 Gherkin（包括确认中的预览草案），`artifacts/` 存放执行产物；所需目录不存在时自动创建。结构化输入由标准输出或系统临时文件传递，草案机器状态由 CLI 放在按工作目录隔离的系统临时目录：
 
 ```text
 .browser-test/
 ├── features/
 │   ├── cases.agent.preview.feature   # 确认中的草案预览；最终写入成功后自动删除
 │   └── <模块路径>.feature            # 用户审阅确认后的最终用例；按模块拆分
-└── runs/
+└── artifacts/
     └── <运行标识>/
         ├── result.json
         ├── report.md
@@ -644,7 +644,7 @@ browser-test feature gen --review cases.agent --yes
 - `feature gen --draft` 在系统临时目录排他创建机器状态，并在 `.browser-test/features/` 创建同名 `.preview.feature`，不会创建最终 feature。`feature addresses` 与 `feature resolve` 更新状态后会同步覆盖这份可读预览。
 - `feature gen --review` 只在终端展示完整差异，不保存 diff 文件；追加 `--yes` 后才在 `.browser-test/features/` 按模块创建最终 `.feature`，成功后自动删除草案预览和临时状态。已有最终文件默认不覆盖，调用方可在审阅后显式选择合并或覆盖。
 - `feature gen --direct` 不创建草案，直接在 `.browser-test/features/` 创建最终 `.feature`；不确定内容保留为 `# TODO(确认)`，清除前不能执行。
-- `.browser-test/` 中历史遗留的 `project.json`、`cases/`、`diagnostics/` 不是当前流程的输入；`runs/` 是 `run` 的输出，不参与生成。
+- `.browser-test/` 中历史遗留的 `project.json`、`cases/`、`diagnostics/` 不是当前流程的输入；`artifacts/` 是 `run` 的输出，不参与生成。
 
 `run` 的退出码为 `0 = PASS`、`1 = FAIL`、`2 = BLOCKED 或参数、解析、待确认项等工具错误`。生成相关命令成功返回 `0`，参数、输入、模型输出、确认取消、文件冲突返回 `2`。
 
@@ -663,13 +663,13 @@ browser-test run .browser-test/features/service-type-list.feature [--headless]
       And   【新增】按钮         PASS  button "新增" (e12)
       And   每条记录【编辑】【删除】  FAIL  第 3 行缺少“删除”   shots/03.png
 
-Result: FAIL (2 passed, 1 failed)   report: .browser-test/runs/20261013-1612/report.md
+Result: FAIL (2 passed, 1 failed)   report: .browser-test/artifacts/20261013-1612/report.md
 ```
 
 目标运行目录仍只保留四类产物，避免为执行计划等内部状态预生成额外文件：
 
 ```text
-.browser-test/runs/20261013-1612/
+.browser-test/artifacts/20261013-1612/
 ├── result.json   # 来源、场景、动作链、逐项检查、证据、数据模式与耗时
 ├── report.md     # 人读：失败步骤置顶，附截图、实际文本、复现命令
 ├── shots/        # 01.png 02.png …（失败步骤必有）
@@ -741,7 +741,7 @@ Result: FAIL (2 passed, 1 failed)   report: .browser-test/runs/20261013-1612/rep
 | `executor.ts` | 解释步骤意图，校验原子动作与完成条件，维护动作预算及观测、证据协议；细分见 5.2.2 |
 | `browser.ts` | 通过 browser-core 执行原子动作，采集快照、正文、表格行与截图，并提供 `BrowserPort` 接口供替换 |
 | `model.ts` | 调用方 AI 接口与本地文件通道，供草案、步骤解释、动作决策与 jev 不可用时的判定兜底共用；CLI 不读取调用方模型凭据 |
-| `typesafe-judge.ts` | 使用 TypeSafe SDK 调用 jev，仅判定规则外页面条件及写操作结果；限制为状态和已有证据选择，并服从剩余时间预算 |
+| `typesafe-judge.ts` | 使用 TypeSafe SDK 调用 jev，选择普通页面元素并判定页面或截图条件；结论与已有证据绑定，服从剩余时间预算 |
 | `wechatide.ts` | 调用微信开发者工具官方 Skills，完成环境门禁、小程序操作、观测与调试取证 |
 | `browser.ts` / `browser-core/auth-state.ts`（已实现） | 按入口 origin 与 profile 选择登录态，支持配置回退、复核及保存；与 `browser-opt` 共用底层规则与文件格式，默认目录独立 |
 | `verdict.ts` | 确定性规则优先，AI 判断兜底，统一输出 PASS／FAIL／BLOCKED；采集不完整时不下“不存在”类结论 |
@@ -761,7 +761,7 @@ Result: FAIL (2 passed, 1 failed)   report: .browser-test/runs/20261013-1612/rep
 | 3（已实现） | `feature-gen.ts`：引导生成 | 使用 XMind 生成草案，生成阶段优先复用同批及指定输出目录的已确认地址，缺失或冲突时按页面集中确认；同页多个用例只询问一次，环境不同不混用，复用来源可追溯；页面名称保留为自然语言；不要求路由、应用注册或 mock 清单；Skill 可调用该能力 |
 | 4（已实现） | `feature.ts`：Gherkin 解析与 TODO 拒绝 | 步骤带行号，含语义或地址 TODO 被拒绝；无 URL 的合法用例可解析；Skill 可验证拒绝提示与定位信息 |
 | 5（已实现） | 步骤协议、`executor.ts`、`browser.ts` 与最小报告 | 原步骤关联意图、动作与完成条件；支持一步多动作；拒绝未观测目标、陈旧引用及预算超限；截图与原文行号可追溯 |
-| 6（已实现） | `verdict.ts`、`run.ts`：Web 用例闭环与 HANDOFF | 页面动作、规则断言、登录复核、场景隔离和报告打通（视觉断言暂以 BLOCKED 处理，尚无视觉证据）；覆盖 PASS/FAIL/BLOCKED、未执行步骤及退出码；登录态复用与 profile 回退见 4.3.2，仍需人工登录时走接管 |
+| 6（已实现） | `verdict.ts`、`run.ts`：Web 用例闭环与 HANDOFF | 页面动作、规则断言、登录复核、场景隔离和报告打通（视觉断言使用实际截图，服务不可用时 BLOCKED）；覆盖 PASS/FAIL/BLOCKED、未执行步骤及退出码；登录态复用与 profile 回退见 4.3.2，仍需人工登录时走接管 |
 | 6.1 | 当前商品场景与写操作的业务验收 | 补齐可核验的数据来源及既有操作项范围后运行；两种商品条件分别关联到正确行；另验证创建、编辑、删除及确认弹窗，写入结果核验、重复提交阻止和结果不明时停止；缺少证据时正确阻塞，不以模拟结果冒充真实通过 |
 | 登录增强（已实现） | `browser.ts` / `browser-core/auth-state.ts`：登录态复用（4.3.2） | 无文件导入 profile、自动 state 失效后单次回退、仍需登录时 HANDOFF、`--state` 文件互通与 `--no-state` 禁用；报告与日志不含凭证，真实业务验收仍按 6.1 进行 |
 | 可选扩展（步骤 6 后） | MSW 数据适配器与应用桥接 | 独立模拟入口、精确绑定、就绪门禁、请求命中、场景重置及清理可验证；结果明确为模拟数据下的前端验证 |
