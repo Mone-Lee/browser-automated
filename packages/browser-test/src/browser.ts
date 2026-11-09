@@ -51,7 +51,6 @@ interface ProbeResult {
 }
 
 const TEXT_LIMIT = 20_000;
-const TARGET_LIMIT = 200;
 const ROW_LIMIT = 200;
 
 // 固定的只读采集脚本：页面文本与表格行，快照不保证覆盖静态文本和布局；不接受模型传入的脚本。
@@ -78,14 +77,14 @@ function parseProbeOutput(output: string): ProbeResult {
   return { text: probe.text ?? '', rows: probe.rows ?? [], textTruncated: probe.textTruncated === true, rowsTruncated: probe.rowsTruncated === true };
 }
 
-/** 从快照结果的 refs 提取目标；agent-browser 仅列出当前可达节点，因此一律视为可见。 */
+/** 完整保留快照引用，避免单元格较多时裁掉页签；可达不等于处于视口内，点击时仍由浏览器核验。 */
 function parseTargets(snapshot: { data: unknown }): { targets: ObservationTarget[]; truncated: boolean } {
   const refs = (snapshot.data as { data?: { refs?: Record<string, { name?: string; role?: string }> } } | null)?.data?.refs ?? {};
   const entries = Object.entries(refs);
-  const targets = entries.slice(0, TARGET_LIMIT).map(([ref, info], index) => ({
+  const targets = entries.map(([ref, info], index) => ({
     id: `t${index + 1}`, ref, role: info.role, name: info.name ?? '', visible: true,
   }));
-  return { targets, truncated: entries.length > TARGET_LIMIT };
+  return { targets, truncated: false };
 }
 
 /** 用同一套登录页识别规则核验入口、回退与接管后的观测，避免各处判定不一致。 */
