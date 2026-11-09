@@ -89,7 +89,11 @@ function parseTargets(snapshot: { data: unknown }): { targets: ObservationTarget
 
 /** 用同一套登录页识别规则核验入口、回退与接管后的观测，避免各处判定不一致。 */
 export function isLoginObservation(observation: Observation): boolean {
-  return isLoginLikeSnapshot({ url: observation.url, text: observation.targets.map(target => target.name).join('\n') });
+  const bodyText = observation.evidence.find(item => item.source === 'body-text')?.actual;
+  const text = typeof bodyText === 'string'
+    ? bodyText
+    : observation.targets.map(target => target.name).join('\n');
+  return isLoginLikeSnapshot({ url: observation.url, text });
 }
 
 /** 创建浏览器端口；清理上一轮托管会话，并记录站点切换及配置回退会话，注入实例不参与跨运行清理。 */
