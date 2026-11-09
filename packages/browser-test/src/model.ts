@@ -1,6 +1,6 @@
 /**
- * 调用方 AI 的本地协作入口：草案、步骤解释、动作决策与服务不可用时的断言判定通过请求文件交给当前 Agent。
- * 不在 CLI 内连接生成模型服务；断言优先使用独立的 TypeSafe 客户端，服务不可用时仍使用此通道。
+ * 调用方 AI 的本地协作入口：草案、步骤解释、复杂动作与服务不可用时的页面判定通过请求文件交给当前 Agent。
+ * 不在 CLI 内连接生成模型服务；普通元素选择与断言优先使用独立的 TypeSafe 客户端。
  */
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -83,13 +83,17 @@ export function describeObservation(observation: Observation): unknown {
   const evidence = (source: string) => observation.evidence.find(item => item.source === source)?.actual;
   const text = String(evidence('body-text') ?? '');
   const rows = (evidence('table-rows') as unknown[] | undefined) ?? [];
+  const tabs = (evidence('tab-states') as unknown[] | undefined) ?? [];
   return {
     observationId: observation.id,
     url: observation.url,
     capture: { ...observation.capture, textTruncated: observation.capture.textTruncated || text.length > 6000, rowsTruncated: observation.capture.rowsTruncated || rows.length > 40 },
-    targets: observation.targets.map(({ id, role, name }) => ({ id, role, name })),
+    // 静态单元格和空节点已由正文、表格提供，不重复灌入模型；宿主仍保留全部目标用于门禁。
+    targets: observation.targets.filter(item => item.name.trim() && !['generic', 'row', 'cell', 'columnheader', 'LabelText', 'Iframe', 'image'].includes(item.role ?? '')).map(({ id, role, name }) => ({ id, role, name })),
     pageText: text.length > 6000 ? `${text.slice(0, 6000)}…（已截断）` : text,
     tableRows: rows.slice(0, 40),
+    tableStructure: evidence('table-structure'),
+    tabStates: tabs,
     evidenceIds: observation.evidence.map(item => item.id),
   };
 }
