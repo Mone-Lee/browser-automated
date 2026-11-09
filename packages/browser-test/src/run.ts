@@ -5,12 +5,12 @@
 import { appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserPort } from './browser.js';
-import { entryUrlOf, executeStep, originOf, type ExecutionContext, type SemanticStep } from './executor.js';
+import { entryUrlOf, executeStep, originOf, prepareStepIntents, type ExecutionContext, type SemanticStep } from './executor.js';
 import type { ParsedFeature } from './feature.js';
 import type { ModelClient } from './model.js';
 import type { JudgeClient } from './typesafe-judge.js';
 import { createRunDirectory, writeReport } from './report.js';
-import type { EvidenceRecord, FeatureResult, Observation, ScenarioResult, StepResult, Verdict } from './types.js';
+import type { EvidenceRecord, FeatureResult, Observation, ScenarioResult, StepIntent, StepResult, Verdict } from './types.js';
 
 export interface RunOptions {
   port: BrowserPort;
@@ -20,7 +20,7 @@ export interface RunOptions {
   judge?: JudgeClient;
   /** feature 文件内容摘要，写入结果便于核对运行的是哪一版。 */
   digest: string;
-  /** 运行目录的父目录，默认调用目录下的 .browser-test/runs。 */
+  /** 运行目录的父目录，CLI 默认使用调用目录下的 .browser-test/artifacts。 */
   runsDirectory: string;
   /** 复现命令中展示的 feature 路径。 */
   featureArgument: string;
@@ -71,9 +71,11 @@ export async function runFeature(feature: ParsedFeature, options: RunOptions): P
   const log = options.log ?? (() => undefined);
   const observations = new Map<string, Observation>();
   const counters = { observation: 0 };
+  const intentCache = new Map<string, Pick<StepIntent, 'kind' | 'scope' | 'conditions'>>();
   const limits = { maxActions: options.limits?.maxActions ?? 10, stepMs: options.limits?.stepMs ?? 60_000, maxRounds: options.limits?.maxRounds ?? 20 };
   const scenarios: ScenarioResult[] = [];
   let declaredUrl: string | undefined;
+  let intentsPrepared = false;
 
   for (const scenario of feature.scenarios) {
     log(`Scenario: ${scenario.title}`);
@@ -96,9 +98,20 @@ export async function runFeature(feature: ParsedFeature, options: RunOptions): P
       continue;
     }
 
+    // 同一 feature 的步骤意图只在首个可执行场景前批量预热一次，避免各场景重复请求模型。
+    // 仅预热语义完整且入口同源的场景；多入口或缺入口的用例会在各自执行时按既有门禁返回 BLOCKED，不能混入同一批上下文。
+    if (!intentsPrepared && options.model) {
+      intentsPrepared = true;
+      const items = feature.scenarios.flatMap(item => {
+        const semanticSteps = withSemantics(item.steps);
+        const origins = new Set(semanticSteps?.flatMap(semanticStep => entryUrlOf(semanticStep) ?? []).map(url => originOf(url) ?? url));
+        return semanticSteps && origins.size === 1 ? semanticSteps.map(semanticStep => ({ step: semanticStep, scenario: item.title })) : [];
+      });
+      await prepareStepIntents(items, options.model, intentCache, limits.stepMs, trace);
+    }
     const context: ExecutionContext = {
       port: options.port, model: options.model, judge: options.judge, file: feature.file, scenario: scenario.title,
-      shotsDir: join(directory, 'shots'), trace, observations, counters, limits,
+      shotsDir: join(directory, 'shots'), trace, observations, counters, limits, intentCache,
     };
     const results: StepResult[] = [];
     let stopped: string | undefined;
