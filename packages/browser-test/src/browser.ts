@@ -12,11 +12,13 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createInterface } from 'node:readline/promises';
 import { createBrowserAgent, type BrowserAgent, type BrowserAgentFactory } from '#browser-core/agent';
 import { createManagedBrowserSessions } from '#browser-core/managed-session';
-import type { AtomicAction, Observation, ObservationTarget } from './types.js';
+import type { AtomicAction, Observation, ObservationTarget, TableView } from './types.js';
 
 export interface BrowserPort {
   /** 采集一次观测；shotPath 给出时同时截图。 */
-  observe(id: string, shotPath?: string): Observation;
+  observe(id: string, shotPath?: string, visual?: boolean): Observation;
+  /** 只读检查页面加载标识，不采集快照或截图；未识别到标识不代表业务条件成立。 */
+  isLoading?(): boolean;
   /** 执行一个已通过门禁的动作，返回命令输出摘要。 */
   act(action: AtomicAction, observation: Observation): string;
   /** 暂停自动执行等待人工操作；返回 false 表示无法接管（无头模式或已取消）。 */
@@ -25,6 +27,8 @@ export interface BrowserPort {
   prepareEntry?(url: string, trace: (line: string) => void): void;
   /** 自动登录态失效时最多切换一次浏览器配置并重开入口；切换后必须重新观测。 */
   retryAuthStateFallback?(url: string): boolean;
+  /** 根据本轮是否发现已有登录态，区分首次登录与登录态失效提示。 */
+  loginHandoffReason?(): '需要登录' | '检测到登录态失效';
   close(): void;
 }
 
@@ -46,25 +50,120 @@ export interface BrowserPortOptions {
 interface ProbeResult {
   text: string;
   rows: Array<{ header: boolean; cells: string[] }>;
+  tabs: Array<{ name: string; selected: boolean }>;
   textTruncated: boolean;
   rowsTruncated: boolean;
+  tables?: TableView[];
+  /** 记录滚动容器的位置，区分正常滚动和对静止页面的重复动作。 */
+  scrolls?: Array<{ index: number; top: number; left: number }>;
+  /** 文本节点是否完整落在视口及所有裁剪容器内，仅用于排除截图未覆盖目标的情况。 */
+  visualText?: Array<{ text: string; visible: boolean }>;
 }
 
 const TEXT_LIMIT = 20_000;
 const ROW_LIMIT = 200;
 
-// 固定的只读采集脚本：页面文本与表格行，快照不保证覆盖静态文本和布局；不接受模型传入的脚本。
+/**
+ * 固定的只读页面探针，供 observe 在浏览器上下文中执行。
+ *
+ * 脚本不接收模型提供的代码，也不触发点击、输入、滚动等副作用；仅将页面当前状态规整为可序列化快照。
+ * 快照包含以下互补信息：全文及通用行用于理解页面语义；结构化表格保留列、单元格、可见性和操作控件；
+ * 标签页与滚动位置用于判断当前视图状态；开启 visual 时额外标记文本是否实际位于视口内。
+ *
+ * 采集存在明确边界：全文和通用行分别受 TEXT_LIMIT、ROW_LIMIT 限制；结构化表格仅接受一个无合并单元格的表头，
+ * 每张表最多保留 20 行数据。静态文本、复杂布局和超出视口或裁剪容器的内容不能仅凭快照完整还原，需结合截图判断。
+ */
 const PROBE_SCRIPT = `(() => {
+  // 统一文本中的空白，避免 DOM 排版差异影响快照比较和动作定位。
   const clean = (value) => (value || '').trim().replace(/\\s+/g, ' ');
   const fullText = document.body ? document.body.innerText : '';
   const text = fullText.slice(0, ${TEXT_LIMIT});
+
+  // 通用行采集不假设其属于表格，用于保留 role=row 等非标准表格中的基础文本。
   const allRows = Array.from(document.querySelectorAll('tr, [role="row"]'));
   const rows = allRows.slice(0, ${ROW_LIMIT}).map((row) => {
     const cells = Array.from(row.querySelectorAll('th, td, [role="cell"], [role="gridcell"], [role="columnheader"]'));
     const header = cells.length > 0 && cells.every((cell) => cell.tagName === 'TH' || cell.getAttribute('role') === 'columnheader');
     return { header, cells: cells.map((cell) => clean(cell.innerText)) };
   });
-  return JSON.stringify({ text, rows, textTruncated: fullText.length > text.length, rowsTruncated: allRows.length > rows.length });
+
+  // 结构化表格只保留可见、列数稳定且恰有一行表头的简单表格，避免合并单元格导致列语义错位。
+  const tableElements = Array.from(document.querySelectorAll('table, [role="table"], [role="grid"]'));
+  const tables = tableElements.flatMap((table, index) => {
+    if (!table.getClientRects().length) return [];
+    const rows = Array.from(table.querySelectorAll('tr, [role="row"]')).filter(row => row.closest('table, [role="table"], [role="grid"]') === table);
+    const cellsOf = row => Array.from(row.children).filter(cell => cell.matches('th, td, [role="cell"], [role="gridcell"], [role="columnheader"]'));
+    const headerRows = rows.filter(row => { const cells = cellsOf(row); return cells.length && cells.every(cell => cell.matches('th, [role="columnheader"]')); });
+    if (headerRows.length !== 1) return [];
+    const headers = cellsOf(headerRows[0]);
+    if (headers.some(cell => Number(cell.getAttribute('colspan') || 1) !== 1 || Number(cell.getAttribute('rowspan') || 1) !== 1)) return [];
+    // 同时检查元素自身、视口和各级裁剪容器，防止将滚出容器或被隐藏的目标误标为可操作。
+    const visible = element => {
+      const rect = element.getBoundingClientRect();
+      if (!rect.width || !rect.height || rect.left < 0 || rect.top < 0 || rect.right > innerWidth || rect.bottom > innerHeight) return false;
+      for (let parent = element; parent; parent = parent.parentElement) {
+        const style = getComputedStyle(parent), bounds = parent.getBoundingClientRect();
+        if (style.display === 'none' || style.visibility !== 'visible' || Number(style.opacity) === 0) return false;
+        if (/(hidden|clip|scroll|auto)/.test(style.overflowX) && (rect.left < bounds.left || rect.right > bounds.right)) return false;
+        if (/(hidden|clip|scroll|auto)/.test(style.overflowY) && (rect.top < bounds.top || rect.bottom > bounds.bottom)) return false;
+      }
+      return true;
+    };
+    // 表头以外只收集列数一致且含有文本的行，并附带单元格内按钮、链接的语义与可见性。
+    const data = rows.flatMap((row, rowIndex) => {
+      const cells = cellsOf(row);
+      if (row === headerRows[0] || cells.length !== headers.length || cells.some(cell => Number(cell.getAttribute('colspan') || 1) !== 1 || Number(cell.getAttribute('rowspan') || 1) !== 1)) return [];
+      if (!cells.some(cell => clean(cell.innerText))) return [];
+      return [{ index: rowIndex, cells: cells.map(cell => ({ text: clean(cell.innerText), visible: visible(cell), controls: Array.from(cell.querySelectorAll('button, a, [role="button"], [role="link"]')).map(control => ({ role: control.getAttribute('role') || (control.tagName === 'A' ? 'link' : 'button'), name: clean(control.getAttribute('aria-label') || control.innerText), visible: visible(control) })) })) }];
+    });
+    return data.length ? [{ index, headers: headers.map(cell => clean(cell.innerText)), rows: data.slice(0, 20) }] : [];
+  });
+
+  // 标签页选择状态与非零滚动位置用于辨识切换后的当前视图；零位置无需重复记录。
+  const tabs = Array.from(document.querySelectorAll('[role="tab"]')).map((tab) => ({
+    name: clean(tab.innerText || tab.getAttribute('aria-label')),
+    selected: tab.getAttribute('aria-selected') === 'true',
+  }));
+  const scrolls = Array.from(document.querySelectorAll('*')).flatMap((element, index) =>
+    element.scrollTop || element.scrollLeft ? [{ index, top: element.scrollTop, left: element.scrollLeft }] : []);
+
+  // visual 模式逐个检查短文本节点是否完整落在视口与祖先裁剪范围内，专门补足截图覆盖范围的判断。
+  const visualText = [];
+  if (document.body && __VISUAL__) {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const label = clean(node.textContent);
+      if (!label || label.length > 100 || !node.parentElement) continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const rects = Array.from(range.getClientRects());
+      let visible = rects.length > 0 && rects.every(rect => rect.width > 0 && rect.height > 0 && rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight);
+      for (let parent = node.parentElement; visible && parent; parent = parent.parentElement) {
+        const style = getComputedStyle(parent);
+        if (style.visibility !== 'visible' || style.display === 'none' || Number(style.opacity) === 0) { visible = false; break; }
+        const bounds = parent.getBoundingClientRect();
+        if (/(hidden|clip|scroll|auto)/.test(style.overflowX) && rects.some(rect => rect.left < bounds.left || rect.right > bounds.right)) visible = false;
+        if (/(hidden|clip|scroll|auto)/.test(style.overflowY) && rects.some(rect => rect.top < bounds.top || rect.bottom > bounds.bottom)) visible = false;
+      }
+      visualText.push({ text: label, visible });
+    }
+  }
+  // 显式返回截断标记，调用方据此避免把受限采样误认为完整页面内容。
+  return JSON.stringify({ text, rows, tabs, tables, scrolls, visualText, textTruncated: fullText.length > text.length, rowsTruncated: allRows.length > rows.length });
+})()`;
+
+// 仅识别可见的加载指示器；空列表文本本身不能用于判断加载状态。
+const LOADING_SCRIPT = `(() => {
+  if (document.readyState === 'loading') return true;
+  return Array.from(document.querySelectorAll('[aria-busy="true"], [role="progressbar"], .ant-spin-spinning, .el-loading-mask, .el-loading-spinner')).some(element => {
+    if (!element.getClientRects().length) return false;
+    for (let parent = element; parent; parent = parent.parentElement) {
+      const style = getComputedStyle(parent);
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
+    }
+    return true;
+  });
 })()`;
 
 const ALLOWED_KEYS = new Set(['Enter', 'Escape', 'Tab', 'ArrowDown', 'ArrowUp']);
@@ -74,7 +173,7 @@ function parseProbeOutput(output: string): ProbeResult {
   let value: unknown = JSON.parse(output.trim());
   if (typeof value === 'string') value = JSON.parse(value);
   const probe = value as Partial<ProbeResult>;
-  return { text: probe.text ?? '', rows: probe.rows ?? [], textTruncated: probe.textTruncated === true, rowsTruncated: probe.rowsTruncated === true };
+  return { text: probe.text ?? '', rows: probe.rows ?? [], tabs: probe.tabs ?? [], tables: probe.tables ?? [], scrolls: probe.scrolls ?? [], visualText: probe.visualText, textTruncated: probe.textTruncated === true, rowsTruncated: probe.rowsTruncated === true };
 }
 
 /** 完整保留快照引用，避免单元格较多时裁掉页签；可达不等于处于视口内，点击时仍由浏览器核验。 */
@@ -121,6 +220,7 @@ export function createBrowserPort(
   let fallbackProfile: string | undefined;
   let profileOpening = false;
   let pendingProfileSave = false;
+  let hadStoredState = false;
   let trace: (line: string) => void = () => undefined;
 
   // 配置导入只尝试一次；之后的自动化与人工接管固定使用替换后的实例。
@@ -195,6 +295,7 @@ export function createBrowserPort(
       const hash = createHash('sha256').update(identity).digest('hex').slice(0, 16);
       const defaultPath = join(authStateDirectory('browser-test'), `browser-test-${host}-${entry.port || (entry.protocol === 'https:' ? '443' : '80')}-${hash}.json`);
       const state = resolveBrowserAuthState(options.statePath ? resolve(options.statePath) : undefined, defaultPath, profile);
+      hadStoredState = Boolean(state.statePath);
       savePath = state.authStateSavePath;
       fallbackProfile = state.fallbackProfile;
       trace(`auth-state-source: ${options.statePath ? 'explicit' : state.statePath ? 'automatic' : 'none'}${state.statePath ? ` ${state.statePath}` : ''}`);
@@ -211,14 +312,20 @@ export function createBrowserPort(
       open(url);
       return true;
     },
-    observe(id, shotPath) {
+    loginHandoffReason() {
+      return hadStoredState ? '检测到登录态失效' : '需要登录';
+    },
+    isLoading() {
+      return JSON.parse(agent.evaluate(LOADING_SCRIPT).trim()) === true;
+    },
+    observe(id, shotPath, visual = false) {
       const snapshot = agent.snapshotJson();
       const url = agent.getUrl();
       if (shotPath) agent.screenshot(shotPath);
       const { targets, truncated: targetsTruncated } = parseTargets(snapshot);
-      let probe: ProbeResult = { text: '', rows: [], textTruncated: false, rowsTruncated: false };
+      let probe: ProbeResult = { text: '', rows: [], tabs: [], textTruncated: false, rowsTruncated: false };
       let probeError: string | undefined;
-      try { probe = parseProbeOutput(agent.evaluate(PROBE_SCRIPT)); } catch (error) {
+      try { probe = parseProbeOutput(agent.evaluate(PROBE_SCRIPT.replace('__VISUAL__', String(visual)))); } catch (error) {
         probeError = error instanceof Error ? error.message : String(error);
       }
       const observation: Observation = {
@@ -233,6 +340,11 @@ export function createBrowserPort(
           { id: `${id}-url`, kind: 'page', source: 'url', actual: url },
           { id: `${id}-text`, kind: 'page', source: 'body-text', actual: probe.text },
           { id: `${id}-rows`, kind: 'page', source: 'table-rows', actual: probe.rows },
+          { id: `${id}-tables`, kind: 'page', source: 'table-structure', actual: probe.tables ?? [] },
+          { id: `${id}-tabs`, kind: 'page', source: 'tab-states', actual: probe.tabs },
+          { id: `${id}-scrolls`, kind: 'page', source: 'scroll-positions', actual: probe.scrolls ?? [] },
+          ...(probe.visualText ? [{ id: `${id}-visual-text`, kind: 'page' as const, source: 'visual-text', actual: probe.visualText }] : []),
+          ...(shotPath ? [{ id: `${id}-shot`, kind: 'page' as const, source: 'screenshot', actual: shotPath }] : []),
           ...(probeError ? [{ id: `${id}-probe-error`, kind: 'page' as const, source: 'probe-error', actual: probeError }] : []),
         ],
       };
@@ -259,7 +371,30 @@ export function createBrowserPort(
         case 'press':
           if (!ALLOWED_KEYS.has(action.key)) throw new Error(`不支持的按键：${action.key}`);
           return agent.press(action.key).trim();
-        case 'scroll': return agent.scroll(action.direction).trim();
+        case 'scroll': {
+          if ('targetId' in action) return agent.scrollIntoView(target(action.targetId).ref).trim();
+          if ('direction' in action) return agent.scroll(action.direction).trim();
+          const tables = observation.evidence.find(item => item.source === 'table-structure')?.actual as TableView[] | undefined;
+          const table = tables?.find(item => item.index === action.table);
+          const row = table?.rows.find(item => item.index === action.row);
+          if (!table || !row || !row.cells[action.column]) throw new Error('表格目标不在最新观测中');
+          // 固定脚本重新核对表头和行内容，避免异步刷新后滚动到不同记录。
+          const input = JSON.stringify({ ...action, headers: table.headers, cells: row.cells.map(cell => cell.text) });
+          const script = `(() => {
+            const data = ${input};
+            const clean = value => (value || '').trim().replace(/\\s+/g, ' ');
+            const table = document.querySelectorAll('table, [role="table"], [role="grid"]')[data.table];
+            if (!table) throw new Error('表格已变化');
+            const rows = Array.from(table.querySelectorAll('tr, [role="row"]')).filter(row => row.closest('table, [role="table"], [role="grid"]') === table);
+            const cellsOf = row => Array.from(row.children).filter(cell => cell.matches('th, td, [role="cell"], [role="gridcell"], [role="columnheader"]'));
+            const headers = rows.filter(row => { const cells = cellsOf(row); return cells.length && cells.every(cell => cell.matches('th, [role="columnheader"]')); });
+            const row = rows[data.row];
+            if (headers.length !== 1 || !row || JSON.stringify(cellsOf(headers[0]).map(cell => clean(cell.innerText))) !== JSON.stringify(data.headers) || JSON.stringify(cellsOf(row).map(cell => clean(cell.innerText))) !== JSON.stringify(data.cells)) throw new Error('表格内容已变化，需重新定位');
+            cellsOf(row)[data.column].scrollIntoView({block:'nearest', inline:'nearest'});
+            return '已滚动表格单元格';
+          })()`;
+          return agent.evaluate(script).trim();
+        }
         case 'wait': return agent.waitMs(action.milliseconds).trim();
       }
     },

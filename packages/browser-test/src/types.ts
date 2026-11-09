@@ -45,13 +45,15 @@ export interface XMindImport {
 /** 三种测试结论；未执行步骤用 StepResult 的 execution 区分，不是第四种结论。 */
 export type Verdict = 'PASS' | 'FAIL' | 'BLOCKED';
 
-/** 规则判定：只允许这些确定性检查，其余条件交给 AI 并标记 by: ai。 */
+/** 规则判定：只允许这些确定性检查，其余条件交给 TypeSafe 或当前 Agent。 */
 export type ConditionRule =
   | { type: 'text-present'; text: string }
   | { type: 'text-absent'; text: string }
   | { type: 'url-contains'; value: string }
   | { type: 'target-present'; role?: string; name: string }
   | { type: 'target-absent'; role?: string; name: string }
+  /** 指定页签已处于选中状态；名称允许带动态数量后缀。 */
+  | { type: 'tab-selected'; name: string }
   /** 至少有一条非空数据行；指定列名时，只匹配该列中的文本。 */
   | { type: 'rows-exist'; column?: string; text?: string }
   | { type: 'rows-all-contain'; text: string; column?: string };
@@ -60,7 +62,7 @@ export type ConditionRule =
 export interface StepCondition {
   id: string;
   expected: string;
-  /** 页面可见的业务数据归 page；明确要求接口、数据库等直接证据才归 data。data 与 visual 暂无可用证据来源，不能附带 rule。 */
+  /** 页面数据归 page；布局归 visual，使用截图；接口或数据库直接证据归 data。后两者不能附带 rule。 */
   evidenceKind: 'page' | 'data' | 'visual';
   rule?: ConditionRule;
 }
@@ -91,6 +93,13 @@ export interface ObservationCapture {
   rowsTruncated: boolean;
 }
 
+/** 表头与数据行按同一表格及列位置采集；只包含可确认列对应关系的表格。 */
+export interface TableView {
+  index: number;
+  headers: string[];
+  rows: Array<{ index: number; cells: Array<{ text: string; visible: boolean; controls: Array<{ role: string; name: string; visible: boolean }> }> }>;
+}
+
 /** 一次实际观测；证据编号形如 o3-text，可在 result.json 中回查。 */
 export interface Observation {
   id: string;
@@ -108,7 +117,11 @@ export type AtomicAction =
   | { type: 'click'; targetId: string }
   | { type: 'fill'; targetId: string; value: string }
   | { type: 'press'; key: string }
-  | { type: 'scroll'; direction: 'up' | 'down' }
+  | { type: 'scroll'; direction: 'up' | 'down' | 'left' | 'right' }
+  /** 仅滚动最新观测中的元素进入视野，不点击或改变业务数据。 */
+  | { type: 'scroll'; targetId: string }
+  /** 仅滚动最新观测中经校验的表格单元格，不接受模型提供的选择器。 */
+  | { type: 'scroll'; table: number; row: number; column: number }
   | { type: 'wait'; milliseconds: number };
 
 /** 模型只能选择受支持的决定；动作还必须经过宿主门禁。 */
@@ -126,7 +139,8 @@ export type ActionDecision = { observationId: string; reason: string } & (
 export interface CheckResult {
   conditionId: string;
   status: Verdict;
-  by: 'rule' | 'ai';
+  /** 区分确定性规则、TypeSafe jev 与当前 Agent，便于确认实际判定来源。 */
+  by: 'rule' | 'typesafe' | 'agent';
   actual: unknown;
   evidenceIds: string[];
 }
