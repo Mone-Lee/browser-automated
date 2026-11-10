@@ -55,7 +55,7 @@ browser-opt "测试 https://example.com。验证页面包含 Example Domain。"
 
 下面展示了在 IDE 中通过 `browser-opt` 一键发起浏览器操作的完整过程：
 
-![browser-opt 操作展示](../../docs/images/browser-opt-demo.gif)
+![browser-opt 操作展示](https://raw.githubusercontent.com/Mone-Lee/browser-automated/master/docs/images/browser-opt-demo.gif)
 
 ## 安装与环境初始化
 
@@ -256,7 +256,7 @@ browser-opt stop --run-id "<runId>" --json
 
 系统把登录凭证保存为轻量的 State 文件，其中只包含 cookies 和 Web Storage，不包含历史标签页。State 默认保存在项目的 `.browser-opt/states/` 目录中。每次执行先尝试加载 State；State 不存在时从 Chrome Profile 初始化；默认 State 失效时则回退一次 Chrome Profile，必要时再进入人工接管。
 
-![browser-opt State 文件位置](../../docs/images/browser-opt-auth-state.png)
+![browser-opt State 文件位置](https://raw.githubusercontent.com/Mone-Lee/browser-automated/master/docs/images/browser-opt-auth-state.png)
 
 ### 三条复用路径
 
@@ -309,7 +309,7 @@ browser-opt stop --run-id "<runId>" --json
 | 执行报告与截图 | `.browser-opt/artifacts/<本次运行目录>/` | 临时证据 | 用于复盘和排查；报告 Bug 时应发送对应运行目录的完整内容 |
 | 人工接管记录 | `.browser-opt/handoffs/<run-id>/` | 临时状态 | 保存后台任务元数据、输出和恢复信号；任务结束且无需排查时可清理 |
 
-![browser-opt 文件产物目录](../../docs/images/browser-opt-files.png)
+![browser-opt 文件产物目录](https://raw.githubusercontent.com/Mone-Lee/browser-automated/master/docs/images/browser-opt-files.png)
 
 每次运行的证据目录通常包含：
 
@@ -322,11 +322,11 @@ browser-opt stop --run-id "<runId>" --json
 
 普通步骤失败时，工具会在流程结束后汇总失败步骤、错误原因和对应截图；仍可安全执行的低风险步骤可以继续。报告和图片都保存在 `.browser-opt/artifacts/<本次运行目录>/`，便于回看页面状态和定位阻塞点。
 
-![browser-opt 失败报告示例](../../docs/images/browser-opt-failure-report.png)
+![browser-opt 失败报告示例](https://raw.githubusercontent.com/Mone-Lee/browser-automated/master/docs/images/browser-opt-failure-report.png)
 
 对于导出、删除、提交、发布等高影响操作，只要前置步骤出现阻塞性失败，该操作就会被跳过；高影响步骤自身失败时也会立即停止后续操作，防止在页面状态不确定时继续产生副作用。
 
-![browser-opt 高影响操作保护示例](../../docs/images/browser-opt-high-impact-guard.png)
+![browser-opt 高影响操作保护示例](https://raw.githubusercontent.com/Mone-Lee/browser-automated/master/docs/images/browser-opt-high-impact-guard.png)
 
 当运行证据超过 10 份，或 `artifacts` 与已结束的 `handoffs` 合计超过 500 MB 时，CLI 会给出按时间排序的清理建议，但不会自动删除文件。确认运行正常且不再需要排查后，可以手动清理对应的临时目录；不要删除仍需复用的 Workflow 和 State。
 
