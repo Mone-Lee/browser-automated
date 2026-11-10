@@ -330,130 +330,6 @@ browser-opt stop --run-id "<runId>" --json
 
 当运行证据超过 10 份，或 `artifacts` 与已结束的 `handoffs` 合计超过 500 MB 时，CLI 会给出按时间排序的清理建议，但不会自动删除文件。确认运行正常且不再需要排查后，可以手动清理对应的临时目录；不要删除仍需复用的 Workflow 和 State。
 
-## 本地开发调试
-
-在本仓库根目录执行下面的命令，将当前 Node/NVM 环境中的全局 `browser-opt` 切换到本地源码构建：
-
-```bash
-npm run browser-opt:use-local
-npm run browser-opt:status
-```
-
-之后切换到任意其他项目，继续直接调用 `browser-opt` 即可，不需要修改其他项目的依赖：
-
-```bash
-cd /path/to/another-project
-browser-opt --version
-browser-opt check-update --json
-```
-
-本地源码再次修改后，重新执行 `npm run browser-opt:use-local`，它会刷新 `dist` 并保持全局软链。调试完成后恢复 npm 最新版：
-
-```bash
-npm run browser-opt:use-npm
-npm run browser-opt:status
-```
-
-`browser-opt:status` 会同时检查软链目标和执行权限；若显示“不可执行”，重新运行 `npm run browser-opt:use-local` 即可修复本地构建入口权限，不要用 `npx browser-opt@latest install` 覆盖本地调试链接。
-
-本地模式下，`install`、`setup` 和 `update` 会在安装前检查全局包链接及命令来源，检测到本地源码时拒绝覆盖。只有明确退出本地模式时才使用 `browser-opt:use-npm`。版本检查不会授权自动更新；直接调用外部 `npm install -g` 或尚未包含此检查的旧版 `npx` 安装器仍可能覆盖链接，调用方必须遵守相同规则。
-
-需要恢复指定 npm 版本时，可把版本号透传给切换脚本：
-
-```bash
-npm run browser-opt:use-npm -- 1.0.21
-```
-
-只改共享底层代码并需要刷新 `browser-opt` 的本地构建产物时：
-
-```bash
-npm run build -w browser-opt
-```
-
-## Workflow 短指令执行时序
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor U as 用户
-    participant A as AI 助手
-    participant O as browser-opt
-    participant W as 已保存的 Workflow
-    participant G as agent-browser
-    participant B as 浏览器
-
-    U->>A: 输入短指令，例如“执行创建直播流程”
-    A->>O: 请求匹配对应的 Workflow
-    O->>W: 根据短指令匹配
-    W-->>O: 返回匹配结果
-
-    alt 唯一匹配
-        O-->>A: 返回目标 Workflow
-    else 存在多个相似结果
-        O-->>A: 返回候选 Workflow
-        A-->>U: 请用户选择
-        U->>A: 确认要执行的 Workflow
-    else 没有匹配结果
-        O-->>A: 未找到对应 Workflow
-        break 本次不启动浏览器
-            A-->>U: 请补充更明确的名称
-        end
-    end
-
-    A->>O: 执行已确定的 Workflow
-    O->>G: 请求打开 Workflow 的目标页面
-    G->>B: 打开页面
-    B-->>G: 返回当前页面状态
-    G-->>O: 提供可识别的页面结构
-
-    loop 按顺序执行每个步骤
-        O->>O: 识别操作类型、目标和值
-        O->>G: 请求读取当前页面
-        G->>B: 获取页面结构
-        B-->>G: 返回页面元素信息
-        G-->>O: 提供可交互的页面结构
-        O->>O: 根据文案、控件类型和字段上下文定位元素
-
-        alt 从常规页面结构找到元素
-            O->>G: 下发明确的浏览器操作
-            G->>B: 执行点击、输入、选择等操作
-        else 常规页面结构无法识别元素
-            O->>G: 请求按字段上下文进行 DOM 兜底
-            G->>B: 在真实 DOM 中定位可用元素并操作
-        end
-
-        B-->>G: 返回操作后的页面状态
-        G-->>O: 返回执行结果
-
-        alt 操作命令成功
-            O->>O: 继续检查页面结果
-        else 定位失效或出现可重试的执行错误
-            O->>G: 重新读取最新页面
-            G-->>O: 返回更新后的页面结构
-            O->>O: 重新定位目标元素
-            O->>G: 重试本步骤一次
-            G->>B: 执行重试操作
-            B-->>G: 返回重试结果
-            G-->>O: 返回最终页面状态
-        end
-
-        O->>O: 检查本步骤最终是否达到预期
-    end
-
-    O-->>A: 返回执行成功或失败
-    A-->>U: 告知最终结果
-```
-
-## 统一说明
-
-1. **先匹配，再执行。** 短指令不会被当作新的临时流程，而是用来查找已经保存好的 Workflow。
-
-2. **不确定时由用户决定。** 唯一匹配可以继续执行；存在多个相似结果时先请用户选择；没有匹配结果时不会启动浏览器。
-
-3. **按步骤理解和操作页面。** browser-opt 会依次读取当前页面、理解步骤意图、执行操作，并检查页面是否达到预期。
-
-4. **执行错误后只重试一次。** 某一步因元素定位失效或可恢复的执行错误而失败时，browser-opt 会重新读取页面并再尝试一次；动作已经执行但最终验证未通过时会直接返回失败，避免重复提交业务操作。
-
 ## browser-opt 与 agent-browser 如何协作
 
 browser-opt 负责理解 Workflow 步骤、匹配页面元素并判断结果，agent-browser 负责读取真实页面和执行确定性浏览器操作；常规元素无法识别时，browser-opt 会借助 agent-browser 在字段上下文内查询 DOM 进行兜底。
@@ -467,7 +343,6 @@ browser-opt 负责理解 Workflow 步骤、匹配页面元素并判断结果，a
 5. 如果执行时发现 `@e1` 已失效，browser-opt 会重新读取页面并再次匹配；同一个输入框此时可能获得新的 ref，例如 `@e7`，随后使用新 ref 重试一次。
 6. 输入成功后，browser-opt 再次读取页面，按“直播间名称”重新找到当前输入框并检查其值是否为“周五新品发布”；验证未通过时直接返回失败，避免重复填写。
 7. 如果常规页面结构始终没有暴露该输入框，browser-opt 会让 agent-browser 在真实 DOM 中查找“直播间名称”所在表单区域内的可编辑元素；定位成功后执行输入，无法可靠定位则返回失败。
-
 
 
 ### 1. browser-opt 负责识别和决策
