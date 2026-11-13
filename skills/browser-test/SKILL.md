@@ -59,7 +59,9 @@ node "<Skill目录>/scripts/browser-test.mjs" --help
 
 ## 引导生成
 
-草案统一使用当前 Agent 已有的 AI 能力，不另接生成模型服务。优先先运行 `feature rules`，再逐条读取用例（来自 `xmind list --json` 或 `--cases`）并严格按规则起草步骤，将 JSON `{"cases":[{"modulePath":[...],"title":"...","steps":[{"keyword":"Given|When|Then|And","text":"...","todo":"可选"}]}]}` 写入系统临时目录，用 `--steps` 传入 CLI。`modulePath`、`title` 须与用例完全一致，每条用例恰好一项；草案补全与原文核对不可跳过，不直接手写草案或 feature。步骤临时文件在调用完成后删除。
+草案统一使用当前 Agent 已有的 AI 能力，不另接生成模型服务。使用 `--steps` 起草前先运行 `feature rules`，读取其中的生成规则与最佳实践，再逐条读取用例（来自 `xmind list --json` 或 `--cases`）并严格按规则起草步骤，将 JSON `{"cases":[{"modulePath":[...],"title":"...","steps":[{"keyword":"Given|When|Then|And","text":"...","todo":"可选"}]}]}` 写入系统临时目录，用 `--steps` 传入 CLI。`modulePath`、`title` 须与用例完全一致，每条用例恰好一项；草案补全与原文核对不可跳过，不直接手写草案或 feature。步骤临时文件在调用完成后删除。
+
+起草时按可独立核验的职责拆分步骤：登录状态、所在页面、目标商品与数据状态分别写为 Given/And，避免一个混合前提失败后无法定位原因。每条预期独立表达一个可观察结果；同一对象的限定信息不机械拆散。拆分只调整表达结构，保留原文语义、顺序和业务限定，不新增操作或预期；有歧义仍标 todo。完整规则与示例以 `feature rules` 为准，文件通道请求也会携带同一份规则。
 
 不带 `--steps` 时，CLI 按下文“当前 Agent 文件协作”逐条请求起草结果，同样由当前 Agent 回复。两种方式只改变传入步骤的方式，校验、审阅与落盘规则相同。
 

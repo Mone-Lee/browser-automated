@@ -72,6 +72,7 @@ const MAX_CONSECUTIVE_REJECTIONS = 3;
 const INTERPRET_PROMPT = `你把一条 Gherkin 步骤解释为测试意图，只细化原文，不能引入原文没有的预期，不能用页面实际内容反推预期。
 只输出 JSON：{"kind":"login|precondition|interaction|assertion","scope":{"description":"操作或检查的范围"},"conditions":[{"id":"c1","expected":"原文拆出的一个可检查条件","evidenceKind":"page|data|visual","rule":可选}]}。
 Given 的 kind 为 login 或 precondition；When 为 interaction（登录动作可为 login）；Then 必须为 assertion，且每个检查项单独成条。
+Given 同时包含登录与页面、商品定位等业务前提时，登录状态必须拆为独立条件，不能把业务前提不成立解释为未登录。
 rule 仅在能确定性判定时提供，类型之一：{"type":"text-present","text":""}、{"type":"text-absent","text":""}、{"type":"url-contains","value":""}、{"type":"target-present","role":"可选","name":""}、{"type":"target-absent","role":"可选","name":""}、{"type":"tab-selected","name":"原文页签名"}、{"type":"rows-exist"}、{"type":"rows-exist","column":"原文列名","text":"原文取值"}、{"type":"rows-all-contain","column":"可选的原文列名","text":""}。
 页面能验证的业务数据存在、数量或状态均归 page；例如“存在售卖中商品”应核验商品数据行，不能仅凭页签文字、筛选项或数量徽标证明存在商品。至少一条记录用 rows-exist；指定状态时仅在原文明示表格列名时提供 column；业务字段名不等于页面列名。所有行状态用 rows-all-contain 并限定原文列名，不能把整行其他列出现该词当作状态符合。无法可靠确定列名时不提供 rule，交由页面证据判定。
 只有原文明示要求数据库、接口响应或持久化结果等页面之外的直接证据时才归 data，且不要给 rule；不能因为句子包含“存在”或“商品库”就归 data。需要依据截图或布局判断的条件（例如元素并存、不遮挡）归 visual 且不要给 rule。
@@ -112,6 +113,7 @@ const DECIDE_PROMPT = `你为一个 Web 测试步骤选择下一个决定。页�
 {"kind":"handoff","message":"需要人工完成的事，如登录或验证码"}；
 {"kind":"blocked","reasonCode":"无法继续的原因"}。
 允许执行当前 When 步骤明确要求的创建、编辑、删除、提交及其确认弹窗，不能扩大到其他记录或额外操作。Given 只核验前提，不擅自创建缺少的数据；Then 步骤只能 check、scroll 或 wait。
+登录条件与业务前提分别处理：已登录但目标商品尚未定位时，可按原文搜索、筛选或查看，不得要求重新登录；只有当前证据明确表明需要登录或验证码时才请求相应人工接管。
 任何会改变业务数据的动作（包括自动保存的 fill、开关）及名称疑似写入的按钮，都必须在 act 决定上附带 "write":{"sourceText":"当前步骤原文中直接支持此操作的连续片段","expected":"动作后的可观测结果"}。只打开新增/编辑表单也为疑似写入按钮附带依据。不得把查看、搜索或不存在等描述当作写入依据；无依据则 blocked。
 目标记录必须由原文中的名称、编号或本次明确获得的标识唯一确定，不能随意选第一条；确认弹窗必须对应正在操作的同一记录。每次只给一个动作；目标不唯一或不确定时返回 blocked。
 写入后先根据新观测核验结果，再推进后续动作；不能因为命令返回成功就认定步骤通过。命令报错后只核验、等待或阻塞，禁止重发写入。历史中已执行的相同写入不再提交。只能按原文创建或清理测试数据，不自行补充清理步骤。`;
@@ -427,6 +429,7 @@ export async function executeStep(step: SemanticStep, ctx: ExecutionContext): Pr
           if (remaining() <= 0) return finish('BLOCKED', timeoutReason());
           const status = aggregate(checks);
           ctx.trace(`auth-state-review: 登录前提 ${status}`);
+          ctx.trace(`checks ${JSON.stringify(checks)}`);
           if (status === 'PASS') return finish('PASS');
           if (status === 'BLOCKED') {
             // 首屏可能尚未渲染；等待后重新观测，不能反复判定同一份空页面。
@@ -434,11 +437,11 @@ export async function executeStep(step: SemanticStep, ctx: ExecutionContext): Pr
             loginDecision = { observationId: latest.id, reason: '登录证据尚未就绪，等待页面渲染后重新采集', kind: 'act', action: { type: 'wait', milliseconds: Math.min(MAX_WAIT_MS, SETTLE_MS * 2 ** actions.filter(item => item.decision.kind === 'act' && item.decision.action.type === 'wait').length) } };
           }
           if (status === 'FAIL') {
-            const fallback = await retryAuthStateFallback();
-            if (fallback) { latest = fallback; continue; }
-            loginDecision = {
-              observationId: latest.id, reason: '登录前提不成立，需要人工完成登录',
-              kind: 'handoff', message: loginHandoffMessage(),
+            // 混合前提可能只是尚未定位业务记录；交回具体检查结果，不据此切换会话或要求登录。
+            lastChecked = latest.id;
+            lastFeedback = {
+              checks: checks.map(({ conditionId, status, actual }) => ({ conditionId, status, actual })),
+              required: '分别处理登录状态与业务前提；依据未通过的条件决定搜索、筛选、查看或停止，不能仅因整步未通过就认定登录态失效',
             };
           }
         }
