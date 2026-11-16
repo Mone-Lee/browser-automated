@@ -59,6 +59,24 @@ function overall(statuses: Verdict[]): Verdict {
   return statuses.includes('FAIL') ? 'FAIL' : statuses.includes('BLOCKED') ? 'BLOCKED' : 'PASS';
 }
 
+/** 输出当前阶段并每隔十五秒提示等待状态；完成或异常时清理计时器，避免上一阶段继续报进度。 */
+async function trackProgress<T>(label: string, log: (line: string) => void, task: (progress: (message: string) => void) => Promise<T>): Promise<T> {
+  const started = Date.now();
+  let phase = '开始执行';
+  let updated = started;
+  const progress = (message: string) => {
+    phase = message;
+    updated = Date.now();
+    log(`${label} ${message}`);
+  };
+  progress(phase);
+  const timer = setInterval(() => {
+    if (Date.now() - updated >= 15_000) log(`${label} 仍在${phase}（已耗时 ${Math.floor((Date.now() - started) / 1000)} 秒；尚未返回结果）`);
+  }, 15_000);
+  timer.unref();
+  try { return await task(progress); } finally { clearInterval(timer); }
+}
+
 /** 运行一个已解析的 feature，写出 result.json、report.md、trace.log 与 shots/，返回结果与运行目录。 */
 export async function runFeature(feature: ParsedFeature, options: RunOptions): Promise<{ result: FeatureResult; directory: string }> {
   const directory = await createRunDirectory(options.runsDirectory);
@@ -68,7 +86,11 @@ export async function runFeature(feature: ParsedFeature, options: RunOptions): P
     if (line.startsWith('auth-state-')) authState.push(line);
     appendFileSync(tracePath, `${new Date().toISOString()} ${line}\n`);
   };
-  const log = options.log ?? (() => undefined);
+  const log = (line: string) => {
+    trace(`progress ${line}`);
+    options.log?.(line);
+  };
+  log(`开始执行流程：共 ${feature.scenarios.length} 个场景`);
   const observations = new Map<string, Observation>();
   const counters = { observation: 0 };
   const intentCache = new Map<string, Pick<StepIntent, 'kind' | 'scope' | 'conditions'>>();
@@ -77,8 +99,9 @@ export async function runFeature(feature: ParsedFeature, options: RunOptions): P
   let declaredUrl: string | undefined;
   let intentsPrepared = false;
 
-  for (const scenario of feature.scenarios) {
-    log(`Scenario: ${scenario.title}`);
+  for (const [scenarioIndex, scenario] of feature.scenarios.entries()) {
+    const label = `[场景 ${scenarioIndex + 1}/${feature.scenarios.length}「${scenario.title}」]`;
+    log(`${label} 开始，共 ${scenario.steps.length} 个步骤`);
     trace(`scenario ${scenario.title} (line ${scenario.line})`);
     const steps = withSemantics(scenario.steps);
     const notRun = (step: { keyword: string; text: string; line: number }, reason: string): StepResult => ({
@@ -93,7 +116,7 @@ export async function runFeature(feature: ParsedFeature, options: RunOptions): P
     if (blockReason) {
       const first = scenario.steps[0];
       const blocked: StepResult = { source: { file: feature.file, scenario: scenario.title, line: first.line, original: `${first.keyword} ${first.text}` }, execution: 'executed', status: 'BLOCKED', durationMs: 0, reason: blockReason, actions: [], checks: [] };
-      log(`  BLOCKED  ${blockReason}`);
+      log(`${label} 执行受阻 BLOCKED：${blockReason}；其余 ${scenario.steps.length - 1} 个步骤未执行`);
       scenarios.push({ title: scenario.title, status: 'BLOCKED', steps: [blocked, ...scenario.steps.slice(1).map(step => notRun(step, blockReason))] });
       continue;
     }
@@ -107,7 +130,11 @@ export async function runFeature(feature: ParsedFeature, options: RunOptions): P
         const origins = new Set(semanticSteps?.flatMap(semanticStep => entryUrlOf(semanticStep) ?? []).map(url => originOf(url) ?? url));
         return semanticSteps && origins.size === 1 ? semanticSteps.map(semanticStep => ({ step: semanticStep, scenario: item.title })) : [];
       });
-      await prepareStepIntents(items, options.model, intentCache, limits.stepMs, trace);
+      await trackProgress(`${label} [准备步骤]`, log, async progress => {
+        progress('等待当前 Agent 批量解释步骤');
+        await prepareStepIntents(items, options.model!, intentCache, limits.stepMs, trace);
+      });
+      log(`${label} 步骤准备完成，开始逐步执行`);
     }
     const context: ExecutionContext = {
       port: options.port, model: options.model, judge: options.judge, file: feature.file, scenario: scenario.title,
@@ -115,18 +142,35 @@ export async function runFeature(feature: ParsedFeature, options: RunOptions): P
     };
     const results: StepResult[] = [];
     let stopped: string | undefined;
-    for (const step of steps!) {
-      if (stopped) { results.push(notRun(step, stopped)); continue; }
-      const result = await executeStep(step, context);
+    for (const [stepIndex, step] of steps!.entries()) {
+      const stepLabel = `${label} [步骤 ${stepIndex + 1}/${steps!.length}，第 ${step.line} 行] ${step.keyword} ${step.text}`;
+      if (stopped) {
+        results.push(notRun(step, stopped));
+        log(`${stepLabel} 未执行：${stopped}`);
+        continue;
+      }
+      const result = await trackProgress(stepLabel, log, progress => {
+        context.progress = progress;
+        context.model = options.model && {
+          async json(system, input, timeoutMs) {
+            progress('等待当前 Agent 解释或判定');
+            const reply = await options.model!.json(system, input, timeoutMs);
+            progress('处理当前 Agent 返回的结果');
+            return reply;
+          },
+        };
+        return executeStep(step, context);
+      });
       results.push(result);
       if (result.execution === 'executed') {
-        log(`  ${step.keyword.padEnd(5)} ${step.text}  ${result.status}${result.reason ? `（${result.reason}）` : ''}`);
+        log(`${stepLabel} ${result.status === 'PASS' ? '执行成功' : result.status === 'FAIL' ? '执行失败' : '执行受阻'} ${result.status}（${(result.durationMs / 1000).toFixed(1)} 秒）${result.reason ? `：${result.reason}` : ''}`);
         if (result.status !== 'PASS') stopped = `同场景第 ${step.line} 行${result.status === 'FAIL' ? '断言失败' : '被阻塞'}`;
       }
     }
     declaredUrl ??= context.entryUrl;
-    results.forEach((item, index) => { if (item.execution === 'not-run') log(`  ${steps![index].keyword.padEnd(5)} ${steps![index].text}  未执行`); });
-    scenarios.push({ title: scenario.title, status: overall(results.flatMap(item => item.execution === 'executed' ? [item.status] : [])), steps: results });
+    const status = overall(results.flatMap(item => item.execution === 'executed' ? [item.status] : []));
+    scenarios.push({ title: scenario.title, status, steps: results });
+    log(`${label} 场景结束 ${status}；通过 ${results.filter(item => item.execution === 'executed' && item.status === 'PASS').length}/${results.length}，未执行 ${results.filter(item => item.execution === 'not-run').length}`);
   }
 
   // 除检查引用的证据外，动作执行后的观测也要保留 URL，便于还原多动作步骤的中间状态。
