@@ -319,14 +319,23 @@ export async function executeStep(step: SemanticStep, ctx: ExecutionContext): Pr
 
     let latest: Observation;
     if (entry) {
+      const firstEntry = !ctx.entryUrl;
       ctx.entryUrl = entry;
       progress('打开场景入口并核验登录状态');
       ctx.trace(`step ${step.line} entry ${entry}`);
       ctx.port.prepareEntry?.(entry, ctx.trace);
-      const outcome = ctx.port.act({ type: 'open', url: entry }, EMPTY_OBSERVATION);
+      let outcome: string;
+      if (firstEntry) {
+        ctx.trace('entry-reset: 销毁上一场景的页面文档后打开入口，保留登录会话');
+        if (ctx.port.resetEntry) outcome = ctx.port.resetEntry(entry);
+        else {
+          ctx.port.act({ type: 'open', url: 'about:blank' }, EMPTY_OBSERVATION);
+          outcome = ctx.port.act({ type: 'open', url: entry }, EMPTY_OBSERVATION);
+        }
+      } else outcome = ctx.port.act({ type: 'open', url: entry }, EMPTY_OBSERVATION);
       await new Promise(resolve => setTimeout(resolve, SETTLE_MS * 2));
       latest = await observe();
-      actions.push({ decision: { observationId: EMPTY_OBSERVATION.id, reason: '打开入口', kind: 'act', action: { type: 'open', url: entry } }, afterObservationId: latest.id, outcome });
+      actions.push({ decision: { observationId: EMPTY_OBSERVATION.id, reason: firstEntry ? '重置场景页面并打开入口' : '打开入口', kind: 'act', action: { type: 'open', url: entry } }, afterObservationId: latest.id, outcome });
       // 自动登录态失效时先尝试一次浏览器配置；回退与接管后都重新核验页面。
       if (isLoginObservation(latest) || latest.url === 'about:blank') {
         latest = await retryAuthStateFallback() ?? latest;
@@ -343,6 +352,15 @@ export async function executeStep(step: SemanticStep, ctx: ExecutionContext): Pr
         if (isLoginObservation(latest)) return finish('BLOCKED', '人工接管后仍停留在登录页');
       }
       ctx.trace('auth-state-review: 继续使用本次页面证据核验入口及登录前提');
+      // 标准入口要求路径与路由一致，避免同站点错误页面被 origin 检查放行。
+      if (pureEntry) {
+        const expected = new URL(entry);
+        const actual = new URL(latest.url);
+        if (actual.origin !== expected.origin || actual.pathname !== expected.pathname || actual.hash !== expected.hash) {
+          checks = [{ conditionId: ENTRY_CONDITION_ID, by: 'rule', status: 'FAIL', actual: latest.url, evidenceIds: [`${latest.id}-url`] }];
+          return finish('BLOCKED', '入口地址未能打开到预期路径及路由，可能被重定向');
+        }
+      }
       if (!parsed.conditions.length) {
         progress('核验当前步骤的预期结果');
         checks = await judgeConditions(intent, intent.conditions, latest, ctx.judge, remaining(), ctx.model, ctx.trace);

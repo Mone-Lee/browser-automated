@@ -25,6 +25,8 @@ export interface BrowserPort {
   handoff(message: string): Promise<boolean>;
   /** 在打开已确认入口前选择并加载登录态；按站点隔离运行会话。 */
   prepareEntry?(url: string, trace: (line: string) => void): void;
+  /** 场景首次入口先销毁旧页面文档，再访问入口；沿用已准备的登录会话。 */
+  resetEntry?(url: string): string;
   /** 自动登录态失效时最多切换一次浏览器配置并重开入口；切换后必须重新观测。 */
   retryAuthStateFallback?(url: string): boolean;
   /** 根据本轮是否发现已有登录态，区分首次登录与登录态失效提示。 */
@@ -240,6 +242,17 @@ export function createBrowserPort(
       profileOpening = false;
       return output.trim();
     } catch (error) {
+      // load 事件可能被非关键资源拖住；已到入口时交给执行器继续等待页面就绪，避免误判或切换登录会话。
+      const message = error instanceof Error ? error.message : String(error);
+      if (/Timed out.*waiting for load state ['"]load['"]/iu.test(message) && /^https?:\/\//u.test(url)) {
+        const expected = new URL(url);
+        const actual = new URL(agent.getUrl());
+        if (actual.origin === expected.origin && actual.pathname === expected.pathname && actual.hash === expected.hash) {
+          profileOpening = false;
+          trace('entry-load-timeout: 导航已到目标地址，继续等待页面就绪后采集证据');
+          return '导航已到目标地址，load 事件超时，等待页面就绪核验';
+        }
+      }
       if (!profileOpening) throw error;
       trace('auth-state-profile-failed: 配置导入失败，改用干净窗口并按需人工接管。');
       agent.close();
@@ -304,6 +317,11 @@ export function createBrowserPort(
         trace('auth-state-fallback: 自动登录态加载失败，尝试浏览器配置。');
         useProfile(fallbackProfile, true);
       }
+    },
+    resetEntry(url) {
+      // 空白页只用于销毁旧文档，不参与站点切换和登录态选择。
+      open('about:blank');
+      return open(url);
     },
     retryAuthStateFallback(url) {
       if (!fallbackProfile || new URL(url).origin !== origin) return false;
