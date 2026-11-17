@@ -3,7 +3,7 @@ export const VERSION = '0.1.0';
 export { importXMind } from './xmind.js';
 
 
-export { DRAFT_RULES, describeTodo, listTodos, renderDraftPreview, resolveTodo, draftFromAgentSteps, generateFeatureDraft, loadAgentSteps, loadCasesImport, validateFeatureDraft, reviewFeatureDraft, saveDirectFeatureDraft, saveFeatureDraft } from './feature-gen.js';
+export { DRAFT_RULES, RULES_VERSION, describeTodo, listTodos, renderDraftPreview, resolveTodo, draftFromAgentSteps, generateFeatureDraft, loadAgentSteps, loadCasesImport, validateFeatureDraft, reviewFeatureDraft, saveDirectFeatureDraft, saveFeatureDraft } from './feature-gen.js';
 export type { AgentSteps, FeatureDraft, DraftScenario, DraftStep, FeatureReview } from './feature-gen.js';
 
 export { findPendingConfirmations, parseFeature, parseFeatureFile } from './feature.js';
