@@ -165,7 +165,7 @@ Then 页面提示保存成功
 
 ### 逐项确认
 
-`--draft` 将草案机器状态保存到系统临时目录，并在 `.browser-test/features/` 写出 `<草案>.preview.feature`（Gherkin 预览，待确认项带 `# TODO(确认 #编号)`）。用 `feature todos <草案>` 查看每项待确认内容及所在场景的完整步骤，用 `feature resolve <草案> <编号> keep|delete|"<完整步骤>"` 每次处理一项并刷新预览；处理后编号可能变化，须重新列出。
+`--draft` 仅在 `.browser-test/features/` 写出 `<草案>.preview.feature`（Gherkin 预览，待确认项带 `# TODO(确认 #编号)`）。用 `feature todos <草案>` 查看每项待确认内容及所在场景的完整步骤，用 `feature resolve <草案> <编号> keep|delete|"<完整步骤>"` 每次处理一项并刷新预览；处理后编号可能变化，须重新列出。
 
 已由当前 Agent 起草步骤后的终端交互：
 
@@ -187,7 +187,7 @@ browser-test feature gen --review cases --merge --yes
 browser-test feature gen --review cases --overwrite --yes
 ```
 
-`--draft` 在系统临时目录排他创建机器状态，并在 `.browser-test/features/` 创建可读预览，不会写最终 feature。`--review` 不带 `--yes` 时仅在终端展示差异。草案或已有文件变化后须重新审阅。所有待确认项必须处理完毕，才能落盘；成功写入后自动删除草案预览和临时机器状态。
+`--draft` 在 `.browser-test/features/` 排他创建可编辑预览，不会写最终 feature。`--review` 不带 `--yes` 时仅在终端展示差异。草案或已有文件变化后须重新审阅。所有待确认项必须处理完毕，才能落盘；成功写入后自动删除草案预览。
 
 同一模块路径的用例合并为一个 feature，模块路径作为 Feature 名，文件头为 `# source: <文件> / <模块路径>`；XMind 产物的文件名由模块路径组成，`--cases` 的图片还原等来源会追加来源后缀，避免与同模块的 XMind 产物冲突。步骤文字若未在原文中找到会标为待确认。仅输出来源注释、Feature、Scenario、原文已有优先级和 Given/When/Then/And，不新增业务字段。
 
@@ -251,3 +251,5 @@ profile 导入后首次确认已进入入口站点的非登录页面时保存；
 `run` 实时输出场景序号与标题、当前步骤序号与原文行号、执行阶段、步骤结果和耗时。场景结束汇总结果、通过数与未执行数；失败或受阻会立即显示原因，后续跳过的步骤也会说明原因。等待页面、Agent 回复或判定时，约每 15 秒输出当前阶段和累计耗时，直到该步骤结束；同步浏览器命令占用期间的提示会在命令返回后继续。所有进度同步保存在 `trace.log`。
 
 通过 Skill 执行时，Agent 会转达新场景、当前步骤、结果和受阻原因；长时间等待时至少每 30 秒更新一次，连续快速通过的步骤可合并反馈。
+
+草稿编辑以 `<草案>.preview.feature` 为唯一依据，支持通过 diff-review 调整完整内容。审阅和最终生成直接读取当前预览，保留步骤、SKU、业务库、注释及顺序，不读取旧临时 JSON。已有同名预览不会被新建草稿覆盖；目标文件存在且未指定覆盖或合并时保留预览并提示。待确认项以正文标记为准，不以文件头的历史计数为准。

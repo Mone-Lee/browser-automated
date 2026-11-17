@@ -3,11 +3,10 @@
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { VERSION, importXMind } from '../index.js';
 import { createInterface } from 'node:readline/promises';
-import { DRAFT_RULES, describeTodo, listTodos, renderDraftPreview, resolveTodo, draftFromAgentSteps, generateFeatureDraft, loadAgentSteps, loadCasesImport, validateFeatureDraft, reviewFeatureDraft, saveDirectFeatureDraft, saveFeatureDraft } from '../feature-gen.js';
+import { DRAFT_RULES, readPreviewDraft, reviewPreview, listTodos, renderDraftPreview, draftFromAgentSteps, generateFeatureDraft, loadAgentSteps, loadCasesImport, validateFeatureDraft, reviewFeatureDraft, saveDirectFeatureDraft, saveFeatureDraft } from '../feature-gen.js';
 import { prepareAddresses, confirmAddress } from '../feature-address.js';
 import { findPendingConfirmations, parseFeatureFile } from '../feature.js';
 import { createAgentModel } from '../model.js';
@@ -33,13 +32,13 @@ const help = `browser-test ${VERSION}
   browser-test --version
 
 生成的 Gherkin 写入当前执行目录的 .browser-test/features/，运行产物写入 .browser-test/artifacts/；目录不存在时自动创建。--json 将完整结果输出到标准输出，不写文件。
-feature gen 默认支持逐项交互确认；--draft 将机器状态保存在系统临时目录，并在 .browser-test/features/ 写入可读预览；--direct 一次性创建可整文件编辑的 Gherkin。
+feature gen 默认支持逐项交互确认；--draft 在 .browser-test/features/ 写入作为唯一内容来源的预览；--direct 一次性创建可整文件编辑的 Gherkin。
 --cases 读取与 xmind list --json 同构的 JSON（如图片还原结果）。
 草案由调用方当前 Agent 起草：默认通过 agent-request 请求文件逐条协作，也可按 feature rules 起草步骤 JSON 后用 --steps 传入。
 生成、步骤解释与动作决策不需要额外模型密钥。审阅无需 AI。
 --draft 写出 <草案>.preview.feature（Gherkin 预览，待确认项带编号）；todos 以 Gherkin 上下文逐项展示待确认项，resolve 每次处理一项并刷新预览。
 --direct 跳过逐项确认并保留 # TODO(确认)；调用方须直接修改生成文件，清除待确认项后才能执行。
-审阅差异只输出到终端；默认不覆盖已有 feature，--merge 保留已有同名场景并追加缺失场景，--overwrite 整体覆盖。最终写入成功后自动删除草案预览和临时状态。
+审阅差异只输出到终端；默认不覆盖已有 feature，--merge 保留已有同名场景并追加缺失场景，--overwrite 整体覆盖。最终写入成功后自动删除草案预览。
 通过 --cases 生成的 feature 文件名追加来源后缀，避免图片还原用例与同模块的 XMind 用例冲突。
 生成阶段按应用、页面和环境复用 .browser-test/features/ 中的已确认地址；缺失或冲突用 feature addresses 集中确认，确认一次应用于同页用例。
 run 在真实 Web 环境按用例执行 feature，步骤解释与动作生成通过 agent-request 交给当前 Agent，规则之外的判定优先使用 TypeSafe jev（可选 TYPESAFE_API_KEY），未配置或调用失败时由当前 Agent 兜底；默认打开可见窗口以便登录接管，--headless 下无法接管。产物写入 .browser-test/artifacts/<时间>/（result.json、report.md、trace.log、shots/）。退出码：0=PASS、1=FAIL、2=BLOCKED 或工具错误。
@@ -61,12 +60,6 @@ function featureDirectory(): string {
   return resolve('.browser-test', 'features');
 }
 
-/** 草案机器状态按工作目录隔离在系统临时目录，不混入用户需要审阅的产物。 */
-function draftStateDirectory(): string {
-  const workspace = createHash('sha256').update(resolve('.')).digest('hex');
-  return resolve(tmpdir(), 'browser-test', workspace);
-}
-
 /** 将产物文件名解析到专用目录内，拒绝绝对路径和越过目录边界的相对路径。 */
 function artifactFile(filename: string, label: string): string {
   const directory = featureDirectory();
@@ -78,27 +71,14 @@ function artifactFile(filename: string, label: string): string {
   return path;
 }
 
-/** 将草案名映射到系统临时状态文件，并沿用产物文件相同的越界检查。 */
-function draftStateFile(filename: string, label: string): string {
-  const directory = draftStateDirectory();
-  const path = resolve(directory, filename);
-  const pathRelativeToDirectory = relative(directory, path);
-  if (!filename || /[\\/]/u.test(filename) || isAbsolute(filename) || pathRelativeToDirectory === '' || pathRelativeToDirectory === '..' || pathRelativeToDirectory.startsWith(`..${sep}`)) {
-    throw new Error(`${label} 必须是简单草案名`);
-  }
-  return path;
+/** 草案只有预览文件一种持久化形式，兼容传入简单名称或预览文件名。 */
+function previewFile(name: string): string {
+  return artifactFile(name.endsWith('.preview.feature') ? name : name.replace(/\.json$/iu, '') + '.preview.feature', '草案');
 }
 
 /** 自动创建 Gherkin 目录，避免调用方为常规生成流程预先准备目录。 */
 async function ensureFeatureDirectory(): Promise<string> {
   const directory = featureDirectory();
-  await mkdir(directory, { recursive: true });
-  return directory;
-}
-
-/** 创建当前工作目录对应的临时状态目录。 */
-async function ensureDraftStateDirectory(): Promise<string> {
-  const directory = draftStateDirectory();
   await mkdir(directory, { recursive: true });
   return directory;
 }
@@ -188,9 +168,23 @@ async function generate(args: string[]): Promise<void> {
   if (!options['--review'] && !options['--draft'] && !options['--direct'] && !interactive) throw new Error('非交互生成请提供 --draft <草案名> 或 --direct');
   const out = outputDirectory(options['--out']);
   const strategy: ExistingFeatureStrategy = options['--merge'] ? 'merge' : options['--overwrite'] ? 'overwrite' : 'create';
-  const draft: FeatureDraft = options['--review']
-    ? JSON.parse(await readFile(draftStateFile(options['--review'], '--review'), 'utf8'))
-    : await buildDraft(options);
+  if (options['--review']) {
+    const path = previewFile(options['--review']);
+    const content = await readFile(path, 'utf8');
+    const review = await reviewPreview(content, out, strategy);
+    console.log(review.diff);
+    if (!options['--yes']) { console.log('请审阅最新预览后加 --yes 落盘。'); return; }
+    if (await readFile(path, 'utf8') !== content) throw new Error('预览已变化，请重新审阅');
+    const skipped = review.files.filter(file => file.previous !== null && file.previous !== file.content && strategy === 'create');
+    if (skipped.length) throw new Error('目标已存在且内容不同，预览已保留；请审阅 --overwrite 或 --merge 后再生成');
+    for (const file of review.files) {
+      if (file.previous !== file.content) await writeFile(file.path, file.content, { encoding: 'utf8', flag: file.previous === null ? 'wx' : 'w' });
+    }
+    await rm(path);
+    console.log(`已生成 ${review.files.length} 个文件。`);
+    return;
+  }
+  const draft = await buildDraft(options);
   validateFeatureDraft(draft);
   let addressRequests = await prepareAddresses(draft, out);
   if (options['--direct']) {
@@ -206,12 +200,10 @@ async function generate(args: string[]): Promise<void> {
     return;
   }
   if (options['--draft']) {
-    const draftFile = draftStateFile(options['--draft'], '--draft');
-    await ensureDraftStateDirectory();
     await ensureFeatureDirectory();
-    await writeFile(draftFile, `${JSON.stringify(draft, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
-    const preview = await writePreview(options['--draft'], draft);
-    console.log(`Gherkin 草案预览：${preview}\n地址待确认 ${addressRequests.length} 组（使用 feature addresses）；语义待确认 ${listTodos(draft).length} 项，请用 feature todos 逐项确认，再使用 --review。机器状态保存在系统临时目录，尚未写入最终 feature。`);
+    const preview = previewFile(options['--draft']);
+    await writeFile(preview, renderDraftPreview(draft), { encoding: 'utf8', flag: 'wx' });
+    console.log(`草案：${preview}。请通过 diff-review 或直接编辑调整，再使用 --review 生成最终文件。`);
     return;
   }
   const rl = options['--review'] ? undefined : createInterface({ input: process.stdin, output: process.stdout });
@@ -240,7 +232,6 @@ async function generate(args: string[]): Promise<void> {
     }
     await ensureFeatureDirectory();
     const written = await saveFeatureDraft(draft, out, strategy);
-    if (options['--review']) await cleanupDraft(options['--review']);
     const action = strategy === 'merge' ? '合并' : strategy === 'overwrite' ? '覆盖' : '新建';
     console.log(`已${action} ${written.length} 个文件。${written.length ? '\n' + written.join('\n') : ''}`);
   } finally {
@@ -357,9 +348,10 @@ async function addresses(args: string[]): Promise<void> {
   }
   if (Boolean(options['--id']) !== Boolean(options['--url'])) throw new Error('确认时同时提供 --id 和 --url');
   if (!options['--id'] && ['--application', '--page', '--environment'].some(name => name in options)) throw new Error('页面身份须与 --id 和 --url 一起提供');
-  const draftFile = draftStateFile(file, '草案');
+  const path = previewFile(file);
+  const original = await readFile(path, 'utf8');
   const out = outputDirectory(options['--out']);
-  const draft: FeatureDraft = JSON.parse(await readFile(draftFile, 'utf8'));
+  const draft = readPreviewDraft(original);
   validateFeatureDraft(draft);
   let requests = await prepareAddresses(draft, out);
   if (options['--id']) {
@@ -369,52 +361,51 @@ async function addresses(args: string[]): Promise<void> {
     requests = await prepareAddresses(draft, out);
   }
   validateFeatureDraft(draft);
-  await ensureDraftStateDirectory();
-  await writeFile(draftFile, `${JSON.stringify(draft, null, 2)}\n`, 'utf8');
-  await writePreview(file, draft);
+  let scenarioIndex = -1;
+  const lines = original.split('\n');
+  const updated: string[] = [];
+  for (const line of lines) {
+    if (/^\s*Scenario:/u.test(line)) scenarioIndex++;
+    const visit = draft.scenarios[scenarioIndex]?.visit;
+    if (visit?.url && /^\s*# 访问页面:/u.test(line)) {
+      updated.push(`    # 访问页面: ${JSON.stringify(visit)}`);
+    } else if (visit?.url && /^\s*# TODO\(确认\): 请通过 feature addresses/u.test(line)) {
+      updated.push(`    Given 本次访问地址为 ${JSON.stringify(visit.url)}`);
+    } else updated.push(line);
+  }
+  const next = updated.join('\n');
+  if (next !== original) await writeFile(path, next, 'utf8');
   console.log(JSON.stringify({ pending: requests.map(request => ({ id: request.id, ...request.visit, scenarios: request.scenarios.map(s => s.title), candidates: request.candidates })), confirmed: draft.scenarios.filter(s => s.visit?.url).map(s => ({ title: s.title, ...s.visit })) }, null, 2));
 }
 
-/** 预览文件是草案的派生视图，每次都按最新草案覆盖；最终 feature 仍只经 --review --yes 创建。 */
-async function writePreview(draftName: string, draft: FeatureDraft): Promise<string> {
-  await ensureFeatureDirectory();
-  const preview = artifactFile(draftName.replace(/\.json$/iu, '') + '.preview.feature', '草案预览');
-  await writeFile(preview, renderDraftPreview(draft), 'utf8');
-  return preview;
-}
-
-/** 最终 Gherkin 成功写入后清除草案机器状态与派生预览，目录中只留下最终文件。 */
-async function cleanupDraft(draftName: string): Promise<void> {
-  const state = draftStateFile(draftName, '草案');
-  const preview = artifactFile(draftName.replace(/\.json$/iu, '') + '.preview.feature', '草案预览');
-  await Promise.all([rm(state, { force: true }), rm(preview, { force: true })]);
-}
-
-/** todos 以 Gherkin 上下文展示待确认项（可用 --id 只看一项）；resolve 每次只改一项并刷新预览，改动后须重新列出编号。 */
+/** 直接在预览文本中列出和处理待确认注释，不重建其他步骤或注释。 */
 async function todos(command: 'todos' | 'resolve', args: string[]): Promise<void> {
-  const file = args[0];
-  if (!file || file.startsWith('--')) throw new Error('缺少草案名');
-  const draftFile = draftStateFile(file, '草案');
-  const draft: FeatureDraft = JSON.parse(await readFile(draftFile, 'utf8'));
-  validateFeatureDraft(draft);
+  const [name, id, action] = args;
+  if (!name) throw new Error('缺少草案名');
+  const path = previewFile(name);
+  const content = await readFile(path, 'utf8');
+  const lines = content.split('\n');
+  const pending = findPendingConfirmations(content).map(item => ({ ...item, id: /确认\s*#([^)]*)\)/u.exec(item.text)?.[1] ?? `L${item.line}` }));
   if (command === 'todos') {
-    if (args.length !== 1 && !(args.length === 3 && args[1] === '--id')) throw new Error('用法：feature todos <草案名> [--id <编号>]');
-    const ids = args.length === 3 ? [args[2]] : listTodos(draft).map(item => item.id);
-    console.log(ids.length ? ids.map(id => describeTodo(draft, id)).join('\n\n') : '无待确认项');
+    const selected = id === '--id' ? pending.filter(item => item.id === action) : pending;
+    console.log(selected.map(item => `[${item.id}] 第 ${item.line} 行\n${lines.slice(Math.max(0, item.line - 3), item.line + 1).join('\n')}`).join('\n\n') || '无待确认项');
     return;
   }
-  const [, id, action, ...rest] = args;
-  if (!id || !action || rest.length) throw new Error('用法：feature resolve <草案名> <编号> keep|delete|"<完整步骤>"');
-  if (action === 'keep' || action === 'delete') resolveTodo(draft, id, action);
+  const item = pending.find(item => item.id === id);
+  if (!item || !action || args.length !== 3) throw new Error('需要有效待确认编号和 keep、delete 或完整替换步骤');
+  if (item.text.includes('feature addresses')) throw new Error('地址请使用 feature addresses 确认');
+  const index = item.line - 1;
+  if (!/^\s*(Given|When|Then|And)\s+/u.test(lines[index - 1] ?? '')) throw new Error('待确认项未紧跟步骤，请直接编辑预览');
+  if (action === 'delete') lines.splice(index - 1, 2);
   else {
-    const match = /^(Given|When|Then|And) (.+)$/.exec(action);
-    if (!match) throw new Error('替换内容须为完整步骤：Given|When|Then|And 原文');
-    resolveTodo(draft, id, { replace: { keyword: match[1] as DraftStep['keyword'], text: match[2] } });
+    if (action !== 'keep') {
+      if (!/^(Given|When|Then|And) .+$/u.test(action) || /[\r\n]/u.test(action)) throw new Error('替换内容须为单行完整步骤');
+      lines[index - 1] = '    ' + action;
+    } else if (lines[index - 1].includes('【待补充】')) throw new Error('缺失步骤不能 keep');
+    lines.splice(index, 1);
   }
-  await ensureDraftStateDirectory();
-  await writeFile(draftFile, `${JSON.stringify(draft, null, 2)}\n`, 'utf8');
-  const preview = await writePreview(file, draft);
-  console.log(`已处理 ${id}；剩余待确认 ${listTodos(draft).length} 项（编号可能已变化，请重新 feature todos）。预览：${preview}`);
+  await writeFile(path, lines.join('\n'), 'utf8');
+  console.log(`已更新预览：${path}`);
 }
 
 /** 有 --steps 时读取当前 Agent 的步骤文件，否则通过本地通道请求当前 Agent 逐条起草。 */

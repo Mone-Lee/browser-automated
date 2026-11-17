@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, extname, resolve, join } from 'node:path';
+import { parseFeature, findPendingConfirmations } from './feature.js';
 import { validAddress } from './feature-address.js';
 import type { PageVisit } from './feature-address.js';
 import { importXMind } from './xmind.js';
@@ -310,6 +311,7 @@ function featureText(source: string, module: string, scenarios: DraftScenario[],
   const lines = [`# source: ${[source, module].filter(Boolean).join(' / ')}`, `Feature: ${module || scenarios[0].title}`];
   for (const scenario of scenarios) {
     lines.push('', ...(scenario.priority ? [`  @${scenario.priority}`] : []), `  Scenario: ${scenario.title}`);
+    if (scenario.platform && scenario.platform !== 'web') lines.push(`    # 执行平台: ${scenario.platform}`);
     if (scenario.visit) {
       lines.push(`    # 访问页面: ${JSON.stringify({ page: scenario.visit.page, url: scenario.visit.url })}`);
       if (scenario.visit.url) lines.push(`    Given 本次访问地址为 ${JSON.stringify(scenario.visit.url)}`);
@@ -456,4 +458,76 @@ export async function saveDirectFeatureDraft(draft: FeatureDraft, output: string
   if (pending.length) await mkdir(resolve(output), { recursive: true });
   for (const file of pending) await writeFile(file.path, file.content, { encoding: 'utf8', flag: 'wx' });
   return pending.map(file => file.path);
+}
+
+/** 从用户编辑后的预览读取场景；只用于地址管理，绝不重新渲染正文。 */
+export function readPreviewDraft(content: string): FeatureDraft {
+  const scenarios: DraftScenario[] = [];
+  let source = 'preview';
+  let modulePath: string[] = [];
+  for (const line of content.split(/\r?\n/u)) {
+    const origin = /^# source: (.+)$/u.exec(line);
+    if (origin) source = origin[1].split(' / ')[0];
+    const feature = /^Feature: (.+)$/u.exec(line);
+    if (feature) modulePath = feature[1].split(' / ');
+    const title = /^\s*Scenario: (.+)$/u.exec(line);
+    if (title) scenarios.push({ title: title[1], modulePath, steps: [] });
+    const scenario = scenarios.at(-1);
+    if (!scenario) continue;
+    const platform = /^\s*# 执行平台: (miniprogram|unsupported)$/u.exec(line);
+    if (platform) scenario.platform = platform[1] as DraftScenario['platform'];
+    const address = /^\s*# 访问页面: (.+)$/u.exec(line);
+    if (address) scenario.visit = { application: '', ...JSON.parse(address[1]) };
+    const step = /^\s*(Given|When|Then|And)\s+(.+)$/u.exec(line);
+    if (step) {
+      scenario.steps.push({ keyword: step[1] as DraftStep['keyword'], text: step[2] });
+      const url = /^本次访问地址为 "(.+)"$/u.exec(step[2]);
+      if (url) scenario.visit = { application: '', page: '', ...scenario.visit, url: url[1] };
+    }
+  }
+  return { source, scenarios };
+}
+
+/** 预览正文是唯一来源；仅移除草案状态标题，按原有来源和模块拆分，保留所有手工步骤与注释。 */
+export async function reviewPreview(content: string, output: string, strategy: ExistingFeatureStrategy): Promise<FeatureReview> {
+  const clean = content.replace(/^# 草案预览（非最终 feature）：.*\r?\n/gmu, '');
+  const pending = findPendingConfirmations(clean);
+  if (pending.length) throw new Error(`预览仍有待确认项：\n${pending.map(item => `${item.line}: ${item.text}`).join('\n')}`);
+  const lines = clean.split('\n');
+  const starts = lines.flatMap((line, index) => /^Feature:/u.test(line) ? [index] : []);
+  const boundaries = starts.map((start, index) => {
+    if (!index) return 0;
+    while (start > 0 && !/^# source:/u.test(lines[start])) start--;
+    if (!start) throw new Error('多个 Feature 必须分别保留 source 注释');
+    return start;
+  });
+  if (!starts.length) throw new Error('预览缺少 Feature');
+  const files: FeatureReview['files'] = [];
+  const sourceStart = lines.findIndex(line => /^# source:/u.test(line));
+  const preamble = lines.slice(0, sourceStart < 0 ? starts[0] : sourceStart).join('\n');
+  for (let index = 0; index < boundaries.length; index++) {
+    const generated = (index ? preamble + '\n' : '') + lines.slice(boundaries[index], boundaries[index + 1] ?? lines.length).join('\n');
+    const parsed = parseFeature(generated);
+    const module = parsed.title.split(' / ');
+    const suffix = ' / ' + module.join(' / ');
+    const source = parsed.source?.endsWith(suffix) ? parsed.source.slice(0, -suffix.length) : parsed.source ?? 'preview';
+    for (const scenario of parsed.scenarios) {
+      if (scenario.steps.some(step => step.text.includes('【待补充】'))) throw new Error(`场景仍有待补充步骤：${scenario.title}`);
+      const addresses = scenario.steps.flatMap(step => {
+        const match = /^本次访问地址为 "(.+)"$/u.exec(step.text);
+        return match ? [match[1]] : [];
+      });
+      const scenarioText = generated.split('\n').slice(scenario.line, parsed.scenarios[parsed.scenarios.indexOf(scenario) + 1]?.line ? parsed.scenarios[parsed.scenarios.indexOf(scenario) + 1].line - 1 : undefined).join('\n');
+      const nonWeb = /^\s*# 执行平台: (miniprogram|unsupported)$/mu.test(scenarioText);
+      if (!nonWeb && (!addresses.length || addresses.some(url => !validAddress(url)))) throw new Error(`场景缺少有效访问地址：${scenario.title}`);
+    }
+    const draft = { source, scenarios: [{ title: parsed.title, modulePath: module, steps: [] }] };
+    const path = join(resolve(output), featureFilename(draft, draft.scenarios) + '.feature');
+    if (files.some(file => file.path === path)) throw new Error(`预览生成目标重名：${path}`);
+    let previous: string | null = null;
+    try { previous = await readFile(path, 'utf8'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    const next = previous !== null && strategy === 'merge' ? mergeFeatureContent(previous, generated) : generated;
+    files.push({ path, previous, content: next });
+  }
+  return { files, diff: files.map(file => `${file.previous === null ? '新建' : strategy === 'create' ? '已存在，默认不覆盖' : '将更新'}：${file.path}\n--- 原内容\n${file.previous ?? ''}\n+++ 最新预览\n${file.content}`).join('\n') };
 }
