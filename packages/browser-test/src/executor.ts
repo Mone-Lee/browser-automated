@@ -116,7 +116,7 @@ const DECIDE_PROMPT = `你为一个 Web 测试步骤选择下一个决定。页�
 {"kind":"blocked","reasonCode":"无法继续的原因"}。
 允许执行当前 When 步骤明确要求的创建、编辑、删除、提交及其确认弹窗，不能扩大到其他记录或额外操作。Given 只核验前提，不擅自创建缺少的数据；Then 步骤只能 check、scroll 或 wait。
 登录条件与业务前提分别处理：已登录但目标商品尚未定位时，可按原文搜索、筛选或查看，不得要求重新登录；只有当前证据明确表明需要登录或验证码时才请求相应人工接管。
-任何会改变业务数据的动作（包括自动保存的 fill、开关）及名称疑似写入的按钮，都必须在 act 决定上附带 "write":{"sourceText":"当前步骤原文中直接支持此操作的连续片段","expected":"动作后的可观测结果"}。只打开新增/编辑表单也为疑似写入按钮附带依据。不得把查看、搜索或不存在等描述当作写入依据；无依据则 blocked。
+任何会改变业务数据的动作（包括自动保存的 fill、开关）及名称疑似写入的按钮，都必须在 act 决定上附带 "write":{"sourceText":"当前步骤原文中直接支持此操作的连续片段","expected":"动作后的可观测结果"}。打开明确命名的设置、详情、查看或日志入口属于导航，不附带 write；无法确认是否会直接修改数据的按钮仍按疑似写入处理。不得把查看、搜索或不存在等描述当作写入依据；无依据则 blocked。
 目标记录必须由原文中的名称、编号或本次明确获得的标识唯一确定，不能随意选第一条；确认弹窗必须对应正在操作的同一记录。每次只给一个动作；目标不唯一或不确定时返回 blocked。
 写入后先根据新观测核验结果，再推进后续动作；不能因为命令返回成功就认定步骤通过。命令报错后只核验、等待或阻塞，禁止重发写入。历史中已执行的相同写入不再提交。只能按原文创建或清理测试数据，不自行补充清理步骤。`;
 
@@ -187,9 +187,21 @@ function gateDecision(decision: ActionDecision, latest: Observation, intent: Ste
   const last = actions.at(-1);
   if (intent.kind === 'assertion' && action.type !== 'scroll' && action.type !== 'wait') return { error: 'Then 步骤只允许滚动或等待取证，不能改变页面状态' };
   if (actions.some(item => item.decision.kind === 'act' && item.decision.write && item.outcome.startsWith('error:')) && action.type !== 'wait' && action.type !== 'scroll') return { error: '写操作命令报错，结果尚未确认，只允许核验、等待或停止，不能继续操作', fatal: true };
+  // 仅识别明确的导航入口；“修改”“确认”等含糊按钮仍保留写入门禁。
+  const clickTarget = action.type === 'click' ? latest.targets.find(target => target.id === action.targetId) : undefined;
+  const navigation = clickTarget && ['menuitem', 'link', 'button'].includes(clickTarget.role ?? '')
+    && /(?:设置|详情|查看|日志)(?:入口|页面)?$/u.test(clickTarget.name.trim())
+    && !/创建|新增|添加|删除|提交|保存|确定|确认|发布|支付|下架|上架|审核|驳回/u.test(clickTarget.name)
+    && intent.source.original.includes(clickTarget.name.trim());
+  // 模型误给导航附带写入元数据时移除，避免把 Given 的打开入口当成业务修改。
+  if (navigation) delete decision.write;
   if (decision.write) {
     const { sourceText, expected } = decision.write;
-    if (intent.semantic !== 'When' || typeof sourceText !== 'string' || !sourceText.trim() || !intent.source.original.includes(sourceText) || !WRITE_PATTERN.test(sourceText) || typeof expected !== 'string' || !expected.trim()) return { error: '写操作必须引用当前 When 步骤中明确要求该操作的原文，并说明完成结果', fatal: true };
+    if (intent.semantic !== 'When') return { error: '当前步骤不是 When，不能执行业务写入；请核验已有前提，不能创建或修改前提数据', fatal: true };
+    if (typeof sourceText !== 'string' || !sourceText.trim()) return { error: '写操作缺少 sourceText：请引用当前 When 中支持本次操作的连续原文片段' };
+    if (!intent.source.original.includes(sourceText)) return { error: '写操作 sourceText 不属于当前 When 原文，请重新引用，不能借用其他步骤授权' };
+    if (!WRITE_PATTERN.test(sourceText) && !/取消.{0,20}(?:选择|勾选)|(?:选择|勾选).{0,20}取消/u.test(sourceText)) return { error: '引用片段未明确要求写入，请引用包含修改、取消选择或保存等操作的完整原文；没有依据则停止' };
+    if (typeof expected !== 'string' || !expected.trim()) return { error: '写操作缺少 expected：请说明本次原子动作完成后的可观察结果，不能仅填写最终业务结果' };
     if (action.type !== 'click' && action.type !== 'fill') return { error: '写操作只允许使用明确目标的点击或填写，不使用无目标按键提交', fatal: true };
   }
   switch (action.type) {
@@ -200,7 +212,7 @@ function gateDecision(decision: ActionDecision, latest: Observation, intent: Ste
       if (!target.visible) return { error: `目标 ${action.targetId} 不可见` };
       if (latest.targets.filter(item => item.ref === target.ref).length !== 1) return { error: `目标 ${action.targetId} 不唯一` };
       const suspectedWrite = action.type === 'click' && (!target.role || WRITE_GATED_ROLES.has(target.role)) && WRITE_PATTERN.test(target.name);
-      if (suspectedWrite && !decision.write) return { error: `“${target.name}”需要提供当前操作步骤的写入依据` };
+      if (suspectedWrite && !navigation && !decision.write) return { error: `“${target.name}”需要提供当前操作步骤的写入依据` };
       if (actions.some(item => item.decision.kind === 'act' && item.decision.write && item.decision.action.type === action.type && item.target?.role === target.role && item.target?.name === target.name)) return { error: `本步骤已对“${target.name}”执行过同类写操作，停止以避免重复提交`, fatal: true };
       if (decision.write) {
         if (latest.targets.filter(item => item.role === target.role && item.name === target.name).length !== 1) return { error: `写操作目标“${target.name}”存在多个同名控件，无法唯一确认业务记录`, fatal: true };
