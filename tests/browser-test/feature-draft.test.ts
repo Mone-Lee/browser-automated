@@ -1,6 +1,6 @@
 /** 验证起草校验：缺少规则版本、数据审查或前提混写时必须拒绝，合格草案正常通过。 */
 import { describe, expect, it } from 'vitest';
-import { RULES_VERSION, draftFromAgentSteps } from '../../packages/browser-test/dist/index.js';
+import { RULES_VERSION, draftFromAgentSteps, renderDraftPreview, reviewFeatureDraft } from '../../packages/browser-test/dist/index.js';
 
 const node = (title: string) => ({ title, path: [title], children: {}, raw: {} });
 const imported = {
@@ -47,4 +47,15 @@ describe('起草校验', () => {
     expect(draft.scenarios[0].steps[0].todo).toContain('业务库名称');
   });
 
+  it('不同执行身份的场景拆成独立 feature，且都来自同一份草案', async () => {
+    const two = { ...imported, cases: [imported.cases[0], { ...imported.cases[0], title: '佣金无权限' }] };
+    const draft = await draftFromAgentSteps(two, { rulesVersion: RULES_VERSION, cases: [
+      { modulePath: ['商品'], title: '佣金查看', steps, dataReview, role: '价格调整权限' },
+      { modulePath: ['商品'], title: '佣金无权限', steps, dataReview, role: '无权限' },
+    ] } as never);
+    const review = await reviewFeatureDraft(draft, '/tmp/browser-test-role-unused');
+    expect(review.files.map(file => file.path.split('/').pop())).toEqual(['商品__role-价格调整权限__cases.feature', '商品__role-无权限__cases.feature']);
+    expect(review.files[1].content).toContain('# 执行身份: 无权限');
+    expect(renderDraftPreview(draft)).toContain('Feature: 商品（身份：价格调整权限）');
+  });
 });

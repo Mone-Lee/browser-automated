@@ -222,6 +222,8 @@ browser-test feature addresses cases --id 1 --url 'https://example.com/products'
 
 Agent 步骤 JSON 可提供 `platform: "web" | "miniprogram" | "unsupported"`，以及 `visit: {application, page, environment?}`（仅提取原文身份）。旧草案默认 Web，常见“已登录应用”“进入页面”句式可自动提取；无法明确识别时通过上述参数确认。小程序明确标为 `miniprogram`，不要求 URL。
 
+步骤 JSON 的每条用例还可附带 `role`（执行身份，如账号或权限集合，仅原文明确时填写）。一次运行只能使用一个登录态，因此不同 `role` 的场景在预览与落盘时会拆成独立 feature（文件名追加 `__role-<身份>`，Feature 名带“（身份：…）”），它们都派生自同一份草案：修改待确认项后重新预览/审阅即可同步，不要手改派生文件。
+
 ### Web 登录态复用
 
 每次 `run` 启动前会清理当前项目上一轮记录的托管浏览器，再创建独立会话；只复用登录态，不保留旧标签页或表单内容。会话记录保存在登录态目录的 `browser-test-sessions.json`，配置回退及站点切换创建的会话也会登记，便于异常退出后在下次运行时清理。browser-test 使用独立的浏览器命名空间，不清理 browser-opt 或外部 Chrome。默认模式下，请勿在同一项目并发执行托管流程，后一次运行会清理前一次的浏览器。
