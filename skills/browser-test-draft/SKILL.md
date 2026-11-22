@@ -1,6 +1,6 @@
 ---
 name: browser-test-draft
-description: 起草或修改 browser-test 的 Gherkin（feature gen、--steps 步骤 JSON、agent-request 起草请求、XMind 用例转 Gherkin）时必须先加载。规定如何读取当次生成规则、拆分前提、审查数据依赖并回传 rulesVersion，否则 CLI 会拒绝草案。
+description: 起草或修改 browser-test 的 Gherkin（feature gen、--steps 步骤 JSON、agent-request 起草请求、XMind、需求文档/截图及数据资料转 Gherkin）时必须先加载。规定如何读取当次生成规则、拆分前提、审查数据依赖并回传 rulesVersion，否则 CLI 会拒绝草案。
 ---
 
 # browser-test-draft
@@ -10,7 +10,7 @@ description: 起草或修改 browser-test 的 Gherkin（feature gen、--steps �
 ## 必做流程
 
 1. 运行 `browser-test feature rules`，完整阅读输出。输出末尾的 `rulesVersion` 每次以当次输出为准，不得凭记忆或沿用旧值。
-2. 逐条用例起草步骤，严格遵守规则输出中的拆分、断言、写操作与数据审查要求。
+2. 逐条用例起草步骤，严格遵守规则输出中的拆分、断言、写操作与数据审查要求。需求资料先按 `browser-test` 的“需求与数据资料生成”整理为可追溯场景；已有用例保留原文，需求推导须保留规则依据，数据资料只补充前提与基准，不能替代验收规则。
 3. 结果 JSON 顶层写入 `"rulesVersion"`；每条 case 写入 `dataReview: {required, basis, missing}`。
 4. 通过 `--steps` 传入，或在 agent-request 中回复同样结构。
 5. CLI 拒绝草案时，按报错逐条修正后重新提交，不要绕过校验，不要通过放宽措辞让校验通过。

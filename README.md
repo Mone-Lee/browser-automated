@@ -1,7 +1,7 @@
 # browser-automated
 
 > [!IMPORTANT]
-> `browser-test` 仍处于分步实现阶段：当前主线为从 XMind 开始的无配置流程，项目预设代码已移除；已支持无配置 XMind 导入、引导生成、Gherkin 解析，以及单应用 Web 用例执行（`browser-test run`，首版）；小程序执行尚未实现。`browser-e2e` **尚未实现**，请勿安装、调用或用于生产流程。
+> `browser-test` 仍处于分步实现阶段：当前主线为从 XMind 或需求、截图与数据资料开始的无配置流程，项目预设代码已移除；已支持无配置 XMind 导入、引导生成、Gherkin 解析，以及单应用 Web 用例执行（`browser-test run`，首版）；小程序执行尚未实现。`browser-e2e` **尚未实现**，请勿安装、调用或用于生产流程。
 
 `browser-automated` 当前主要维护 `browser-opt`：一个面向真实 Chrome 的自然语言浏览器操作工具。它可以立即执行一次操作，也可以保存和复用项目级 Workflow，并为每次运行产出截图、页面快照、日志和 PASS/FAIL 报告。
 
@@ -20,11 +20,11 @@
 
 ## browser-test（设计中）
 
-`browser-test` 是独立 CLI，不扩展 `browser-opt`，也不处理 Workflow 与测试用例的互转。目标是将 XMind 用例经人工确认转换为可读的 `.feature` 文件，并在 Web 或微信开发者工具模拟器中执行，产出可复现的逐步结论和运行证据。
+`browser-test` 是独立 CLI，不扩展 `browser-opt`，也不处理 Workflow 与测试用例的互转。目标是将 XMind 用例或需求与数据资料整理的场景经人工确认转换为可读的 `.feature` 文件，并在 Web 或微信开发者工具模拟器中执行，产出可复现的逐步结论和运行证据。
 
 设计以 `.feature` 为唯一执行入口：步骤原文就是断言口径，运行器不会改写或放宽预期。执行时优先使用确定性规则判断；规则无法覆盖时才由 AI 辅助判断；执行入口、登录、用例数据前提或证据不足时结论为 `BLOCKED`。当前使用已有运行环境，数据前提不满足时明确阻塞。
 
-当前阶段只要求用户提供包含测试用例的 XMind，不读取业务路由源码，也不要求准备 `project.json`、应用映射或 mock 场景。页面描述保留为自然语言；执行时缺少地址再请求补充，需要登录时人工接管，通过实际页面导航与观测完成测试。先打通 Web 单应用用例闭环，再接入已运行的微信小程序。前置配置等实际使用证明能提高效率后再评估。
+当前阶段接受 XMind、需求文档、截图、粘贴文本及数据资料；非 XMind 材料由 Agent 整理为结构化用例，通过 `feature gen --cases` 生成。不读取业务路由源码，也不要求准备 `project.json`、应用映射或 mock 场景。页面描述保留为自然语言；执行时缺少地址再请求补充，需要登录时人工接管，通过实际页面导航与观测完成测试。先打通 Web 单应用用例闭环，再接入已运行的微信小程序。前置配置等实际使用证明能提高效率后再评估。
 
 范围与当前实现状态见 [browser-test 包说明](packages/browser-test/README.md)。目前可构建并导入 XMind：
 
@@ -370,7 +370,7 @@ browser-opt stop --run-id "<runId>" --json
 - `packages/browser-core/src`：底层浏览器适配、session、handoff 与基础类型；不独立发布
 - `packages/browser-opt/src`：`browser-opt` 包源码与 CLI
 - `packages/browser-opt/skills`：随 `browser-opt` 发布的 Skill
-- `packages/browser-test`：Gherkin 用例驱动测试工具的实现目录（已实现 XMind 导入，生成与执行主流程待实现）
+- `packages/browser-test`：Gherkin 用例驱动测试工具的实现目录（已实现 XMind 导入、多来源用例生成与单应用 Web 执行）
 - `packages/browser-e2e`：已暂停的规划目录，不提供可用 CLI
 - `packages/*/dist`：构建产物，由构建命令生成
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** 提供 XMind 导入、引导生成、Gherkin 解析与 Web 用例执行（run）入口。 */
+/** 提供 XMind 导入、多来源用例引导生成、Gherkin 解析与 Web 用例执行（run）入口。 */
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
@@ -33,13 +33,13 @@ const help = `browser-test ${VERSION}
 
 生成的 Gherkin 写入当前执行目录的 .browser-test/features/，运行产物写入 .browser-test/artifacts/；目录不存在时自动创建。--json 将完整结果输出到标准输出，不写文件。
 feature gen 默认支持逐项交互确认；--draft 在 .browser-test/features/ 写入作为唯一内容来源的预览；--direct 一次性创建可整文件编辑的 Gherkin。
---cases 读取与 xmind list --json 同构的 JSON（如图片还原结果）。
+--cases 读取与 xmind list --json 同构的 JSON（如 Agent 从需求文档、截图及数据资料整理的结果；不直接读取原始附件）。
 草案由调用方当前 Agent 起草：默认通过 agent-request 请求文件逐条协作，也可按 feature rules 起草步骤 JSON 后用 --steps 传入。
 生成、步骤解释与动作决策不需要额外模型密钥。审阅无需 AI。
 --draft 写出 <草案>.preview.feature（Gherkin 预览，待确认项带编号）；todos 以 Gherkin 上下文逐项展示待确认项，resolve 每次处理一项并刷新预览。
 --direct 跳过逐项确认并保留 # TODO(确认)；调用方须直接修改生成文件，清除待确认项后才能执行。
 审阅差异只输出到终端；默认不覆盖已有 feature，--merge 保留已有同名场景并追加缺失场景，--overwrite 整体覆盖。最终写入成功后自动删除草案预览。
-通过 --cases 生成的 feature 文件名追加来源后缀，避免图片还原用例与同模块的 XMind 用例冲突。
+通过 --cases 生成的 feature 文件名追加来源后缀，避免不同资料整理的用例与同模块的 XMind 用例冲突。
 生成阶段按应用、页面和环境复用 .browser-test/features/ 中的已确认地址；缺失或冲突用 feature addresses 集中确认，确认一次应用于同页用例。
 run 在真实 Web 环境按用例执行 feature，步骤解释与动作生成通过 agent-request 交给当前 Agent，规则之外的判定优先使用 TypeSafe jev（可选 TYPESAFE_API_KEY），未配置或调用失败时由当前 Agent 兜底；默认打开可见窗口以便登录接管，--headless 下无法接管。产物写入 .browser-test/artifacts/<时间>/（result.json、report.md、trace.log、shots/）。退出码：0=PASS、1=FAIL、2=BLOCKED 或工具错误。
 run 默认清理之前登记的托管窗口，再启动新会话；--keep-previous-browser 保留旧窗口及其记录，后续默认运行仍会统一清理。

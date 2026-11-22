@@ -1,5 +1,5 @@
 /**
- * 定义 XMind 导入用例与 run 的运行时协议类型；来源文件仅记录在 XMindImport.file，节点不重复携带来源、画布或节点 ID。
+ * 定义 XMind 导入及多来源结构化用例与 run 的运行时协议类型；来源文件仅记录在 XMindImport.file，节点不重复携带来源、画布或节点 ID。
  * 运行时类型是内存协议，不替换 browser-core 的同名类型，动作链与检查最终写入 result.json。
  */
 
@@ -31,9 +31,9 @@ export interface XMindCase {
   expectedResults: XMindNode[];
 }
 
-/** 单个文件的导入结果，仅表达原文结构与识别情况，不包含执行结论。 */
+/** XMind 导入或需求、截图、数据整理的统一结果；沿用名称以兼容既有调用，不包含执行结论。 */
 export interface XMindImport {
-  /** 导入文件的绝对路径。 */
+  /** XMind 为导入文件的绝对路径；其他资料为可追溯的单行来源名称，可组合多个来源。 */
   file: string;
   /** 按原文件顺序保存所有画布及完整主题树，包括未识别为用例的节点。 */
   sheets: { title: string; root: XMindNode }[];
