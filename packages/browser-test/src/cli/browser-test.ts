@@ -15,6 +15,8 @@ import { runFeature } from '../run.js';
 import type { FeatureResult } from '../types.js';
 import type { ExistingFeatureStrategy, FeatureDraft, DraftStep } from '../feature-gen.js';
 
+const todoScreenshotHint = '\n【截图辅助修复 TODO】\n提供对应操作后的页面截图，有助于更准确地补全步骤、定位控件和确认预期文案。\n可在与 Agent 的对话中附图，并说明操作、目标对象及你确认正确的效果；截图为可选补充，已有清晰资料无需重复提供。\n';
+
 const help = `browser-test ${VERSION}
 用法：
   browser-test xmind list --xmind <文件> [--json]
@@ -388,6 +390,7 @@ async function todos(command: 'todos' | 'resolve', args: string[]): Promise<void
   const pending = findPendingConfirmations(content).map(item => ({ ...item, id: /确认\s*#([^)]*)\)/u.exec(item.text)?.[1] ?? `L${item.line}` }));
   if (command === 'todos') {
     const selected = id === '--id' ? pending.filter(item => item.id === action) : pending;
+    if (selected.length) console.log(todoScreenshotHint);
     console.log(selected.map(item => `[${item.id}] 第 ${item.line} 行\n${lines.slice(Math.max(0, item.line - 3), item.line + 1).join('\n')}`).join('\n\n') || '无待确认项');
     return;
   }
@@ -418,6 +421,7 @@ async function buildDraft(options: Record<string, string>): Promise<FeatureDraft
 
 /** 逐条询问草案中的待确认项：替换步骤、删除或确认保留现有文字。 */
 async function resolveTodos(draft: FeatureDraft, rl: ReturnType<typeof createInterface>): Promise<void> {
+  if (listTodos(draft).length) console.log(todoScreenshotHint);
   for (const scenario of draft.scenarios) {
     for (let i = 0; i < scenario.steps.length; i++) {
       const step = scenario.steps[i];
